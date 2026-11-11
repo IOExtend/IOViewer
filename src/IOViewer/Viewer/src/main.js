@@ -51,7 +51,9 @@ const testOptions = window.IOVIEWER_TEST ?? {};
 const scene = createScene();
 data.releaseBinary(); // the scene has copied what it needs
 // Starting at the whole model's cost, a GPU that draws it in time orbits at full detail; a slower one shrinks it.
-const motionDetail = new MotionDetail(scene, requestRender, scene.totalCost);
+// Larger models start at about what an integrated GPU draws at 30 fps (a 200k-element model, 19.2e6): from a 1M one's
+// 134e6 the first gesture would take some 20 frames of 200 ms to shrink. A faster GPU grows the budget.
+const motionDetail = new MotionDetail(scene, requestRender, Math.min(scene.totalCost, 20e6));
 world.add(scene.root);
 // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
 const sections = new Sections(scene, scene.visibleBox());
