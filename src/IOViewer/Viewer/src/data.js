@@ -37,18 +37,30 @@ function decodeInto(bytes, offset, text) {
   return offset;
 }
 
+// The page's data blocks are missing, malformed or do not fit together, as in a truncated or damaged file.
+export class ModelDataError extends Error {}
+
 export function loadModelData(doc = document) {
-  const meta = JSON.parse(block(doc, 'ioviewer-meta'));
-  const binElement = doc.getElementById('ioviewer-bin');
-  if (!binElement) throw new Error("Data block 'ioviewer-bin' is missing.");
-  let bin = decodeBase64(binElement);
+  let meta, bin;
+  try {
+    meta = JSON.parse(block(doc, 'ioviewer-meta'));
+    const binElement = doc.getElementById('ioviewer-bin');
+    if (!binElement) throw new Error("Data block 'ioviewer-bin' is missing.");
+    bin = decodeBase64(binElement);
+  } catch (error) {
+    throw new ModelDataError(error.message, { cause: error });
+  }
   let props = null;
   return {
     meta,
     view(v) {
       if (!bin) throw new Error('The binary data has been released.');
       const Type = VIEW_TYPES[v.t];
-      if (!Type) throw new Error(`Unknown view type '${v.t}'.`);
+      if (!Type) throw new ModelDataError(`Unknown view type '${v.t}'.`);
+      const size = Type.BYTES_PER_ELEMENT;
+      if (!(Number.isInteger(v.o) && Number.isInteger(v.n) && v.o >= 0 && v.n >= 0 && v.o % size === 0 && v.o + v.n * size <= bin.length)) {
+        throw new ModelDataError(`View ${JSON.stringify(v)} is outside the ${bin.length} bytes of binary data.`);
+      }
       return new Type(bin.buffer, v.o, v.n);
     },
     // Frees the decoded BIN once the scene holds its own copies; view() throws afterwards.

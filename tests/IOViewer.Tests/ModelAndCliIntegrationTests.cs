@@ -130,4 +130,40 @@ public class ModelAndCliIntegrationTests
             if (File.Exists(tempJson)) File.Delete(tempJson);
         }
     }
+
+    [Fact]
+    public void Cli_InvalidGeometry_ReturnsDataErrorAndKeepsExistingOutput()
+    {
+        const string objData = """
+            v 0 0 0
+            v 1 0 0
+            v 0 1 0
+            f 1 2 9
+            """;
+
+        var tempObj = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.obj");
+        var tempHtml = Path.Combine(Path.GetTempPath(), $"test_viewer_{Guid.NewGuid():N}.html");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            File.WriteAllText(tempObj, objData);
+            File.WriteAllText(tempHtml, "previous export");
+            Console.SetError(errors);
+
+            int code = Program.Main(new[] { tempObj, "-o", tempHtml });
+
+            Assert.Equal(3, code);
+            Assert.Equal("previous export", File.ReadAllText(tempHtml));
+            string message = errors.ToString().TrimEnd();
+            Assert.Contains("outside the 3 vertices", message, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine, message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            if (File.Exists(tempObj)) File.Delete(tempObj);
+            if (File.Exists(tempHtml)) File.Delete(tempHtml);
+        }
+    }
 }

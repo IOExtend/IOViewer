@@ -14,8 +14,10 @@ public static class HtmlViewerExporter
         ArgumentNullException.ThrowIfNull(doc);
         ArgumentNullException.ThrowIfNull(filePath);
 
+        // Validated before the file is opened, so invalid data never truncates an existing page.
+        var payload = ViewerPayloadWriter.Create(doc, options ?? new HtmlViewerOptions());
         using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        Export(doc, fs, options);
+        Write(payload, fs);
     }
 
     public static void Export(ViewerDocument doc, Stream stream, HtmlViewerOptions? options = null)
@@ -23,8 +25,11 @@ public static class HtmlViewerExporter
         ArgumentNullException.ThrowIfNull(doc);
         ArgumentNullException.ThrowIfNull(stream);
 
-        options ??= new HtmlViewerOptions();
-        var payload = ViewerPayloadWriter.Create(doc, options);
+        Write(ViewerPayloadWriter.Create(doc, options ?? new HtmlViewerOptions()), stream);
+    }
+
+    private static void Write(ViewerPayloadWriter payload, Stream stream)
+    {
         string shell = ReadResourceText("IOViewer.Viewer.index.html");
 
         (string Token, Action<Stream> Write)[] placeholders =

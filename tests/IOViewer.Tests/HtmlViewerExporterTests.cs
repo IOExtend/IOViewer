@@ -331,6 +331,25 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void Save_InvalidData_LeavesExistingFileUntouched()
+    {
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(new ViewerMesh { Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 3] });
+        string tempPath = Path.Combine(Path.GetTempPath(), $"ioviewer_test_{Guid.NewGuid():N}.html");
+        byte[] previous = [0x3C, 0x68, 0x74, 0x6D, 0x6C, 0x3E, 0x00, 0xFF];
+        try
+        {
+            File.WriteAllBytes(tempPath, previous);
+            Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.Save(doc, tempPath));
+            Assert.Equal(previous, File.ReadAllBytes(tempPath));
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
     public void SharedGeometryIndexOutOfRange_Throws()
     {
         var doc = new ViewerDocument();

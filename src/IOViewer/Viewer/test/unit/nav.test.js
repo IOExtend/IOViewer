@@ -48,6 +48,20 @@ test('zoomTowards halves the distance to the cursor point and shifts the target 
   near(r.position.distanceTo(r.target), 5);
 });
 
+import { wheelZoomFactor } from '../../src/nav/math.js';
+
+test('wheelZoomFactor: a 100 px notch zooms by 0.85, small trackpad deltas by as much less, lines and pages in pixels', () => {
+  near(wheelZoomFactor(-100, 0, 800), 0.85);
+  near(wheelZoomFactor(100, 0, 800), 1 / 0.85);
+  near(wheelZoomFactor(-4, 0, 800), 0.85 ** 0.04);
+  assert.ok(Math.abs(wheelZoomFactor(-4, 0, 800) - 0.9935) < 1e-4);
+  near(wheelZoomFactor(-3, 1, 800), 0.85); // Firefox: 3 lines per notch
+  near(wheelZoomFactor(-0.5, 2, 800), 0.85 ** 4); // half a page of 800 px
+  assert.equal(wheelZoomFactor(0, 0, 800), 1); // horizontal swipe, Shift+wheel
+  assert.equal(wheelZoomFactor(-5000, 0, 800), 0.5);
+  assert.equal(wheelZoomFactor(5000, 0, 800), 2);
+});
+
 import { interpolateView } from '../../src/nav/math.js';
 
 test('interpolateView between opposite views keeps the distance and never crosses the target', () => {

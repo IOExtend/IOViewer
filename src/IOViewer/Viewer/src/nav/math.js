@@ -29,6 +29,16 @@ export function zoomTowards(position, target, cursorPoint, factor) {
   return { position: scale(position), target: scale(target) };
 }
 
+const WHEEL_STEP = 0.85; // zoom factor per 100 px of wheel delta, a mouse notch in Chromium
+const LINE_PIXELS = 100 / 3; // Firefox scrolls 3 lines per notch
+
+// Zoom factor (distance multiplier) for a wheel event's deltaY in its deltaMode (0 pixels, 1 lines, 2 pages of
+// `pageHeight` px): a notch zooms by WHEEL_STEP, a trackpad's small deltas proportionally less; at most 2x per event.
+export function wheelZoomFactor(deltaY, deltaMode, pageHeight) {
+  const pixels = deltaY * (deltaMode === 1 ? LINE_PIXELS : deltaMode === 2 ? pageHeight : 1);
+  return THREE.MathUtils.clamp(WHEEL_STEP ** (-pixels / 100), 0.5, 2);
+}
+
 export const boxSelectMode = (startX, endX) => (endX >= startX ? 'window' : 'crossing');
 
 // Camera pose between two views, seen from the (lerped) target: distance, azimuth (shortest way round +Z) and

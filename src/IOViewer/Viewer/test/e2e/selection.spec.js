@@ -205,7 +205,17 @@ test('an element of an opaque and a transparent mesh is picked through its glazi
   expect(errors).toEqual([]);
 });
 
-test('a mesh without an element is drawn but never picked, and clicking it clears', async ({ page }) => {
+// Client position of a world point.
+const screenOfWorld = (page, world) =>
+  page.evaluate((w) => {
+    const { scene, camera } = window.__ioviewer;
+    const [ox, oy, oz] = JSON.parse(document.getElementById('ioviewer-meta').textContent).rtcOffset;
+    const p = scene.elementBox(0).min.clone().set(w[0] - ox, w[1] - oy, w[2] - oz).project(camera);
+    const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
+    return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];
+  }, world);
+
+test('a mesh without an element is picked for navigation and measuring, but clicking it selects nothing', async ({ page }) => {
   const errors = await open(page);
   const marker = await page.evaluate(() => {
     const { scene } = window.__ioviewer;
@@ -213,24 +223,43 @@ test('a mesh without an element is drawn but never picked, and clicking it clear
     return -1;
   });
   expect(marker).toBeGreaterThanOrEqual(0);
-  // Marker pyramid base -3.3..-2.7 in X and Y, apex at z 0.8 (world): aim a little above the base centre.
-  const point = await page.evaluate(() => {
-    const { scene, camera } = window.__ioviewer;
-    const [ox, oy, oz] = JSON.parse(document.getElementById('ioviewer-meta').textContent).rtcOffset;
-    const p = scene.elementBox(0).min.clone().set(-3 - ox, -3 - oy, 0.2 - oz).project(camera);
-    const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
-    return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];
-  });
+  // The Survey Marker pyramid: base -3.3..-2.7 in X and Y, apex at z 0.8 (world); aim a little above the base centre.
+  const point = await screenOfWorld(page, [-3, -3, 0.2]);
   const background = await page.evaluate(() => window.__ioviewer.picker.pick(100, 15));
   expect(background).toBeNull();
-  // The marker is on screen there (the pixel is not the background colour), yet nothing is picked.
-  const pixel = await page.screenshot({ clip: { x: Math.round(point[0]), y: Math.round(point[1]), width: 1, height: 1 } });
-  const corner = await page.screenshot({ clip: { x: 100, y: 15, width: 1, height: 1 } });
-  expect(pixel.equals(corner)).toBe(false);
-  expect(await page.evaluate(([x, y]) => window.__ioviewer.picker.pick(x, y), point)).toBeNull();
+  // The marker is picked with element -1 and its surface point, in world coordinates on the pyramid.
+  const hit = await page.evaluate(([x, y]) => {
+    const h = window.__ioviewer.picker.pick(x, y);
+    const [ox, oy, oz] = JSON.parse(document.getElementById('ioviewer-meta').textContent).rtcOffset;
+    return h && { element: h.element, point: h.point.toArray(), world: [h.point.x + ox, h.point.y + oy, h.point.z + oz] };
+  }, point);
+  expect(hit.element).toBe(-1);
+  const [wx, wy, wz] = hit.world;
+  for (const c of [wx, wy]) expect(c > -3.3 - 1e-3 && c < -2.7 + 1e-3).toBe(true);
+  expect(wz > -1e-3 && wz < 0.8 + 1e-3).toBe(true);
+  // The orbit pivot and the wheel zoom target are that point.
+  expect(await page.evaluate(([x, y]) => window.__ioviewer.controls.pick(x, y)?.toArray(), point)).toEqual(hit.point);
 
+  // Clicking it selects nothing and clears the selection, without errors.
   await page.mouse.click(...(await screenAt(page, await indexOf(page, 'Column D2 Level 1'))));
+  expect(await selected(page)).toHaveLength(1);
   await page.mouse.click(...point);
+  expect(await selected(page)).toEqual([]);
+  await page.mouse.click(...point, { modifiers: ['Control'] });
+  expect(await selected(page)).toEqual([]);
+  await page.mouse.click(...point, { button: 'right' });
+  await expect(page.locator('.ioviewer-context-menu')).toBeVisible();
+  expect(await selected(page)).toEqual([]);
+  await page.keyboard.press('Escape');
+
+  // The distance tool measures from the marker to a point on the ground slab.
+  const slabPoint = [2, -0.9, 0];
+  await page.locator('.ioviewer-tool[data-tool="distance"]').click();
+  await page.mouse.click(...point);
+  await page.mouse.click(...(await screenOfWorld(page, slabPoint)));
+  const measured = await page.evaluate(() => ({ count: window.__ioviewer.measure.points.length, distance: window.__ioviewer.measure.distance }));
+  expect(measured.count).toBe(2);
+  expect(Math.abs(measured.distance - Math.hypot(wx - slabPoint[0], wy - slabPoint[1], wz - slabPoint[2]))).toBeLessThan(0.05);
   expect(await selected(page)).toEqual([]);
   expect(errors).toEqual([]);
 });

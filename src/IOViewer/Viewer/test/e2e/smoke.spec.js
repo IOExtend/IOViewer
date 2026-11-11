@@ -200,6 +200,35 @@ test('curved surfaces are shaded smoothly from the baked normals, not flat per f
   expect(errors).toEqual([]);
 });
 
+// Opens a page that is expected to fail at startup: no __ioviewer.ready to wait for.
+async function openFailing(page, name) {
+  const errors = [];
+  page.on('console', (message) => message.type() === 'error' && errors.push(message.text()));
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto(pathToFileURL(path.join(viewerDir, 'test-results', `${name}.html`)).href);
+  return errors;
+}
+
+test('without WebGL 2 the page says so instead of staying blank', async ({ page }) => {
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+      return type === 'webgl2' ? null : getContext.call(this, type, ...rest);
+    };
+  });
+  const errors = await openFailing(page, 'building');
+  await expect(page.locator('#ioviewer-message')).toHaveText('Нужен браузер с поддержкой WebGL 2');
+  await expect(page.locator('#ioviewer-message')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('a page with damaged model data says so instead of staying blank', async ({ page }) => {
+  const errors = await openFailing(page, 'damaged');
+  await expect(page.locator('#ioviewer-message')).toHaveText('Не удалось прочитать данные модели');
+  await expect(page.locator('#ioviewer-message')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('context lost shows the reload message', async ({ page }) => {
   await open(page, 'building');
   await expect(page.locator('#ioviewer-message')).toBeHidden();

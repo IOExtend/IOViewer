@@ -167,6 +167,35 @@ test('hotkeys: I isolates, H hides, Shift+H shows all, F zooms to the selection;
   expect(errors).toEqual([]);
 });
 
+test('a press in the 3D view or on the view cube takes focus from a panel field or a toolbar button: hotkeys work', async ({ page }) => {
+  const errors = await open(page);
+  const d2 = await indexOf(page, 'Column D2 Level 1');
+  await rail(page, 'model').click();
+  const search = sidePanel(page, 'model').locator('input');
+  await search.click();
+  await page.keyboard.type('col');
+  await search.fill('');
+  await expect(search).toBeFocused();
+  await page.mouse.click(...(await screenAt(page, d2)));
+  expect(await selected(page)).toEqual([d2]);
+  await page.keyboard.press('KeyH');
+  expect(await visible(page, d2)).toBe(false);
+  await expect(search).toHaveValue('');
+  await page.keyboard.press('Escape');
+  expect(await selected(page)).toEqual([]);
+
+  // A toolbar button does not keep the focus after a press in the view: Enter does not fire it again.
+  await page.locator('.ioviewer-tool[data-tool="fit"]').click();
+  await page.mouse.click(...blank);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+
+  // Nor does the view cube leave it in a field.
+  await search.click();
+  await page.locator('.ioviewer-viewcube-canvas').click({ position: { x: 3, y: 3 } });
+  await expect(search).not.toBeFocused();
+  expect(errors).toEqual([]);
+});
+
 test('F with nothing selected fits everything', async ({ page }) => {
   await open(page);
   const fitted = () => page.evaluate(() => window.__ioviewer.controls.target.toArray());

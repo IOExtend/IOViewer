@@ -115,7 +115,7 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
       return first === undefined ? contextMenu.open('empty', x, y, null) : contextMenu.open('element', x, y, first);
     }
     const hit = picker.pick(x, y);
-    if (!hit) return contextMenu.open('empty', x, y, null);
+    if (!hit || hit.element < 0) return contextMenu.open('empty', x, y, null);
     if (!selection.has(hit.element)) selection.set([hit.element]);
     contextMenu.open('element', x, y, hit.element);
   });

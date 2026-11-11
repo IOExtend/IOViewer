@@ -198,7 +198,15 @@ internal static class Program
         }
         else
         {
-            HtmlViewerExporter.Save(doc, outputPath, options);
+            try
+            {
+                HtmlViewerExporter.Save(doc, outputPath, options);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
+            {
+                Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {ex.Message}");
+                return 3;
+            }
             var fi = new FileInfo(outputPath);
             Console.WriteLine($"Exported standalone 3D HTML viewer to '{outputPath}' ({fi.Length / 1024:N0} KB, {doc.Meshes.Count} meshes) in {sw.ElapsedMilliseconds} ms.");
         }

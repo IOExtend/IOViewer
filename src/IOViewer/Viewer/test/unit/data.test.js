@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadModelData } from '../../src/data.js';
+import { loadModelData, ModelDataError } from '../../src/data.js';
 
 // A data block as the DOM has it: its text in text nodes (`pieces` of it, one node each), read with substringData.
 function textBlock(text, pieces = 1) {
@@ -167,4 +167,21 @@ test('uses the native Uint8Array.setFromBase64 where there is one, with the same
     if (native) Object.defineProperty(Uint8Array.prototype, 'setFromBase64', native);
     else delete Uint8Array.prototype.setFromBase64;
   }
+});
+
+test('damaged data blocks throw ModelDataError: bad JSON, bad base64, a missing block', () => {
+  const blocks = (meta, bin) => ({ getElementById: (id) => ({ 'ioviewer-meta': meta, 'ioviewer-bin': bin })[id] ?? null });
+  assert.throws(() => loadModelData(blocks({ textContent: '{"format": 3,' }, textBlock(''))), ModelDataError);
+  assert.throws(() => loadModelData(blocks({ textContent: '{}' }, textBlock('A*B$'))), ModelDataError);
+  assert.throws(() => loadModelData(blocks({ textContent: '{}' }, undefined)), ModelDataError);
+});
+
+test('views outside BIN, misaligned or of an unknown type throw ModelDataError (a truncated file)', () => {
+  const { doc } = fakeDocument('{}');
+  const data = loadModelData(doc);
+  assert.throws(() => data.view({ o: 12, n: 3, t: 'f32' }), ModelDataError); // 24 bytes, BIN has 20
+  assert.throws(() => data.view({ o: 2, n: 1, t: 'f32' }), ModelDataError);
+  assert.throws(() => data.view({ o: 0, n: -1, t: 'u16' }), ModelDataError);
+  assert.throws(() => data.view({ o: 0, n: 1, t: 'f64' }), ModelDataError);
+  assert.deepEqual([...data.view({ o: 16, n: 1, t: 'u32' })], [0]); // up to the last byte
 });

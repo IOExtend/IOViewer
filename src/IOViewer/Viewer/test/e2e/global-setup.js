@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const viewerDir = path.resolve(import.meta.dirname, '../..');
@@ -38,8 +38,8 @@ function largeModel(count) {
   return { Title: 'Large Model', Elements: elements, Meshes: meshes, Geometries: [{ Id: 1, Vertices: corners, Indices: faces }] };
 }
 
-// Exports every committed fixture, the building again opening in white mode, and a generated large model for the
-// tree virtualization test.
+// Exports every committed fixture, the building again opening in white mode, a generated large model for the
+// tree virtualization test and a copy of the building whose binary block is cut in half, as in a truncated file.
 export default function globalSetup() {
   for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith('.json'))) {
     exportHtml(path.join(fixturesDir, file), path.basename(file, '.json'));
@@ -49,4 +49,10 @@ export default function globalSetup() {
   const large = path.join(viewerDir, 'test-results', 'large.json');
   writeFileSync(large, JSON.stringify(largeModel(LARGE_ELEMENTS)));
   exportHtml(large, 'large');
+
+  const results = path.join(viewerDir, 'test-results');
+  const html = readFileSync(path.join(results, 'building.html'), 'utf8');
+  const bin = /(<script id="ioviewer-bin" type="application\/octet-stream">)([^<]*)/;
+  if (!bin.test(html)) throw new Error('building.html has no BIN block.');
+  writeFileSync(path.join(results, 'damaged.html'), html.replace(bin, (_, open, data) => open + data.slice(0, (data.length >> 1) & ~3)));
 }

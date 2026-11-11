@@ -91,7 +91,8 @@ export class Picker {
     }
   }
 
-  // { element, point } under the client pixel, or null for background and meshes without an element.
+  // { element, point } under the client pixel, or null for the background; element is -1 on a mesh without an
+  // element (navigation and measuring use its point, selection ignores it).
   pick(clientX, clientY) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const x = Math.floor(clientX - rect.left);
@@ -115,7 +116,6 @@ export class Picker {
     const slot = (this._float ? Math.round(pixel[3]) : new Uint32Array(pixel.buffer)[0]) - 1;
     if (slot < 0) return null;
     const element = this.scene.slotElement(slot);
-    if (element < 0) return null;
     if (this._float) return { element, point: new THREE.Vector3(pixel[0], pixel[1], pixel[2]) };
     const [r, g, b, a] = this._render(this._depthMaterial, x, y, rect);
     const depth = r / 256 + g / 65536 + b / 16777216 + a / 255 / 16777216; // three's unpackRGBAToDepth on the bytes

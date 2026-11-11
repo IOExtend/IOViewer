@@ -1,8 +1,7 @@
 import * as THREE from 'three';
-import { isClick, orbit, zoomTowards, boxSelectMode, interpolateView } from './math.js';
+import { isClick, orbit, zoomTowards, wheelZoomFactor, boxSelectMode, interpolateView } from './math.js';
 
 const ORBIT_SPEED = 0.005; // radians per pixel
-const WHEEL_STEP = 0.85;
 const DEFAULT_DIRECTION = new THREE.Vector3(1, -1, 0.8).normalize();
 
 const detail = (type, d) => new CustomEvent(type, { detail: d });
@@ -256,6 +255,7 @@ export class NavigationControls extends EventTarget {
 
   _wheel(e) {
     e.preventDefault();
+    if (e.deltaY === 0) return; // a horizontal swipe or Shift+wheel does not zoom
     this._stopAnimation();
     // One pick per animation frame: notches arriving within a frame zoom towards the same point.
     if (!this._wheelPick) {
@@ -263,7 +263,7 @@ export class NavigationControls extends EventTarget {
       requestAnimationFrame(() => (this._wheelPick = null));
     }
     const point = this._wheelPick.point ?? this.target;
-    const r = zoomTowards(this.camera.position, this.target, point, e.deltaY > 0 ? 1 / WHEEL_STEP : WHEEL_STEP);
+    const r = zoomTowards(this.camera.position, this.target, point, wheelZoomFactor(e.deltaY, e.deltaMode, this.dom.clientHeight));
     this._set(r.position, r.target);
   }
 }

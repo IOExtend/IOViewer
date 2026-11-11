@@ -29,8 +29,8 @@ API between minor releases.
   - saved viewpoints with a tour, a clash list that flies to the clash and selects both elements, a 4D schedule player
     and linked-file visibility;
   - Russian or English interface, chosen from the browser language;
-  - a message instead of a blank page when the graphics context is lost or the model has more objects than the GPU
-    can address.
+  - a message instead of a blank page when the browser has no WebGL 2, the model data cannot be read, the graphics
+    context is lost or the model has more objects than the GPU can address.
 - Shared geometry: `ViewerDocument.Geometries`, `ViewerGeometry`, `ViewerMesh.GeometryId`, `ViewerMesh.Transform` and
   the `Transform3d` affine transform. The HTML exporter writes each shared geometry once and also writes meshes that
   are exact translated copies of each other once.
@@ -47,6 +47,10 @@ API between minor releases.
   `ViewerMesh` per node that uses it) and converts glTF's Y-up to the viewer's Z-up, so GLB models no longer lie on
   their side. A node hierarchy that is not a tree (a node referenced twice, or a cycle) now throws
   `InvalidDataException`.
+- `HtmlViewerExporter` throws `InvalidDataException` for indices outside a mesh's or geometry's vertices, a
+  `GeometryId` that is not in the document, a duplicate geometry id or a mesh with both a `GeometryId` and its own
+  vertices, instead of writing broken geometry. `Save` checks the data before it opens the file, so a failed export
+  leaves an existing file as it was, and the CLI reports such input with exit code 3.
 - `HtmlViewerOptions.MaxMeshVertices` defaults to no limit (was 5,000,000) and no longer cuts the model silently: when a
   lower limit leaves meshes out, the viewer shows a banner with the number of meshes written.
 - The HTML payload uses format 3: one base64 binary block, positions quantized to 16-bit steps of 2⁻¹⁰ m (error at most

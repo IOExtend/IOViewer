@@ -457,6 +457,36 @@ test('ten wheel notches within one animation frame pick once and zoom by 0.85 ea
   expect(await page.evaluate(() => window.__picks)).toEqual({ renders: 2, asked: 2 });
 });
 
+test('small wheel deltas (a trackpad) zoom by as much less than notches; 3 lines are a notch; deltaY 0 does not zoom', async ({ page }) => {
+  await open(page);
+  const wheel = (init) =>
+    page.evaluate((init) => {
+      const canvas = document.getElementById('ioviewer-canvas');
+      for (let k = 0; k < 10; k++) canvas.dispatchEvent(new WheelEvent('wheel', { clientX: 640, clientY: 400, bubbles: true, cancelable: true, ...init }));
+    }, init);
+  let d = await distance(page);
+  const ratio = async () => {
+    const next = await distance(page);
+    const r = next / d;
+    d = next;
+    await frame(page);
+    return r;
+  };
+  await wheel({ deltaY: -4 });
+  const trackpad = await ratio();
+  expect(trackpad).toBeCloseTo(0.85 ** 0.4, 3);
+  await wheel({ deltaY: 4 });
+  expect(await ratio()).toBeCloseTo(0.85 ** -0.4, 3);
+  await wheel({ deltaY: -100 });
+  const notches = await ratio();
+  expect(notches).toBeCloseTo(0.85 ** 10, 3);
+  expect(1 - trackpad).toBeLessThan((1 - notches) / 10);
+  await wheel({ deltaY: -3, deltaMode: 1 });
+  expect(await ratio()).toBeCloseTo(0.85 ** 10, 3);
+  await wheel({ deltaY: 0, deltaX: -100 });
+  expect(await ratio()).toBe(1);
+});
+
 test('pressing again at the same spot with the camera unchanged draws no new pick; a hide or a section does', async ({ page }) => {
   await open(page);
   await countPicks(page);
