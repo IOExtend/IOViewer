@@ -1,28 +1,33 @@
 export const TASK_TYPES = ['construct', 'demolish', 'temporary'];
 
-function time(text, taskId) {
-  const ms = Date.parse(text);
-  if (Number.isNaN(ms)) throw new Error(`4D task '${taskId}' has an invalid date '${text}'.`);
-  return ms;
+// DateTimeOffset's default value (year 1) is how an exporter writes "no date".
+const MIN_TIME = Date.parse('0002-01-01T00:00:00Z');
+
+// Epoch ms of an ISO date, or NaN when it is missing, invalid or the default year 1.
+function time(text) {
+  const ms = typeof text === 'string' ? Date.parse(text) : NaN;
+  return ms >= MIN_TIME ? ms : NaN;
 }
 
 /**
- * META `timeliner` with dates as epoch ms and attached element Ids as indices in META `elements` (Ids not in the
- * model are dropped): { start, end, tasks: [{ name, type, start, end, elements }] }.
+ * META `timeliner` with dates as epoch ms and attached element Ids as indices in META `elements`:
+ * { start, end, tasks: [{ name, type, start, end, elements }] }. A malformed task (missing or invalid dates, end before
+ * start, an unknown type) is left out, and Ids not in the model are dropped, so a bad schedule never stops the viewer.
+ * The range spans the tasks kept (start = Infinity, end = -Infinity without any).
  */
 export function prepareSchedule(timeliner, elements) {
   const indexOf = new Map(elements.map((e, i) => [e.id, i]));
-  const tasks = timeliner.tasks.map((task) => {
-    if (!TASK_TYPES.includes(task.type)) throw new Error(`4D task '${task.id}' has an unknown type '${task.type}'.`);
-    return {
-      name: task.name,
-      type: task.type,
-      start: time(task.start, task.id),
-      end: time(task.end, task.id),
-      elements: task.attachedElements.filter((id) => indexOf.has(id)).map((id) => indexOf.get(id)),
-    };
-  });
-  return { start: time(timeliner.start, 'schedule'), end: time(timeliner.end, 'schedule'), tasks };
+  const tasks = [];
+  for (const task of Array.isArray(timeliner?.tasks) ? timeliner.tasks : []) {
+    const start = time(task?.start);
+    const end = time(task?.end);
+    if (!TASK_TYPES.includes(task?.type) || !(start <= end)) continue;
+    const ids = Array.isArray(task.attachedElements) ? task.attachedElements : [];
+    tasks.push({ name: task.name, type: task.type, start, end, elements: ids.filter((id) => indexOf.has(id)).map((id) => indexOf.get(id)) });
+  }
+  const start = tasks.reduce((min, task) => Math.min(min, task.start), Infinity);
+  const end = tasks.reduce((max, task) => Math.max(max, task.end), -Infinity);
+  return { start, end, tasks };
 }
 
 /**

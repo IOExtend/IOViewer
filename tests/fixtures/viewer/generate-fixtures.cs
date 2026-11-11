@@ -145,6 +145,7 @@ doc.Viewpoints.Add(new ViewerViewpoint("Isometric", new ViewerCamera { Position 
 doc.Viewpoints.Add(new ViewerViewpoint("Front", new ViewerCamera { Position = new(9, -40, 3.6), Target = new(9, 6, 3.6) }));
 doc.Viewpoints.Add(new ViewerViewpoint("Top", new ViewerCamera { Position = new(9, 6, 50), Target = new(9, 6, 0), Up = Vector3d.UnitY }));
 doc.Viewpoints.Add(new ViewerViewpoint("Duct Clash", new ViewerCamera { Position = new(14, -4, 5), Target = new(9, 3, 3.2) }));
+doc.Viewpoints.Add(new ViewerViewpoint("Plan", new ViewerCamera { Position = new(9, 6, 40), Target = new(9, 6, 0), Projection = ViewerProjection.Orthographic }));
 
 var schedule = new ViewerTimeLinerSchedule("Construction Schedule");
 DateTimeOffset start = new(2026, 3, 2, 8, 0, 0, TimeSpan.Zero);

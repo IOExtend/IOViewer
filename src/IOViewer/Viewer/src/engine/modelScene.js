@@ -29,6 +29,8 @@ export function reversedWinding(geometry) {
  * The model as one BatchedMesh per material (a material is either opaque or transparent).
  * Elements are addressed by their index in META `elements` (0..n-1); per-instance visibility and colour
  * change without rebuilding. Every visual change dispatches `{type: 'change', detail: {kind}}` on `root`.
+ * Visibility has layers: the user's (setVisible, isolate, showAll) and named ones (setLayerHidden, e.g. the 4D schedule
+ * or a linked file); an instance is drawn when the user shows it and no named layer hides it.
  */
 export class ModelScene {
   constructor(data) {
@@ -49,7 +51,9 @@ export class ModelScene {
     this._elementOf = data.view(instances.element);
     this._bucketOf = new Uint32Array(count);
     this._batchId = new Uint32Array(count);
-    this._visible = new Uint8Array(count).fill(1);
+    this._visible = new Uint8Array(count).fill(1); // the user's layer
+    this._layers = new Map(); // name -> Uint8Array, 1 = hidden by that layer
+    this._layerHides = new Uint8Array(count); // how many named layers hide the instance
     this._highlight = new Uint8Array(count);
     this._highlighted = [];
     this._tint = new Map(); // instance -> THREE.Color
@@ -142,17 +146,28 @@ export class ModelScene {
     this._changed('appearance');
   }
 
-  // Copy of every instance's visibility, for restoreVisibility.
-  visibilityState() {
-    return this._visible.slice();
+  // Hides (hidden = true) or unhides elements in the named layer `layer`, independently of the user's layer.
+  setLayerHidden(layer, indices, hidden) {
+    let flags = this._layers.get(layer);
+    if (!flags) this._layers.set(layer, (flags = new Uint8Array(this._visible.length)));
+    for (const index of indices) {
+      for (const i of this.instancesOf(index)) this._setLayerFlag(flags, i, hidden);
+    }
+    this._changed('visibility');
   }
 
-  restoreVisibility(state) {
-    if (state.length !== this._visible.length) {
-      throw new RangeError(`Visibility state has ${state.length} instances, the model has ${this._visible.length}.`);
-    }
-    for (let i = 0; i < state.length; i++) this._setInstanceVisible(i, state[i] === 1);
+  // Unhides everything the named layer hides.
+  clearLayer(layer) {
+    const flags = this._layers.get(layer);
+    if (!flags) return;
+    for (let i = 0; i < flags.length; i++) this._setLayerFlag(flags, i, false);
+    this._layers.delete(layer);
     this._changed('visibility');
+  }
+
+  // Which instances are drawn now (1 = drawn), all layers combined.
+  visibilityState() {
+    return this._visible.map((_, i) => (this._shown(i) ? 1 : 0));
   }
 
   // Instance numbers (0..instanceCount-1) of an element.
@@ -161,9 +176,9 @@ export class ModelScene {
     return this._elementInstances.subarray(this._elementStart[index], this._elementStart[index + 1]);
   }
 
-  // True when at least one instance of the element is shown.
+  // True when at least one instance of the element is drawn (all visibility layers combined).
   isVisible(index) {
-    return this.instancesOf(index).some((i) => this._visible[i] === 1);
+    return this.instancesOf(index).some((i) => this._shown(i));
   }
 
   get instanceCount() {
@@ -184,7 +199,7 @@ export class ModelScene {
   visibleBox() {
     const box = new THREE.Box3();
     for (let i = 0; i < this._visible.length; i++) {
-      if (this._visible[i]) this._expandBox(box, i);
+      if (this._shown(i)) this._expandBox(box, i);
     }
     return box;
   }
@@ -335,7 +350,22 @@ export class ModelScene {
 
   _setInstanceVisible(i, visible) {
     this._visible[i] = visible ? 1 : 0;
-    this._buckets[this._bucketOf[i]].mesh.setVisibleAt(this._batchId[i], visible);
+    this._draw(i);
+  }
+
+  _setLayerFlag(flags, i, hidden) {
+    if (flags[i] === (hidden ? 1 : 0)) return;
+    flags[i] = hidden ? 1 : 0;
+    this._layerHides[i] += hidden ? 1 : -1;
+    this._draw(i);
+  }
+
+  _shown(i) {
+    return this._visible[i] === 1 && this._layerHides[i] === 0;
+  }
+
+  _draw(i) {
+    this._buckets[this._bucketOf[i]].mesh.setVisibleAt(this._batchId[i], this._shown(i));
   }
 
   _checkElement(index) {

@@ -448,6 +448,7 @@ internal sealed class ViewerPayloadWriter
                 w.WriteStartObject("camera");
                 WriteVector(w, "position", vp.Camera.Position - _rtcOffset);
                 WriteVector(w, "target", vp.Camera.Target - _rtcOffset);
+                w.WriteString("projection", vp.Camera.Projection == ViewerProjection.Orthographic ? "orthographic" : "perspective");
                 w.WriteEndObject();
                 w.WriteEndObject();
             }

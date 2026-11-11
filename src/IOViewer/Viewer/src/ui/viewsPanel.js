@@ -45,7 +45,10 @@ export function mountViews({ shell, toolbar, controls, views }) {
     tour.frame = requestAnimationFrame(wait);
   }
 
-  const stopOnPress = (e) => !tourButton.contains(e.target) && stopTour();
+  // A press on the tour button, or Enter/Space on it, is left to its click, which toggles the tour.
+  const onButton = (e) => tourButton.contains(e.target);
+  const stopOnPress = (e) => !onButton(e) && stopTour();
+  const stopOnKey = (e) => !(onButton(e) && (e.key === 'Enter' || e.key === ' ')) && stopTour();
 
   function stopTour() {
     if (!tour) return;
@@ -54,7 +57,7 @@ export function mountViews({ shell, toolbar, controls, views }) {
     tour = null;
     window.removeEventListener('pointerdown', stopOnPress, true);
     window.removeEventListener('wheel', stopTour, true);
-    window.removeEventListener('keydown', stopTour, true);
+    window.removeEventListener('keydown', stopOnKey, true);
     showTourState();
   }
 
@@ -62,7 +65,7 @@ export function mountViews({ shell, toolbar, controls, views }) {
     tour = { next: 0, frame: 0, timer: 0 };
     window.addEventListener('pointerdown', stopOnPress, true);
     window.addEventListener('wheel', stopTour, true);
-    window.addEventListener('keydown', stopTour, true);
+    window.addEventListener('keydown', stopOnKey, true);
     showTourState();
     step();
   }

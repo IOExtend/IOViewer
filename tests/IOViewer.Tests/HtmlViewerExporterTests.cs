@@ -450,6 +450,23 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void Viewpoints_WriteProjection()
+    {
+        var doc = GeoreferencedModel();
+        doc.Viewpoints.Add(new ViewerViewpoint("Plan", new ViewerCamera
+        {
+            Position = new Vector3d(OffsetX + 5, OffsetY + 7.5, 50),
+            Target = new Vector3d(OffsetX + 5, OffsetY + 7.5, 0),
+            Projection = ViewerProjection.Orthographic
+        }));
+
+        var viewpoints = ViewerHtml.Export(doc).Meta.GetProperty("viewpoints");
+
+        Assert.Equal("perspective", viewpoints[0].GetProperty("camera").GetProperty("projection").GetString());
+        Assert.Equal("orthographic", viewpoints[1].GetProperty("camera").GetProperty("projection").GetString());
+    }
+
+    [Fact]
     public void Export_200kElements_DoesNotBuildWholeString()
     {
         const int count = 200_000;

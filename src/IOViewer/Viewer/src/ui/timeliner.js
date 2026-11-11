@@ -6,35 +6,35 @@ import { segmented } from './sectionsPanel.js';
 
 const DAY_MS = 86400000;
 const SPEEDS = ['1', '5', '15']; // schedule days per second
-const COLORS = { construct: '#22c55e', demolish: '#ef4444', temporary: '#fbbf24' };
+const COLORS = { construct: '#22c55e', demolish: '#ef4444', temporary: '#a855f7' };
 const PLAYER_SPACE = '156px'; // --toolbar-space while the player bar is open: panels end above it
 
 /**
  * «4D-график»: the task list and the 4D player, a bar above the toolbar with play/pause, a date slider across the
  * schedule, speed 1×/5×/15× (1× = one schedule day per second) and the current date. At a date the schedule
- * (scheduleState) hides and tints the elements attached to tasks; other elements are left alone.
+ * (scheduleState) hides and tints the elements attached to tasks; other elements are left alone. Malformed tasks are
+ * left out (prepareSchedule).
  *
- * Visibility while the player is open: at each date it hides the attached elements the schedule hides (again after any
- * other visibility change, so «Показать всё» does not reveal future work) and shows again only those it hid itself.
- * Hide, Isolate and the links act on top of that. Closing the player restores every instance's visibility from before
- * it opened (so changes made meanwhile are undone too) and removes its tints. Returns the player, or null without 4D.
+ * The schedule hides elements only in the scene's 'schedule' visibility layer, so the user's Hide/Isolate/Show all and
+ * the links (their own layers) stay as they are and combine with it; closing the player clears that layer and its
+ * tints. Dates are shown in UTC: exporters write the schedule's wall-clock times with a 'Z'. Returns the player, or
+ * null without a usable 4D schedule.
  */
 export function mountTimeliner({ root, shell, timeliner, elements, scene }) {
-  if (!(timeliner?.tasks.length > 0)) {
+  const schedule = prepareSchedule(timeliner, elements);
+  if (schedule.tasks.length === 0) {
     shell.registerPanel('timeliner', { icon: icons.timeliner, title: t('panel.timeliner'), visible: false, render: () => {} });
     return null;
   }
-  const schedule = prepareSchedule(timeliner, elements);
-  const dayFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' });
-  const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+  const dayFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeZone: 'UTC' });
+  const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' });
   let date = schedule.start;
   let speed = 1;
   let frame = 0; // requestAnimationFrame id while playing
   let last = 0;
-  let saved = null; // instance visibility from before opening; null while closed
-  let hiddenByPlayer = new Set();
+  let isOpen = false;
+  let hidden = new Set(); // elements in the 'schedule' layer
   let tinted = new Map(); // element -> task type
-  let applying = false;
 
   const bar = el('div', 'ioviewer-player ioviewer-floating');
   bar.setAttribute('role', 'group');
@@ -58,54 +58,47 @@ export function mountTimeliner({ root, shell, timeliner, elements, scene }) {
   root.append(bar);
 
   function apply() {
-    const { hidden, active } = scheduleState(schedule.tasks, date);
-    const show = [...hiddenByPlayer].filter((i) => !hidden.has(i));
-    const hide = [...hidden].filter((i) => scene.isVisible(i));
-    hiddenByPlayer = new Set([...[...hiddenByPlayer].filter((i) => hidden.has(i)), ...hide]);
-    const clear = [...tinted.keys()].filter((i) => active.get(i) !== tinted.get(i));
+    const state = scheduleState(schedule.tasks, date);
+    const show = [...hidden].filter((i) => !state.hidden.has(i));
+    const hide = [...state.hidden].filter((i) => !hidden.has(i));
+    hidden = state.hidden;
+    const clear = [...tinted.keys()].filter((i) => state.active.get(i) !== tinted.get(i));
     const paint = new Map(); // type -> elements to tint with it
-    for (const [i, type] of active) {
+    for (const [i, type] of state.active) {
       if (tinted.get(i) === type) continue;
       if (!paint.has(type)) paint.set(type, []);
       paint.get(type).push(i);
     }
-    tinted = active;
-    applying = true;
-    if (show.length) scene.setVisible(show, true);
-    if (hide.length) scene.setVisible(hide, false);
+    tinted = state.active;
+    if (show.length) scene.setLayerHidden('schedule', show, false);
+    if (hide.length) scene.setLayerHidden('schedule', hide, true);
     if (clear.length) scene.setTint(clear, null);
     for (const [type, list] of paint) scene.setTint(list, COLORS[type]);
-    applying = false;
   }
 
   function setDate(value) {
     date = Math.min(Math.max(value, schedule.start), schedule.end);
     slider.value = String(date);
     label.textContent = dateFormat.format(date);
-    if (saved) apply();
+    if (isOpen) apply();
   }
 
-  scene.root.addEventListener('change', (e) => {
-    if (saved && !applying && e.detail.kind === 'visibility') apply();
-  });
-
   function open() {
-    if (saved) return;
-    saved = scene.visibilityState();
+    if (isOpen) return;
+    isOpen = true;
     bar.hidden = false;
     root.style.setProperty('--toolbar-space', PLAYER_SPACE);
     setDate(schedule.start);
   }
 
   function closePlayer() {
-    if (!saved) return;
+    if (!isOpen) return;
     pause();
-    const state = saved;
-    saved = null;
+    isOpen = false;
     scene.setTint([...tinted.keys()], null);
     tinted = new Map();
-    hiddenByPlayer = new Set();
-    scene.restoreVisibility(state);
+    hidden = new Set();
+    scene.clearLayer('schedule');
     bar.hidden = true;
     root.style.removeProperty('--toolbar-space');
   }
@@ -172,7 +165,7 @@ export function mountTimeliner({ root, shell, timeliner, elements, scene }) {
       return date;
     },
     get isOpen() {
-      return saved !== null;
+      return isOpen;
     },
   };
 }

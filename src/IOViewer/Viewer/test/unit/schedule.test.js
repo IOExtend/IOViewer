@@ -54,9 +54,36 @@ test('prepareSchedule maps attached Ids to element indices and parses the dates'
   assert.deepEqual(schedule.tasks, [{ name: 'Slab', type: 'construct', start: Date.UTC(2026, 2, 2, 8), end: Date.UTC(2026, 2, 12, 8), elements: [2, 0] }]);
 });
 
-test('prepareSchedule rejects a bad date or an unknown task type', () => {
-  const base = { start: '2026-03-02T08:00:00Z', end: '2026-03-12T08:00:00Z' };
-  const one = (t) => prepareSchedule({ ...base, tasks: [{ id: 'T1', name: 'x', attachedElements: [], ...t }] }, []);
-  assert.throws(() => one({ type: 'construct', start: 'soon', end: base.end }), /T1/);
-  assert.throws(() => one({ type: 'build', start: base.start, end: base.end }), /build/);
+test('prepareSchedule leaves out malformed tasks and spans the range of the good ones', () => {
+  const good = (id, start, end) => ({ id, name: id, type: 'construct', start, end, attachedElements: [5] });
+  const schedule = prepareSchedule(
+    {
+      start: '0001-01-01T00:00:00Z', // the exporter's overall range includes the bad tasks
+      end: '2027-01-01T00:00:00Z',
+      tasks: [
+        { id: 'no dates', name: 'x', type: 'construct', attachedElements: [5] },
+        { ...good('invalid'), start: 'soon', end: '2026-03-12T08:00:00Z' },
+        { ...good('reversed'), start: '2026-03-12T08:00:00Z', end: '2026-03-02T08:00:00Z' },
+        { ...good('default year'), start: '0001-01-01T00:00:00Z', end: '2026-03-12T08:00:00Z' },
+        { ...good('unknown type'), type: 'build', start: '2026-03-02T08:00:00Z', end: '2026-03-12T08:00:00Z' },
+        { id: 'no ids', name: 'n', type: 'demolish', start: '2026-04-01T00:00:00Z', end: '2026-04-02T00:00:00Z' },
+        { ...good('unknown ids'), start: '2026-03-05T00:00:00Z', end: '2026-03-06T00:00:00Z', attachedElements: [99, 5, 'x'] },
+        null,
+        good('ok', '2026-03-02T08:00:00Z', '2026-03-12T08:00:00Z'),
+      ],
+    },
+    [{ id: 5 }],
+  );
+  assert.deepEqual(schedule.tasks.map((task) => [task.name, task.elements]), [['n', []], ['unknown ids', [0]], ['ok', [0]]]);
+  assert.equal(schedule.start, Date.UTC(2026, 2, 2, 8));
+  assert.equal(schedule.end, Date.UTC(2026, 3, 2));
+  // The good tasks still drive the 4D state.
+  assert.deepEqual([...scheduleState(schedule.tasks, Date.UTC(2026, 2, 1)).hidden], [0]);
+  assert.deepEqual([...scheduleState(schedule.tasks, Date.UTC(2026, 2, 5, 12)).active], [[0, 'construct']]);
+});
+
+test('prepareSchedule without a schedule or without good tasks has no tasks', () => {
+  for (const timeliner of [null, {}, { tasks: 'none' }, { tasks: [{ type: 'construct' }] }]) {
+    assert.deepEqual(prepareSchedule(timeliner, []).tasks, []);
+  }
 });

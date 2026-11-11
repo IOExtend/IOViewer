@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { viewerDir } from './global-setup.js';
@@ -111,7 +112,7 @@ test.describe('views', () => {
     expect(await page.evaluate(() => window.__ioviewer.camera.isOrthographicCamera)).toBe(true);
     await rail(page, 'views').click();
     const rows = sidePanel(page, 'views').locator('.ioviewer-view');
-    await expect(rows).toHaveText(['Isometric', 'Front', 'Top', 'Duct Clash']);
+    await expect(rows).toHaveText(['Isometric', 'Front', 'Top', 'Duct Clash', 'Plan']);
     await expect(rows.nth(1)).toHaveAttribute('title', 'Front');
     await rows.nth(1).click();
     expect(await page.evaluate(() => window.__ioviewer.camera.isPerspectiveCamera)).toBe(true);
@@ -120,11 +121,19 @@ test.describe('views', () => {
     const at = await camera(page);
     expect(near(at.position, viewpoints[1].camera.position)).toBe(true);
     expect(near(at.target, viewpoints[1].camera.target)).toBe(true);
+
+    // «Plan» is an orthographic viewpoint.
+    expect(viewpoints[4].camera.projection).toBe('orthographic');
+    await rows.nth(4).click();
+    expect(await page.evaluate(() => window.__ioviewer.camera.isOrthographicCamera)).toBe(true);
+    await expect(page.locator('.ioviewer-tool[data-tool="projection"]')).toHaveClass(/active/);
+    await settled(page);
+    expect(near((await camera(page)).target, viewpoints[4].camera.target)).toBe(true);
     expect(errors).toEqual([]);
   });
 
   test('the tour goes from view to view and stops on a mouse press or a key', async ({ page }) => {
-    test.setTimeout(30000);
+    test.setTimeout(40000);
     const errors = await open(page);
     const { viewpoints } = await meta(page);
     const at = (i) =>
@@ -164,12 +173,23 @@ test.describe('views', () => {
     await expect(tour).toHaveAttribute('aria-pressed', 'true');
     await tour.click();
     await expect(tour).toHaveAttribute('aria-pressed', 'false');
+
+    // Enter on the focused button stops the tour and it stays stopped.
+    await tour.click();
+    await at(0);
+    await tour.focus();
+    await page.keyboard.press('Enter');
+    await expect(tour).toHaveAttribute('aria-pressed', 'false');
+    const held = await camera(page);
+    await page.waitForTimeout(3500);
+    await expect(tour).toHaveAttribute('aria-pressed', 'false');
+    expect(await camera(page)).toEqual(held);
     expect(errors).toEqual([]);
   });
 });
 
 test.describe('4D', () => {
-  test('at the start date future work is hidden and active work is green; closing restores the view', async ({ page }) => {
+  test('at the start date future work is hidden and active work is green; closing leaves the user state', async ({ page }) => {
     const errors = await open(page);
     const slab = await indexOf(page, 'Ground Slab');
     const column = await indexOf(page, 'Column A1 Level 1');
@@ -178,7 +198,6 @@ test.describe('4D', () => {
     const twin = await indexOf(page, 'Column Twin');
     // The user hid the twin (not in the schedule) before opening the player.
     await page.evaluate((i) => window.__ioviewer.scene.setVisible([i], false), twin);
-    const before = await visibility(page);
     const slabColor = await colorOf(page, slab);
 
     await rail(page, 'timeliner').click();
@@ -187,7 +206,7 @@ test.describe('4D', () => {
     await expect(tasks).toHaveCount(7);
     await expect(tasks.first().locator('.ioviewer-row-name')).toHaveText('Ground slab');
     const dates = await page.evaluate(() => {
-      const f = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' });
+      const f = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeZone: 'UTC' });
       return `${f.format(Date.parse('2026-03-02T08:00:00Z'))} – ${f.format(Date.parse('2026-03-12T08:00:00Z'))}`;
     });
     await expect(tasks.first().locator('.ioviewer-task-dates')).toHaveText(dates);
@@ -227,7 +246,7 @@ test.describe('4D', () => {
     expect(near(await colorOf(page, beam), await css(page, '#22c55e'), 1e-6)).toBe(true);
     expect(await visible(page, roof)).toBe(false);
     await expect(player.locator('.ioviewer-player-date')).toHaveText(
-      await page.evaluate(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(Date.parse('2026-03-25T08:00:00Z'))),
+      await page.evaluate(() => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' }).format(Date.parse('2026-03-25T08:00:00Z'))),
     );
     // The player sits above the toolbar, and the open panel ends above the player.
     const bar = await player.boundingBox();
@@ -247,9 +266,107 @@ test.describe('4D', () => {
 
     await player.getByRole('button', { name: 'Закрыть' }).click();
     await expect(player).toBeHidden();
-    expect(await visibility(page)).toEqual(before);
+    // The user's Show all stays; nothing is hidden any more.
+    expect((await visibility(page)).every((v) => v === 1)).toBe(true);
     for (const i of [slab, beam, duct]) expect(near(await colorOf(page, i), await css(page, '#22c55e'), 1e-6)).toBe(false);
     expect(near(await colorOf(page, slab), slabColor, 1e-6)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe('4D layers', () => {
+  const setDate = (page, iso) => page.evaluate((iso) => window.__ioviewer.timeliner.setDate(Date.parse(iso)), iso);
+  const elementsShown = (page) =>
+    page.evaluate(() => {
+      const { scene } = window.__ioviewer;
+      return [...Array(scene.elementCount).keys()].filter((i) => scene.isVisible(i));
+    });
+
+  test('isolating during 4D keeps later work hidden; closing leaves the isolation', async ({ page }) => {
+    const errors = await open(page);
+    const slab = await indexOf(page, 'Ground Slab');
+    const column = await indexOf(page, 'Column A1 Level 1');
+    await page.evaluate(() => window.__ioviewer.timeliner.open());
+    expect(await visible(page, column)).toBe(false);
+    await page.evaluate((i) => window.__ioviewer.scene.isolate([i]), slab);
+    await setDate(page, '2026-03-15T00:00:00Z'); // past the start of «Columns Level 1»
+    expect(await visible(page, column)).toBe(false);
+    expect(await elementsShown(page)).toEqual([slab]);
+    await page.evaluate(() => window.__ioviewer.timeliner.close());
+    expect(await elementsShown(page)).toEqual([slab]);
+    expect(errors).toEqual([]);
+  });
+
+  test('a link unchecked while 4D hides its element stays off as the schedule moves on and after closing', async ({ page }) => {
+    const errors = await open(page);
+    const duct = await indexOf(page, 'Supply Duct SA-1');
+    const twin = await indexOf(page, 'Column Twin');
+    await page.evaluate(() => window.__ioviewer.timeliner.open());
+    expect(await visible(page, duct)).toBe(false); // «Supply duct» has not started
+    await rail(page, 'links').click();
+    const links = sidePanel(page, 'links').locator('.ioviewer-link');
+    const structure = links.nth(0).getByRole('checkbox');
+    const mep = links.nth(1).getByRole('checkbox');
+    await expect(mep).toBeChecked();
+    await mep.uncheck();
+    await setDate(page, '2026-05-01T08:00:00Z');
+    expect(await visible(page, duct)).toBe(false);
+    await expect(mep).not.toBeChecked();
+    await expect(structure).toBeChecked(); // its own state, though 4D had hidden most of its elements
+    await page.evaluate((i) => window.__ioviewer.scene.setVisible([i], false), twin); // the user, meanwhile
+
+    await page.evaluate(() => window.__ioviewer.timeliner.close());
+    const count = await page.evaluate(() => window.__ioviewer.scene.elementCount);
+    expect(await elementsShown(page)).toEqual([...Array(count).keys()].filter((i) => i !== duct && i !== twin));
+    await expect(mep).not.toBeChecked();
+    await mep.check();
+    expect(await visible(page, duct)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe('4D dates west of UTC', () => {
+  // 08:00Z is still the same day in New York; Honolulu (UTC-10) is where a local-time format would show the day before.
+  test.use({ timezoneId: 'Pacific/Honolulu' });
+
+  test('the schedule shows its dates as written, not shifted by the time zone', async ({ page }) => {
+    const errors = await open(page);
+    await rail(page, 'timeliner').click();
+    const first = sidePanel(page, 'timeliner').locator('.ioviewer-task').first();
+    await expect(first.locator('.ioviewer-task-dates')).toHaveText('02.03.2026 – 12.03.2026');
+    await page.evaluate(() => window.__ioviewer.timeliner.open());
+    await expect(page.locator('.ioviewer-player-date')).toHaveText('2 мар. 2026 г.');
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe('malformed 4D', () => {
+  test('bad tasks are left out and the viewer and the player still work', async ({ page }) => {
+    const html = readFileSync(path.join(viewerDir, 'test-results', 'building.html'), 'utf8');
+    const tag = '<script id="ioviewer-meta" type="application/json">';
+    const start = html.indexOf(tag) + tag.length;
+    const end = html.indexOf('</script>', start);
+    const data = JSON.parse(html.slice(start, end));
+    const bad = (id, name, dates) => ({ id, name, type: 'construct', progress: 0, attachedElements: [300002], ...dates });
+    data.timeliner.start = '0001-01-01T00:00:00Z';
+    data.timeliner.tasks.unshift(
+      bad('B1', 'No dates', {}),
+      bad('B2', 'Default year', { start: '0001-01-01T00:00:00Z', end: '2026-03-03T00:00:00Z' }),
+      bad('B3', 'Reversed', { start: '2026-03-10T00:00:00Z', end: '2026-03-05T00:00:00Z' }),
+      bad('B4', 'Invalid', { start: 'soon', end: '2026-03-05T00:00:00Z' }),
+      { ...bad('B5', 'Unknown ids', { start: '2026-03-02T08:00:00Z', end: '2026-03-05T00:00:00Z' }), attachedElements: [999999] },
+    );
+    writeFileSync(path.join(viewerDir, 'test-results', 'bad-4d.html'), html.slice(0, start) + JSON.stringify(data) + html.slice(end));
+
+    const errors = await open(page, 'bad-4d');
+    await rail(page, 'timeliner').click();
+    const names = sidePanel(page, 'timeliner').locator('.ioviewer-task .ioviewer-row-name');
+    await expect(names).toHaveCount(8);
+    await expect(names.first()).toHaveText('Unknown ids');
+    await page.evaluate(() => window.__ioviewer.timeliner.open());
+    expect(await page.locator('.ioviewer-player-slider').getAttribute('min')).toBe(String(Date.parse('2026-03-02T08:00:00Z')));
+    expect(await visible(page, await indexOf(page, 'Ground Slab'))).toBe(true);
+    expect(await visible(page, await indexOf(page, 'Column A1 Level 1'))).toBe(false);
     expect(errors).toEqual([]);
   });
 });
@@ -283,10 +400,12 @@ test.describe('links', () => {
     expect(await visible(page, twin)).toBe(true);
     expect(await visible(page, column)).toBe(false);
 
-    // Show all brings the elements back, and the box follows.
+    // Show all is the user's: it does not bring back an unchecked file.
     await mep.uncheck();
     await page.evaluate(() => window.__ioviewer.scene.showAll()); // Shift+H: the focused checkbox keeps the hotkeys off
-    await expect(mep).toBeChecked();
+    await expect(mep).not.toBeChecked();
+    expect(await visible(page, duct)).toBe(false);
+    expect(await visible(page, column)).toBe(true);
     expect(errors).toEqual([]);
   });
 });

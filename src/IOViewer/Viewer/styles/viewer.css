@@ -868,7 +868,7 @@ label.ioviewer-row:hover {
 }
 
 .ioviewer-task[data-type="temporary"]::before {
-  background: #fbbf24;
+  background: #a855f7;
 }
 
 .ioviewer-player {

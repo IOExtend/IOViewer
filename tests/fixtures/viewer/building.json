@@ -12121,6 +12121,37 @@
         "FarDistance": 1000,
         "Projection": 0
       }
+    },
+    {
+      "Name": "Plan",
+      "Camera": {
+        "Position": {
+          "X": 9,
+          "Y": 6,
+          "Z": 40,
+          "LengthSquared": 1717,
+          "Length": 41.43669871020132
+        },
+        "Target": {
+          "X": 9,
+          "Y": 6,
+          "Z": 0,
+          "LengthSquared": 117,
+          "Length": 10.816653826391969
+        },
+        "Up": {
+          "X": 0,
+          "Y": 0,
+          "Z": 1,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        "FieldOfView": 0.785,
+        "AspectRatio": 1.6,
+        "NearDistance": 0.1,
+        "FarDistance": 1000,
+        "Projection": 1
+      }
     }
   ],
   "SectionPlanes": [],
