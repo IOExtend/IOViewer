@@ -612,4 +612,41 @@ public class HtmlViewerExporterTests
         Assert.Equal([0, 0], view.Instances("geometry"));
         Assert.Equal(3.0, view.Instances("matrix")[12 + 9] - view.Instances("matrix")[9]);
     }
+
+    [Fact]
+    public void Format3_DedupesOffGridTranslatedCopies()
+    {
+        // Copies at millimetre offsets are off the 2^-10 m grid; they still share the first copy's geometry, placed by
+        // an exact (unsnapped) translation. Offsets stay within ±5 m of the RTC origin, so float32 adds < 1e-6 m.
+        var random = new Random(7);
+        var shape = Enumerable.Range(0, 100)
+            .Select(_ => new Vector3d(random.Next(0, 3000) / 1000.0, random.Next(0, 3000) / 1000.0, random.Next(0, 3000) / 1000.0)).ToArray();
+        int[] indices = [.. Enumerable.Range(0, 99)];
+        var doc = new ViewerDocument();
+        for (int i = 0; i < 1000; i++)
+        {
+            var shift = new Vector3d(OffsetX + random.Next(0, 10000) / 1000.0, OffsetY + random.Next(0, 10000) / 1000.0, random.Next(0, 10000) / 1000.0);
+            doc.Meshes.Add(new ViewerMesh { Id = i, Vertices = [.. shape.Select(p => p + shift)], Indices = indices });
+        }
+
+        var view = ViewerHtml.Export(doc);
+
+        Assert.Equal(1, view.Geometries.GetArrayLength());
+        Assert.Equal(1000, view.InstanceCount);
+        var rtc = Vec(view.Meta.GetProperty("rtcOffset"));
+        var p = view.Positions(view.Geometries[0]);
+        var matrix = view.Instances("matrix");
+        for (int i = 0; i < 1000; i++)
+        {
+            var vertices = doc.Meshes[i].Vertices;
+            for (int v = 0; v < vertices.Count; v++)
+            {
+                double[] exact = [vertices[v].X - rtc[0], vertices[v].Y - rtc[1], vertices[v].Z - rtc[2]];
+                for (int k = 0; k < 3; k++)
+                {
+                    Assert.InRange(Math.Abs(matrix[i * 12 + 9 + k] + p[v * 3 + k] - exact[k]), 0, Step / 2 + 1e-6);
+                }
+            }
+        }
+    }
 }

@@ -21,6 +21,7 @@ internal sealed class ViewerPayloadWriter
     private readonly BinaryBlobBuilder _blob = new();
     private readonly List<GeometryEntry> _geometries = [];
     private readonly Dictionary<int, List<int>> _geometriesByHash = [];
+    private readonly Dictionary<int, List<OwnTwin>> _ownTwinsByHash = [];
     private readonly List<MaterialKey> _materials = [];
     private readonly Dictionary<MaterialKey, int> _materialIndex = [];
     private readonly Dictionary<int, ViewerMaterial> _materialsById = [];
@@ -109,7 +110,7 @@ internal sealed class ViewerPayloadWriter
             }
             else
             {
-                (geometryIndex, translation) = AddOwnGeometry(mesh, transform);
+                (geometryIndex, translation) = AddOwnGeometry(mesh);
                 transform = Transform3d.Identity;
             }
 
@@ -151,12 +152,58 @@ internal sealed class ViewerPayloadWriter
             : AddGeometry(null, Floats(vertices, Vector3d.Zero), null, geometry.Indices, normals, uvs, bounds);
     }
 
-    // Bakes the mesh transform into its vertices (in RTC); returns the geometry and the instance translation (RTC).
-    // Quantized, the translation is the snapped minimum corner, a point of the global RTC grid, and q has origin 0, so
-    // vertices that coincide in the world decode to the same grid point in every mesh. Otherwise (over 64 m) the
-    // vertices are f32 relative to the exact minimum corner, as in format 2.
-    private (int Index, Vector3d Translation) AddOwnGeometry(ViewerMesh mesh, Transform3d transform)
+    // Returns the geometry of a mesh with its own vertices and the instance translation (RTC).
+    // A translated twin of an earlier own mesh (format 2's dedupe: equal float32 positions relative to the exact minimum
+    // corner, equal indices, normals and UVs) reuses that geometry with an exact, unsnapped translation; its vertices
+    // are then within Step/2 plus float32 rounding of the truth, but no longer bit-identical to coinciding vertices of
+    // other meshes. Otherwise the mesh gets its own geometry: quantized, the translation is the snapped minimum corner,
+    // a point of the global RTC grid, and q has origin 0, so vertices that coincide in the world decode to the same
+    // grid point in every mesh; over 64 m, the vertices are f32 relative to the exact minimum corner, as in format 2.
+    private (int Index, Vector3d Translation) AddOwnGeometry(ViewerMesh mesh)
     {
+        var shape = Bake(mesh);
+        var hasher = new HashCode();
+        hasher.AddBytes(Bytes(shape.Relative));
+        foreach (int index in mesh.Indices) hasher.Add(index);
+        hasher.AddBytes(Bytes(shape.Normals));
+        hasher.AddBytes(Bytes(shape.Uvs));
+        int hash = hasher.ToHashCode();
+        if (!_ownTwinsByHash.TryGetValue(hash, out var twins))
+        {
+            twins = [];
+            _ownTwinsByHash.Add(hash, twins);
+        }
+        foreach (var twin in twins)
+        {
+            var other = Bake(twin.Mesh); // rebaked on a hash match instead of keeping every mesh's floats in memory
+            if (SameBytes(shape.Relative, other.Relative) && mesh.Indices.SequenceEqual(twin.Mesh.Indices)
+                && SameBytes(shape.Normals, other.Normals) && SameBytes(shape.Uvs, other.Uvs))
+            {
+                return (twin.Geometry, twin.Translation + (shape.Min - other.Min));
+            }
+        }
+
+        int geometry;
+        Vector3d translation;
+        var box = shape.Box;
+        if (GeometryQuantizer.TryQuantize(shape.Rtc, out var origin, out var q))
+        {
+            var local = box.IsEmpty ? box : new BoundingBox3d(box.Min - origin, box.Max - origin);
+            (geometry, translation) = (AddGeometry(q, null, Vector3d.Zero, mesh.Indices, shape.Normals, shape.Uvs, local), origin);
+        }
+        else
+        {
+            var bounds = new BoundingBox3d(Vector3d.Zero, box.Max - shape.Min); // not empty: no vertices always quantize
+            (geometry, translation) = (AddGeometry(null, shape.Relative, null, mesh.Indices, shape.Normals, shape.Uvs, bounds), shape.Min);
+        }
+        twins.Add(new OwnTwin(mesh, geometry, translation));
+        return (geometry, translation);
+    }
+
+    // Bakes the mesh transform into its vertices (in RTC) and normals.
+    private OwnShape Bake(ViewerMesh mesh)
+    {
+        var transform = mesh.Transform ?? Transform3d.Identity;
         var vertices = mesh.Vertices;
         var rtc = new Vector3d[vertices.Count];
         var box = BoundingBox3d.Empty;
@@ -165,22 +212,14 @@ internal sealed class ViewerPayloadWriter
             rtc[i] = transform.Apply(vertices[i]) - _rtcOffset;
             box = box.Encapsulate(rtc[i]);
         }
+        var min = box.IsEmpty ? Vector3d.Zero : box.Min;
 
         short[]? normals = null;
         if (mesh.Normals is { } n && n.Count == vertices.Count)
         {
             normals = GeometryQuantizer.OctEncode(mesh.Transform is null ? n : [.. n.Select(v => TransformNormal(transform, v))]);
         }
-        var uvs = Uvs(mesh.UVs, vertices.Count);
-
-        if (GeometryQuantizer.TryQuantize(rtc, out var origin, out var q))
-        {
-            var local = box.IsEmpty ? box : new BoundingBox3d(box.Min - origin, box.Max - origin);
-            return (AddGeometry(q, null, Vector3d.Zero, mesh.Indices, normals, uvs, local), origin);
-        }
-        var min = box.Min; // not empty: no vertices always quantize
-        var bounds = new BoundingBox3d(Vector3d.Zero, box.Max - min);
-        return (AddGeometry(null, Floats(rtc, min), null, mesh.Indices, normals, uvs, bounds), min);
+        return new OwnShape(rtc, box, min, Floats(rtc, min), normals, Uvs(mesh.UVs, vertices.Count));
     }
 
     // Multiplies by the inverse transpose of the linear part, so normals stay perpendicular under any affine map.
@@ -274,6 +313,9 @@ internal sealed class ViewerPayloadWriter
         candidates.Add(_geometries.Count - 1);
         return _geometries.Count - 1;
     }
+
+    private static bool SameBytes<T>(T[]? a, T[]? b) where T : struct =>
+        a is null ? b is null : b is not null && Bytes(a).SequenceEqual(Bytes(b));
 
     private bool Same<T>(T[]? values, BlobView? view) where T : struct =>
         values is null ? view is null : view is { } v && Bytes(values).SequenceEqual(_blob.Bytes(v));
@@ -617,6 +659,12 @@ internal sealed class ViewerPayloadWriter
 
     // Origin is META q.o: set for u16 grid-step positions, null for f32.
     private sealed record GeometryEntry(BlobView Positions, Vector3d? Origin, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds);
+
+    // An own-vertex mesh baked into RTC: Relative = float32 positions relative to Min, the exact minimum corner.
+    private sealed record OwnShape(Vector3d[] Rtc, BoundingBox3d Box, Vector3d Min, float[] Relative, short[]? Normals, float[]? Uvs);
+
+    // The first own mesh of a shape, the geometry written for it and its instance translation (RTC).
+    private readonly record struct OwnTwin(ViewerMesh Mesh, int Geometry, Vector3d Translation);
 
     private readonly record struct InstanceViews(BlobView Geometry, BlobView Material, BlobView Element, BlobView Matrix);
 }
