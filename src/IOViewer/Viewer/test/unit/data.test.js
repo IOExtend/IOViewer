@@ -2,6 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadModelData } from '../../src/data.js';
 
+// A data block as the DOM has it: its text in text nodes (`pieces` of it, one node each), read with substringData.
+function textBlock(text, pieces = 1) {
+  const size = Math.ceil(text.length / pieces);
+  const childNodes = Array.from({ length: pieces }, (_, k) => {
+    const data = text.slice(k * size, (k + 1) * size);
+    return { length: data.length, substringData: (offset, count) => data.substr(offset, count) };
+  });
+  return { textContent: text, childNodes };
+}
+
 // BIN layout: f32[3] at 0 (12 bytes), u16[3] at 12 (6 bytes + 2 padding to the next 4-byte boundary).
 function fakeDocument(propsJson) {
   const bytes = new Uint8Array(20);
@@ -17,7 +27,7 @@ function fakeDocument(propsJson) {
   const propsReads = { count: 0 };
   const blocks = {
     'ioviewer-meta': { textContent: JSON.stringify(meta) },
-    'ioviewer-bin': { textContent: Buffer.from(bytes).toString('base64') },
+    'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64')),
     'ioviewer-props': {
       get textContent() {
         propsReads.count++;
@@ -47,7 +57,7 @@ test('decodes i32 and u32 views', () => {
   new DataView(bytes.buffer).setUint32(4, 4000000000, true);
   const blocks = {
     'ioviewer-meta': { textContent: '{}' },
-    'ioviewer-bin': { textContent: Buffer.from(bytes).toString('base64') },
+    'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64')),
     'ioviewer-props': { textContent: '{}' },
   };
   const data = loadModelData({ getElementById: (id) => blocks[id] });
@@ -61,7 +71,7 @@ test('decodes BIN larger than one 4 MB chunk', () => {
   for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + (i >> 8)) & 0xff;
   const blocks = {
     'ioviewer-meta': { textContent: '{}' },
-    'ioviewer-bin': { textContent: Buffer.from(bytes).toString('base64') },
+    'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64')),
     'ioviewer-props': { textContent: '{}' },
   };
   const data = loadModelData({ getElementById: (id) => blocks[id] });
@@ -82,9 +92,65 @@ test('parses PROPS only on the first props() call', () => {
 test('empty BIN gives empty views', () => {
   const blocks = {
     'ioviewer-meta': { textContent: '{"format":2}' },
-    'ioviewer-bin': { textContent: '' },
+    'ioviewer-bin': textBlock(''),
     'ioviewer-props': { textContent: '{}' },
   };
   const data = loadModelData({ getElementById: (id) => blocks[id] });
   assert.equal(data.view({ o: 0, n: 0, t: 'u32' }).length, 0);
+});
+
+test('decodes BIN split over several text nodes at any character, with whitespace around it', () => {
+  const bytes = Uint8Array.from({ length: 1000 }, (_, i) => (i * 7) & 0xff);
+  const blocks = {
+    'ioviewer-meta': { textContent: '{}' },
+    'ioviewer-bin': textBlock(`
+ ${Buffer.from(bytes).toString('base64')}
+`, 7),
+    'ioviewer-props': { textContent: '{}' },
+  };
+  const data = loadModelData({ getElementById: (id) => blocks[id] });
+  assert.deepEqual(new Uint8Array(data.view({ o: 0, n: 250, t: 'u32' }).buffer, 0, 1000), bytes);
+});
+
+test('releaseBinary frees BIN: views throw afterwards, META and PROPS stay', () => {
+  const { doc } = fakeDocument('{"42": {}}');
+  const data = loadModelData(doc);
+  data.releaseBinary();
+  assert.throws(() => data.view(data.meta.positions), /released/);
+  assert.equal(data.meta.title, 'Fake');
+  assert.deepEqual(data.props(42), {});
+});
+
+test('BIN without its padding decodes as atob does', () => {
+  const blocks = { 'ioviewer-meta': { textContent: '{}' }, 'ioviewer-bin': textBlock('QUJDRA'), 'ioviewer-props': { textContent: '{}' } };
+  const data = loadModelData({ getElementById: (id) => blocks[id] });
+  assert.deepEqual(new Uint8Array(data.view({ o: 0, n: 1, t: 'u32' }).buffer, 0, 4), new Uint8Array([65, 66, 67, 68]));
+});
+
+test('uses the native Uint8Array.setFromBase64 where there is one, with the same result', () => {
+  const native = Object.getOwnPropertyDescriptor(Uint8Array.prototype, 'setFromBase64');
+  let calls = 0;
+  // A counting wrapper of the native one, or a stand-in with the standard's contract: decodes into this array and
+  // returns { read, written }.
+  Uint8Array.prototype.setFromBase64 = function (text) {
+    calls++;
+    if (native) return native.value.call(this, text);
+    const decoded = Buffer.from(text, 'base64');
+    this.set(decoded);
+    return { read: text.length, written: decoded.length };
+  };
+  try {
+    const bytes = Uint8Array.from({ length: 5 * 1024 * 1024 }, (_, i) => (i * 13) & 0xff);
+    const blocks = {
+      'ioviewer-meta': { textContent: '{}' },
+      'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64'), 3),
+      'ioviewer-props': { textContent: '{}' },
+    };
+    const data = loadModelData({ getElementById: (id) => blocks[id] });
+    assert.ok(calls > 1);
+    assert.deepEqual(new Uint8Array(data.view({ o: 0, n: bytes.length / 4, t: 'u32' }).buffer, 0, bytes.length), bytes);
+  } finally {
+    if (native) Object.defineProperty(Uint8Array.prototype, 'setFromBase64', native);
+    else delete Uint8Array.prototype.setFromBase64;
+  }
 });

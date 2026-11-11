@@ -58,18 +58,20 @@ export class Picker {
     this._probe.geometry.boundingBox = new THREE.Box3();
     this._probe.geometry.boundingSphere = new THREE.Sphere();
     this._materials = new Map(); // bucket BatchedMesh -> its id material
+    const ids = new Map(); // bucket BatchedMesh -> the texels of its element ids, as Uint32
     for (let i = 0; i < modelScene.instanceCount; i++) {
       const { mesh, batchId, element } = modelScene.instance(i);
-      let material = this._materials.get(mesh);
-      if (!material) {
-        material = idMaterial(mesh.maxInstanceCount);
+      let texels = ids.get(mesh);
+      if (!texels) {
+        const material = idMaterial(mesh.maxInstanceCount);
         this._materials.set(mesh, material);
+        texels = new Uint32Array(material.uniforms.elementIds.value.image.data.buffer);
+        ids.set(mesh, texels);
       }
-      const ids = material.uniforms.elementIds.value;
       // Little-endian like the BIN block: byte 0 (red) holds the low bits. Element -1 stays 0, never picked.
-      new Uint32Array(ids.image.data.buffer)[batchId] = element + 1;
-      ids.needsUpdate = true;
+      texels[batchId] = element + 1;
     }
+    for (const material of this._materials.values()) material.uniforms.elementIds.value.needsUpdate = true;
   }
 
   // { element, point } under the client pixel, or null for background and meshes without an element.

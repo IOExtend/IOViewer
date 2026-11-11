@@ -1,8 +1,12 @@
 import * as THREE from 'three';
+import { detailThreshold, frustumPlanes, outsideFrustum, screenRadius, viewMetrics } from './culling.js';
 
 export const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
 const HIGHLIGHT_COLOR = new THREE.Color('#f59e0b');
 const WHITE_COLOR = new THREE.Color().setRGB(0.92, 0.92, 0.93, THREE.SRGBColorSpace);
+// Drawing one instance costs about as much as this many of its triangles (measured: ANGLE/D3D11 multi-draw on an
+// integrated GPU spends ~0.14 µs per draw and ~1.8 ns per triangle).
+const DRAW_COST = 80;
 
 // True when the linear part of instance i (12 floats per instance, columns first) has a negative determinant.
 export function isMirrored(matrices, i) {
@@ -31,6 +35,9 @@ export function reversedWinding(geometry) {
  * change without rebuilding. Every visual change dispatches `{type: 'change', detail: {kind}}` on `root`.
  * Visibility has layers: the user's (setVisible, isolate, showAll) and named ones (setLayerHidden, e.g. the 4D schedule
  * or a linked file); an instance is drawn when the user shows it and no named layer hides it.
+ * Each frame every bucket lists only its shown instances inside the camera's frustum (one tight loop over typed
+ * arrays instead of three's per-instance objects); setDetail can also leave out instances smaller on screen than a
+ * given radius, which the viewer uses while the camera moves (detailThreshold picks it for a cost budget).
  */
 export class ModelScene {
   constructor(data) {
@@ -48,7 +55,7 @@ export class ModelScene {
     this._mode = 'materials';
     this._opacity = 1;
     this._textures = new Map();
-    this._elementOf = data.view(instances.element);
+    this._elementOf = data.view(instances.element).slice(); // own copy: the BIN block is released after load
     this._bucketOf = new Uint32Array(count);
     this._batchId = new Uint32Array(count);
     this._visible = new Uint8Array(count).fill(1); // the user's layer
@@ -90,6 +97,7 @@ export class ModelScene {
       box.max.toArray(this._boxes, i * 6 + 3);
     }
     for (const bucket of this._buckets) bucket.geometryIds = null;
+    this._prepareCulling();
   }
 
   elementId(index) {
@@ -178,7 +186,11 @@ export class ModelScene {
 
   // True when at least one instance of the element is drawn (all visibility layers combined).
   isVisible(index) {
-    return this.instancesOf(index).some((i) => this._shown(i));
+    this._checkElement(index);
+    for (let k = this._elementStart[index]; k < this._elementStart[index + 1]; k++) {
+      if (this._shown(this._elementInstances[k])) return true;
+    }
+    return false;
   }
 
   get instanceCount() {
@@ -190,9 +202,11 @@ export class ModelScene {
     return { mesh: this._buckets[this._bucketOf[i]].mesh, batchId: this._batchId[i], element: this._elementOf[i] };
   }
 
-  elementBox(index) {
-    const box = new THREE.Box3();
-    for (const i of this.instancesOf(index)) this._expandBox(box, i);
+  // Box of all the element's instances, in `box` when given (callers looping over many elements reuse one).
+  elementBox(index, box = new THREE.Box3()) {
+    this._checkElement(index);
+    box.makeEmpty();
+    for (let k = this._elementStart[index]; k < this._elementStart[index + 1]; k++) this._expandBox(box, this._elementInstances[k]);
     return box;
   }
 
@@ -226,6 +240,31 @@ export class ModelScene {
     this._changed('appearance');
   }
 
+  // While minPixels > 0, renders leave out instances whose bounding sphere is smaller on screen than minPixels
+  // (radius, CSS px) in a view `viewHeight` CSS px high; 0 draws everything shown again.
+  setDetail(minPixels, viewHeight = 1) {
+    this._minPixels = minPixels;
+    this._viewHeight = viewHeight;
+  }
+
+  // The radius for setDetail that keeps the cost of drawing what `camera` sees within `budget` (in triangles, a draw
+  // counting as DRAW_COST of them); 0 when everything fits.
+  detailThreshold(camera, viewHeight, budget) {
+    if (this._totalCost <= budget) return 0;
+    camera.updateMatrixWorld();
+    const planes = frustumPlanes(camera, this._planes);
+    const view = viewMetrics(camera, viewHeight, this._view);
+    const pixels = this._pixels;
+    const s = this._spheres;
+    for (let i = 0; i < pixels.length; i++) {
+      const o = i * 4;
+      const x = s[o], y = s[o + 1], z = s[o + 2], r = s[o + 3];
+      pixels[i] = !this._shown(i) || outsideFrustum(planes, x, y, z, r) ? -1
+        : screenRadius(view, r, (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5]);
+    }
+    return detailThreshold(pixels, this._cost, budget);
+  }
+
   setClipping(planes, intersection) {
     for (const { material } of this._buckets) {
       material.clippingPlanes = planes.length > 0 ? planes : null;
@@ -233,6 +272,100 @@ export class ModelScene {
       material.needsUpdate = true;
     }
     this._changed('appearance');
+  }
+
+  // Bounding spheres (model space: root is never moved) and draw costs per instance, each bucket's instances by batch
+  // id, and the draw-list fill.
+  _prepareCulling() {
+    const count = this._batchId.length;
+    const b = this._boxes;
+    this._spheres = new Float32Array(count * 4);
+    this._cost = new Float32Array(count);
+    this._pixels = new Float32Array(count);
+    this._planes = new Float64Array(24);
+    this._view = new Float64Array(8);
+    this._minPixels = 0;
+    this._viewHeight = 1;
+    const range = {};
+    for (const bucket of this._buckets) {
+      const n = bucket.mesh.maxInstanceCount;
+      Object.assign(bucket, { members: new Uint32Array(n), starts: new Uint32Array(n), counts: new Uint32Array(n) });
+      bucket.mesh.onBeforeRender = (renderer, scene, camera, geometry, material) => this._fillDraws(bucket, camera, geometry, material);
+    }
+    for (let i = 0; i < count; i++) {
+      const o = i * 6;
+      const s = this._spheres;
+      s[i * 4] = (b[o] + b[o + 3]) / 2;
+      s[i * 4 + 1] = (b[o + 1] + b[o + 4]) / 2;
+      s[i * 4 + 2] = (b[o + 2] + b[o + 5]) / 2;
+      s[i * 4 + 3] = Math.hypot(b[o + 3] - b[o], b[o + 4] - b[o + 1], b[o + 5] - b[o + 2]) / 2;
+      const bucket = this._buckets[this._bucketOf[i]];
+      const id = this._batchId[i];
+      bucket.mesh.getGeometryRangeAt(bucket.mesh.getGeometryIdAt(id), range);
+      bucket.members[id] = i;
+      bucket.starts[id] = range.start;
+      bucket.counts[id] = range.count;
+      this._cost[i] = DRAW_COST + range.count / 3;
+    }
+    this._totalCost = this._cost.reduce((sum, c) => sum + c, 0);
+  }
+
+  // BatchedMesh.onBeforeRender replacement: the multi-draw list of the bucket's shown instances in the frustum (and,
+  // with setDetail, large enough on screen); transparent buckets sorted back to front.
+  _fillDraws(bucket, camera, geometry, material) {
+    const mesh = bucket.mesh;
+    // As three does: in wireframe the draw ranges are in the line index three makes, two entries per triangle index.
+    const wire = material.wireframe ? 2 : 1;
+    const bytes = !material.wireframe ? geometry.getIndex().array.BYTES_PER_ELEMENT : geometry.attributes.position.count > 65535 ? 4 : 2;
+    const planes = frustumPlanes(camera, this._planes);
+    const minPixels = this._minPixels;
+    const sorted = material.transparent;
+    const view = minPixels > 0 || sorted ? viewMetrics(camera, this._viewHeight, this._view) : null;
+    const { members, starts, counts } = bucket;
+    const s = this._spheres;
+    const order = sorted ? (bucket.order ??= new Float64Array(members.length)) : null;
+    const draws = sorted ? (bucket.draws ??= new Uint32Array(members.length)) : mesh._indirectTexture.image.data;
+    let n = 0;
+    let near = Infinity, far = -Infinity;
+    for (let id = 0; id < members.length; id++) {
+      const i = members[id];
+      if (this._visible[i] === 0 || this._layerHides[i] !== 0) continue;
+      const o = i * 4;
+      const x = s[o], y = s[o + 1], z = s[o + 2], r = s[o + 3];
+      if (outsideFrustum(planes, x, y, z, r)) continue;
+      if (view) {
+        const depth = (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5];
+        if (minPixels > 0 && screenRadius(view, r, depth) < minPixels) continue;
+        if (sorted) {
+          order[n] = depth;
+          near = Math.min(near, depth);
+          far = Math.max(far, depth);
+        }
+      }
+      draws[n++] = id;
+    }
+    if (sorted) this._sortBackToFront(bucket, n, near, far);
+    const ids = mesh._indirectTexture.image.data;
+    for (let k = 0; k < n; k++) {
+      const id = ids[k];
+      mesh._multiDrawStarts[k] = starts[id] * bytes * wire;
+      mesh._multiDrawCounts[k] = counts[id] * wire;
+    }
+    mesh._indirectTexture.needsUpdate = true;
+    mesh._multiDrawCount = n;
+    mesh._multiDrawBytesPerElement = bytes;
+  }
+
+  // Writes the bucket's n listed draws (bucket.draws, depths in bucket.order) to its indirect list, farthest first:
+  // depth quantized into the high part of one number and the batch id in the low part, so a plain numeric sort works.
+  _sortBackToFront(bucket, n, near, far) {
+    const { order, draws, members } = bucket;
+    const span = Math.max(far - near, 1e-9);
+    const levels = Math.floor(2 ** 52 / members.length) - 1;
+    for (let k = 0; k < n; k++) order[k] = Math.round(((far - order[k]) / span) * levels) * members.length + draws[k];
+    const keys = order.subarray(0, n).sort();
+    const ids = bucket.mesh._indirectTexture.image.data;
+    for (let k = 0; k < n; k++) ids[k] = keys[k] % members.length;
   }
 
   _createBuckets(meta, geometryKey, materialOf) {
@@ -263,6 +396,8 @@ export class ModelScene {
       bucket.texture = source.texture;
       bucket.material = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
       bucket.mesh = new THREE.BatchedMesh(bucket.instances, bucket.vertices, bucket.indices, bucket.material);
+      // _fillDraws culls each instance; three's whole-mesh test would first walk every geometry's vertices for bounds.
+      bucket.mesh.frustumCulled = false;
       bucket.geometryIds = new Map();
       this._applyOpacity(bucket);
       this.root.add(bucket.mesh);
@@ -337,9 +472,7 @@ export class ModelScene {
     if (material.transparent !== transparent) material.needsUpdate = true;
     material.opacity = opacity;
     material.transparent = transparent;
-    material.depthWrite = !transparent;
-    // Sorting every frame only pays off for transparent buckets (back-to-front blending).
-    bucket.mesh.sortObjects = transparent;
+    material.depthWrite = !transparent; // _fillDraws sorts transparent buckets back to front
   }
 
   _applyColor(i) {

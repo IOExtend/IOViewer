@@ -9,27 +9,51 @@ function block(doc, id) {
   return element.textContent;
 }
 
-function decodeBase64(text) {
-  const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0;
-  const bytes = new Uint8Array((text.length / 4) * 3 - padding);
+// Decodes the BIN block's base64 text. It is read from its text nodes in pieces: as one string, a block over the
+// JavaScript string limit (about 512 M characters in Chromium, ~380 MB of binary) would come back empty.
+function decodeBase64(element) {
+  let total = 0;
+  for (const node of element.childNodes) total += node.length;
+  const bytes = new Uint8Array(Math.ceil(total / 4) * 3); // at most; padding and whitespace make it less
   let offset = 0;
-  for (let start = 0; start < text.length; start += CHUNK_CHARS) {
-    const binary = atob(text.slice(start, start + CHUNK_CHARS));
-    for (let i = 0; i < binary.length; i++) bytes[offset++] = binary.charCodeAt(i);
+  let carry = ''; // characters past the last whole group of 4
+  for (const node of element.childNodes) {
+    for (let start = 0; start < node.length; start += CHUNK_CHARS) {
+      const text = carry + node.substringData(start, CHUNK_CHARS).trim();
+      const whole = text.length - (text.length % 4);
+      offset = decodeInto(bytes, offset, text.slice(0, whole));
+      carry = text.slice(whole);
+    }
   }
-  return bytes;
+  return bytes.subarray(0, decodeInto(bytes, offset, carry)); // an unpadded tail, as atob accepts it
+}
+
+// Writes the bytes of base64 `text` into `bytes` at `offset`; returns the offset after them. Uses the native decoder
+// where the browser has one (several times faster), else atob.
+function decodeInto(bytes, offset, text) {
+  if (bytes.setFromBase64) return offset + bytes.subarray(offset).setFromBase64(text).written;
+  const binary = atob(text);
+  for (let i = 0; i < binary.length; i++) bytes[offset++] = binary.charCodeAt(i);
+  return offset;
 }
 
 export function loadModelData(doc = document) {
   const meta = JSON.parse(block(doc, 'ioviewer-meta'));
-  const bin = decodeBase64(block(doc, 'ioviewer-bin').trim());
+  const binElement = doc.getElementById('ioviewer-bin');
+  if (!binElement) throw new Error("Data block 'ioviewer-bin' is missing.");
+  let bin = decodeBase64(binElement);
   let props = null;
   return {
     meta,
     view(v) {
+      if (!bin) throw new Error('The binary data has been released.');
       const Type = VIEW_TYPES[v.t];
       if (!Type) throw new Error(`Unknown view type '${v.t}'.`);
       return new Type(bin.buffer, v.o, v.n);
+    },
+    // Frees the decoded BIN once the scene holds its own copies; view() throws afterwards.
+    releaseBinary() {
+      bin = null;
     },
     props(elementId) {
       props ??= JSON.parse(block(doc, 'ioviewer-props'));

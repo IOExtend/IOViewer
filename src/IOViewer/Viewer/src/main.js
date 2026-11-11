@@ -5,11 +5,13 @@ import { lang, t } from './i18n.js';
 import { NavigationControls } from './nav/controls.js';
 import { ViewCube } from './nav/viewCube.js';
 import { Picker } from './engine/picking.js';
+import { MotionDetail } from './engine/motionDetail.js';
 import { Selection } from './select/selection.js';
 import { selectInRect, screenBoxes } from './select/boxSelect.js';
 import { mountUI } from './ui/app.js';
 import { Sections } from './tools/sections.js';
 import { SectionGizmo } from './tools/sectionGizmo.js';
+import { boxFullyClipped } from './tools/sectionMath.js';
 import { mountSections } from './ui/sectionsPanel.js';
 import { Measure } from './tools/measure.js';
 import { GridAxes } from './tools/grids.js';
@@ -44,6 +46,7 @@ headlight.target.position.set(0, 0, -1);
 world.add(camera);
 
 const scene = new ModelScene(data);
+data.releaseBinary(); // the scene has copied what it needs
 world.add(scene.root);
 // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
 const sections = new Sections(scene, scene.visibleBox());
@@ -73,11 +76,14 @@ function requestRender() {
     sectionGizmo.update(controls.camera);
     measure.update(controls.camera, rect);
     grids.update(controls.camera, rect);
+    motionDetail.begin(controls.camera, rect.height, performance.now());
     renderer.render(world, controls.camera);
+    motionDetail.end();
     viewCube.update();
     resolveReady();
   });
 }
+const motionDetail = new MotionDetail(scene, requestRender);
 scene.root.addEventListener('change', requestRender);
 sections.addEventListener('change', requestRender);
 sectionGizmo.addEventListener('change', requestRender);
@@ -146,9 +152,11 @@ controls.addEventListener('boxselect', (e) => {
     if (!ctrl && !shift) selection.clear();
     return;
   }
-  const found = selectInRect(rect, mode, screenBoxes(scene, controls.camera, canvas.getBoundingClientRect()))
-    .filter((i) => !sections.isCut(scene.elementBox(i)));
-  selection.set(ctrl ? [...selection.values(), ...found] : found);
+  const box = new THREE.Box3();
+  const found = selectInRect(rect, mode, screenBoxes(scene, controls.camera, canvas.getBoundingClientRect()));
+  const { planes, intersection } = sections.clipping(); // once, not per element
+  const shown = found.filter((i) => !boxFullyClipped(scene.elementBox(i, box), planes, intersection));
+  selection.set(ctrl ? [...selection.values(), ...shown] : shown);
 });
 
 window.addEventListener('resize', () => {

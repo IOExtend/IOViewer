@@ -15,25 +15,30 @@ export function selectInRect(rect, mode, screenBoxes) {
 // Client-pixel boxes of the 8 projected corners of every visible element's bounding box.
 // shortcut: elements reaching behind the near plane (or past far) are skipped; clip them in 3D if walking inside a model matters.
 export function screenBoxes(scene, camera, canvasRect) {
-  const viewProjection = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-  const corner = new THREE.Vector3();
+  // The projection is written out (as Vector3.applyMatrix4 does it) so that a million elements take no allocations.
+  const m = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).elements;
+  const { left, top, width, height } = canvasRect;
+  const box = new THREE.Box3();
   const boxes = [];
   for (let index = 0; index < scene.elementCount; index++) {
     if (!scene.isVisible(index)) continue;
-    const { min, max } = scene.elementBox(index);
-    const b = { index, minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    const { min, max } = scene.elementBox(index, box);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     let inDepth = true;
     for (let k = 0; k < 8 && inDepth; k++) {
-      corner.set(k & 1 ? max.x : min.x, k & 2 ? max.y : min.y, k & 4 ? max.z : min.z).applyMatrix4(viewProjection);
-      inDepth = Math.abs(corner.z) <= 1;
-      const x = canvasRect.left + ((corner.x + 1) / 2) * canvasRect.width;
-      const y = canvasRect.top + ((1 - corner.y) / 2) * canvasRect.height;
-      b.minX = Math.min(b.minX, x);
-      b.maxX = Math.max(b.maxX, x);
-      b.minY = Math.min(b.minY, y);
-      b.maxY = Math.max(b.maxY, y);
+      const x = k & 1 ? max.x : min.x;
+      const y = k & 2 ? max.y : min.y;
+      const z = k & 4 ? max.z : min.z;
+      const w = 1 / (m[3] * x + m[7] * y + m[11] * z + m[15]);
+      inDepth = Math.abs((m[2] * x + m[6] * y + m[10] * z + m[14]) * w) <= 1;
+      const sx = left + (((m[0] * x + m[4] * y + m[8] * z + m[12]) * w + 1) / 2) * width;
+      const sy = top + ((1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) * w) / 2) * height;
+      minX = Math.min(minX, sx);
+      maxX = Math.max(maxX, sx);
+      minY = Math.min(minY, sy);
+      maxY = Math.max(maxY, sy);
     }
-    if (inDepth) boxes.push(b);
+    if (inDepth) boxes.push({ index, minX, minY, maxX, maxY });
   }
   return boxes;
 }
