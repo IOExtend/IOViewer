@@ -1,4 +1,4 @@
-// Regenerates building.json and empty.json; run from the repository root: dotnet run tests/fixtures/viewer/generate-fixtures.cs -- tests/fixtures/viewer
+// Regenerates building.json, empty.json and escaping.json; run from the repository root: dotnet run tests/fixtures/viewer/generate-fixtures.cs -- tests/fixtures/viewer
 #:project ../../../src/IOViewer/IOViewer.csproj
 #:property PublishAot=false
 #:property JsonSerializerIsReflectionEnabledByDefault=true
@@ -179,6 +179,7 @@ doc.LinkedFiles.Add(new ViewerLinkedFile("MEP", "MEP.rvt"));
 string buildingPath = Path.Combine(outDir, "building.json");
 JsonViewerExporter.Save(doc, buildingPath);
 JsonViewerExporter.Save(new ViewerDocument("Empty Model"), Path.Combine(outDir, "empty.json"));
+JsonViewerExporter.Save(Escaping(), Path.Combine(outDir, "escaping.json"));
 
 // Round-trip check: everything the viewer needs must survive JsonViewerImporter.
 var back = JsonViewerImporter.Load(buildingPath);
@@ -193,6 +194,26 @@ void AddBox(ViewerElement e, Vector3d min, Vector3d max, RgbaColor color, double
 {
     var (v, i, n) = Box(min, max);
     AddMesh(e, new ViewerMesh { Name = e.Name, Vertices = v, Indices = i, Normals = n, Color = color, Opacity = opacity });
+}
+
+// Hostile markup in an element name and in a property group, name and value: the viewer must show it as text.
+// No clashes, 4D, links or viewpoints, so the panels for them stay hidden.
+ViewerDocument Escaping()
+{
+    const string script = "</script><script>window.__xss=2</script>";
+    var hostile = new ViewerDocument("Escaping");
+    string[] names = ["<img src=x onerror=\"window.__xss=1\">", "Plain Wall", "Plain Slab"];
+    for (int k = 0; k < names.Length; k++)
+    {
+        var e = new ViewerElement { Id = 500001 + k, Name = names[k], Category = "Walls", TypeName = "Generic 200", Level = "Level 1" };
+        if (k == 0) e.AddProperty(script, script, script);
+        else e.AddProperty("Identity Data", "Mark", names[k]);
+        var (v, i, n) = Box(new(k * 3, 0, 0), new(k * 3 + 2, 0.3, 3));
+        e.MeshIndices.Add(k);
+        hostile.Elements.Add(e);
+        hostile.Meshes.Add(new ViewerMesh { Id = k, Name = names[k], ElementId = e.Id, Vertices = v, Indices = i, Normals = n, Color = concrete });
+    }
+    return hostile;
 }
 
 // Axis-aligned box with 4 vertices per face so each face has its own flat normal.

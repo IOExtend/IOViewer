@@ -1,21 +1,50 @@
 import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const viewerDir = path.resolve(import.meta.dirname, '../..');
 export const fixturesDir = path.resolve(viewerDir, '../../../tests/fixtures/viewer');
+export const LARGE_ELEMENTS = 20000;
 
-// Exports every fixture to test-results/<name>.html with the CLI, as a user would.
+// Exports a JSON document to test-results/<name>.html with the CLI, as a user would.
+function exportHtml(jsonPath, name) {
+  // The CLI targets net8.0 and net10.0, so `dotnet run` needs an explicit framework.
+  const args = ['run', '--project', '../../IOViewer.Cli', '-c', 'Release', '-f', 'net10.0', '--',
+    jsonPath, '-o', `test-results/${name}.html`];
+  try {
+    execFileSync('dotnet', args, { cwd: viewerDir, stdio: 'pipe' });
+  } catch (error) {
+    throw new Error(`Exporting ${jsonPath} failed:\n${error.stdout}\n${error.stderr}`, { cause: error });
+  }
+}
+
+// ViewerDocument JSON with `count` small boxes on one shared geometry, in 4 categories, all of type "Segment 50".
+function largeModel(count) {
+  const v = (X, Y, Z) => ({ X, Y, Z });
+  const axes = { XAxis: v(1, 0, 0), YAxis: v(0, 1, 0), ZAxis: v(0, 0, 1) };
+  const corners = [v(0, 0, 0), v(0.3, 0, 0), v(0.3, 0.3, 0), v(0, 0.3, 0), v(0, 0, 0.3), v(0.3, 0, 0.3), v(0.3, 0.3, 0.3), v(0, 0.3, 0.3)];
+  const faces = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7];
+  const elements = [];
+  const meshes = [];
+  for (let i = 0; i < count; i++) {
+    const id = 900000 + i;
+    elements.push({ Id: id, Name: `Pipe ${i}`, Category: `System ${i % 4}`, TypeName: 'Segment 50', Level: 'Level 1', MeshIndices: [i] });
+    meshes.push({
+      Id: i, Name: `Pipe ${i}`, ElementId: id, Vertices: [], Indices: [], GeometryId: 1,
+      Transform: { ...axes, Translation: v((i % 200) * 0.5, Math.floor(i / 200) * 0.5, 0) },
+      Color: { R: 120, G: 140, B: 160, A: 255 }, Opacity: 1,
+    });
+  }
+  return { Title: 'Large Model', Elements: elements, Meshes: meshes, Geometries: [{ Id: 1, Vertices: corners, Indices: faces }] };
+}
+
+// Exports every committed fixture, plus a generated large model for the tree virtualization test.
 export default function globalSetup() {
   for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith('.json'))) {
-    const name = path.basename(file, '.json');
-    // The CLI targets net8.0 and net10.0, so `dotnet run` needs an explicit framework.
-    const args = ['run', '--project', '../../IOViewer.Cli', '-c', 'Release', '-f', 'net10.0', '--',
-      path.join(fixturesDir, file), '-o', `test-results/${name}.html`];
-    try {
-      execFileSync('dotnet', args, { cwd: viewerDir, stdio: 'pipe' });
-    } catch (error) {
-      throw new Error(`Exporting ${file} failed:\n${error.stdout}\n${error.stderr}`, { cause: error });
-    }
+    exportHtml(path.join(fixturesDir, file), path.basename(file, '.json'));
   }
+  mkdirSync(path.join(viewerDir, 'test-results'), { recursive: true });
+  const large = path.join(viewerDir, 'test-results', 'large.json');
+  writeFileSync(large, JSON.stringify(largeModel(LARGE_ELEMENTS)));
+  exportHtml(large, 'large');
 }

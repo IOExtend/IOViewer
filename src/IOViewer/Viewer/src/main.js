@@ -6,7 +6,7 @@ import { NavigationControls } from './nav/controls.js';
 import { Picker } from './engine/picking.js';
 import { Selection } from './select/selection.js';
 import { selectInRect, screenBoxes } from './select/boxSelect.js';
-import { mountProperties } from './ui/properties.js';
+import { mountUI } from './ui/app.js';
 
 const data = loadModelData();
 document.documentElement.lang = lang;
@@ -18,7 +18,7 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderer.localClippingEnabled = true;
 
 const world = new THREE.Scene();
-world.background = new THREE.Color('#e6eaef');
+world.background = new THREE.Color('#1f2228');
 const sky = new THREE.HemisphereLight('#ffffff', '#8a8f99', 1.6);
 sky.position.set(0, 0, 1);
 world.add(sky);
@@ -37,7 +37,6 @@ world.add(scene.root);
 const options = data.meta.options ?? {};
 scene.setDisplayMode(options.initialWireframe ? 'wireframe' : options.initialWhiteMode ? 'white' : 'materials');
 
-document.getElementById('ioviewer-status').textContent = `${t('elements')}: ${scene.elementCount}`;
 if (data.meta.instances.count === 0) {
   const message = document.getElementById('ioviewer-message');
   message.textContent = t('noGeometry');
@@ -75,10 +74,7 @@ scene.root.addEventListener('change', (e) => {
 
 const selection = new Selection();
 selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
-const properties = document.createElement('aside');
-properties.id = 'ioviewer-properties';
-document.getElementById('ioviewer-ui').append(properties);
-mountProperties(properties, selection, data);
+const ui = mountUI({ root: document.getElementById('ioviewer-ui'), data, scene, controls, picker, selection });
 
 // Click selects, Ctrl+click toggles; a click on nothing clears unless a modifier is held.
 controls.addEventListener('click', (e) => {
@@ -99,10 +95,6 @@ controls.addEventListener('boxselect', (e) => {
   const found = selectInRect(rect, mode, screenBoxes(scene, controls.camera, canvas.getBoundingClientRect()));
   selection.set(ctrl ? [...selection.values(), ...found] : found);
 });
-window.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
-  selection.clear();
-});
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -112,4 +104,4 @@ renderer.setSize(window.innerWidth, window.innerHeight, false);
 controls.resize(); // also schedules the first frame for an empty model
 controls.fitBox(scene.visibleBox(), false);
 
-window.__ioviewer = { scene, controls, picker, selection, ready, get camera() { return controls.camera; } };
+window.__ioviewer = { scene, controls, picker, selection, ui, ready, get camera() { return controls.camera; } };

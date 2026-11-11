@@ -27,9 +27,9 @@ test('building renders the model and counts elements', async ({ page }) => {
 
   const { width, height } = page.viewportSize();
   const center = await region(page, width / 2 - 20, height / 2 - 20);
-  const background = await region(page, 0, 0);
+  const background = await region(page, 80, 0); // right of the panel rail
   expect(center.equals(background)).toBe(false);
-  await expect(page.locator('#ioviewer-status')).toHaveText(`Элементов: ${building.Elements.length}`);
+  await expect(page.locator('#ioviewer-status')).toHaveText(`Выбрано: 0 · Элементов: ${building.Elements.length}`);
   expect(errors).toEqual([]);
   expect(requests).toEqual([]);
 });
@@ -38,7 +38,7 @@ test('empty document shows "no geometry"', async ({ page }) => {
   const { errors, requests } = await open(page, 'empty');
 
   await expect(page.getByText('Нет геометрии')).toBeVisible();
-  await expect(page.locator('#ioviewer-status')).toHaveText('Элементов: 0');
+  await expect(page.locator('#ioviewer-status')).toHaveText('Выбрано: 0 · Элементов: 0');
   expect(errors).toEqual([]);
   expect(requests).toEqual([]);
 });
@@ -108,7 +108,7 @@ test('a mirrored instance is shaded like its unmirrored twin', async ({ page }) 
   }, twins);
   const plain = await brightness(page, ...points[0]);
   const mirrored = await brightness(page, ...points[1]);
-  const background = await brightness(page, 20, 20);
+  const background = await brightness(page, 100, 20);
 
   expect(Math.abs(plain - background)).toBeGreaterThan(10); // the sample hits the column, not the background
   expect(Math.abs(mirrored - plain)).toBeLessThanOrEqual(3);

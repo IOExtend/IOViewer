@@ -1,11 +1,5 @@
 import { t } from '../i18n.js';
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
+import { el } from './dom.js';
 
 function group(title, rows) {
   const table = el('table');

@@ -21,6 +21,7 @@ const selected = (page) => page.evaluate(() => [...window.__ioviewer.selection.v
 const screenAt = (page, index, f = [0.5, 0.5, 0.5]) =>
   page.evaluate(([i, f]) => {
     const { scene, camera } = window.__ioviewer;
+    camera.updateMatrixWorld(); // a camera just swapped in by setProjection has not been rendered yet
     const { min, max } = scene.elementBox(i);
     const p = min.clone().set(...[0, 1, 2].map((k) => min.getComponent(k) + (max.getComponent(k) - min.getComponent(k)) * f[k]));
     p.project(camera);
@@ -56,6 +57,7 @@ async function shiftDrag(page, from, to, extra) {
 }
 
 const panel = (page) => page.locator('#ioviewer-properties');
+const blank = [100, 15]; // background: right of the panel rail, far from the fitted model
 
 test('click selects a column and shows its properties; Ctrl+click adds a second; click on nothing clears', async ({ page }) => {
   const errors = await open(page);
@@ -83,10 +85,10 @@ test('click selects a column and shows its properties; Ctrl+click adds a second;
 
   // Ctrl+click on nothing keeps the selection; a plain click on nothing clears it.
   await page.keyboard.down('Control');
-  await page.mouse.click(15, 15);
+  await page.mouse.click(...blank);
   await page.keyboard.up('Control');
   expect(await selected(page)).toEqual([d2, d3]);
-  await page.mouse.click(15, 15);
+  await page.mouse.click(...blank);
   expect(await selected(page)).toEqual([]);
   await expect(panel(page)).toBeHidden();
   expect(errors).toEqual([]);
@@ -220,11 +222,11 @@ test('a mesh without an element is drawn but never picked, and clicking it clear
     const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
     return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];
   });
-  const background = await page.evaluate(() => window.__ioviewer.picker.pick(15, 15));
+  const background = await page.evaluate(() => window.__ioviewer.picker.pick(100, 15));
   expect(background).toBeNull();
   // The marker is on screen there (the pixel is not the background colour), yet nothing is picked.
   const pixel = await page.screenshot({ clip: { x: Math.round(point[0]), y: Math.round(point[1]), width: 1, height: 1 } });
-  const corner = await page.screenshot({ clip: { x: 15, y: 15, width: 1, height: 1 } });
+  const corner = await page.screenshot({ clip: { x: 100, y: 15, width: 1, height: 1 } });
   expect(pixel.equals(corner)).toBe(false);
   expect(await page.evaluate(([x, y]) => window.__ioviewer.picker.pick(x, y), point)).toBeNull();
 
