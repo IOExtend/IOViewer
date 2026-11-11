@@ -211,18 +211,22 @@ public static class GlbViewerImporter
             if (sceneIndex >= 0 && sceneIndex < scenes.Length &&
                 scenes[sceneIndex].TryGetProperty("nodes", out var rootNodes))
             {
-                var path = new HashSet<int>();
+                // glTF node hierarchy is a strict tree: reaching a node twice (shared child, repeated root, cycle) is invalid.
+                var visited = new HashSet<int>();
+                var stack = new Stack<(int Node, Transform3d ParentWorld)>();
+                foreach (var rootNode in rootNodes.EnumerateArray().Reverse()) stack.Push((rootNode.GetInt32(), Transform3d.Identity));
 
-                void Visit(int nodeIndex, Transform3d parentWorld)
+                while (stack.Count > 0)
                 {
+                    var (nodeIndex, parentWorld) = stack.Pop();
                     if (nodeIndex < 0 || nodeIndex >= nodes.Length)
                     {
                         throw new InvalidDataException($"glTF references missing node {nodeIndex}.");
                     }
 
-                    if (!path.Add(nodeIndex))
+                    if (!visited.Add(nodeIndex))
                     {
-                        throw new InvalidDataException($"glTF node hierarchy contains a cycle at node {nodeIndex}.");
+                        throw new InvalidDataException($"glTF node {nodeIndex} is referenced more than once; the node hierarchy must be a tree.");
                     }
 
                     var node = nodes[nodeIndex];
@@ -234,13 +238,9 @@ public static class GlbViewerImporter
 
                     if (node.TryGetProperty("children", out var children))
                     {
-                        foreach (var child in children.EnumerateArray()) Visit(child.GetInt32(), world);
+                        foreach (var child in children.EnumerateArray().Reverse()) stack.Push((child.GetInt32(), world));
                     }
-
-                    path.Remove(nodeIndex);
                 }
-
-                foreach (var rootNode in rootNodes.EnumerateArray()) Visit(rootNode.GetInt32(), Transform3d.Identity);
             }
         }
         else

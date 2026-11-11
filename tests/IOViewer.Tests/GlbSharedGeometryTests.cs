@@ -116,4 +116,30 @@ public class GlbSharedGeometryTests
     {
         Assert.Throws<InvalidDataException>(() => Import("""{ "children": [0] }""", "0"));
     }
+
+    [Fact]
+    public void NodeWithTwoParents_Throws()
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            Import("""{ "children": [2] }, { "children": [2] }, { "mesh": 0 }""", "0, 1"));
+    }
+
+    [Fact]
+    public void SameRootListedTwice_Throws()
+    {
+        Assert.Throws<InvalidDataException>(() => Import("""{ "mesh": 0 }""", "0, 0"));
+    }
+
+    [Fact]
+    public void DeepHierarchy_DoesNotOverflow()
+    {
+        const int depth = 100_000;
+        var nodes = new StringBuilder();
+        for (int i = 0; i < depth - 1; i++) nodes.Append("{\"children\":[").Append(i + 1).Append("]},");
+        nodes.Append("{\"mesh\":0}");
+
+        var doc = Import(nodes.ToString(), "0");
+
+        Assert.Single(doc.Meshes);
+    }
 }
