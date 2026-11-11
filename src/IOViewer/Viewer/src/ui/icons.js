@@ -28,9 +28,6 @@ export const icons = {
   grids: svg('<path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>'),
   opacity: svg('<path d="M12 3l6 8a6 6 0 1 1-12 0z"/>'),
   fullscreen: svg('<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>'),
-  settings: svg(
-    '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
-  ),
   // Controls
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   chevron: svg('<path d="M9 6l6 6-6 6"/>'),

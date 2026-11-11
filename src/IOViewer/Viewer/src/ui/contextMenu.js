@@ -9,10 +9,17 @@ export const menus = {
 const shortcuts = { hide: 'H', isolate: 'I', showAll: 'Shift+H', zoomTo: 'F' };
 const MARGIN = 4; // px kept free between the menu and the window edge
 
+function swallow(e) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
 /**
  * Right-click menu. open(kind, x, y, target) shows menus[kind] at client (x, y), kept inside the window;
  * an item calls its handler with `target` and closes the menu. setItem(id, { enabled, handler }) configures
- * an item; items without a handler are shown disabled. Closes on outside press, wheel, scroll and resize.
+ * an item; items without a handler are shown disabled. Closes on wheel, resize, page scroll (not on scrolling inside
+ * the UI panels, which cannot move the menu) and on a press outside it; that press only dismisses the menu,
+ * so it never reaches the model or the panels (no pick, no selection change).
  */
 export function createContextMenu(root) {
   const menu = el('div', 'ioviewer-context-menu');
@@ -27,12 +34,29 @@ export function createContextMenu(root) {
     menu.replaceChildren();
     window.removeEventListener('pointerdown', outside, true);
     window.removeEventListener('wheel', close, true);
-    window.removeEventListener('scroll', close, true);
+    window.removeEventListener('scroll', pageScroll, true);
     window.removeEventListener('resize', close);
   }
 
+  function pageScroll(e) {
+    if (!root.contains(e.target)) close();
+  }
+
+  // Swallows the dismissing press: its pointerdown, pointerup and the click that follows.
   function outside(e) {
-    if (!menu.contains(e.target)) close();
+    if (menu.contains(e.target)) return;
+    close();
+    swallow(e);
+    const release = () => {
+      window.removeEventListener('pointerup', swallowUp, true);
+      setTimeout(() => window.removeEventListener('click', swallow, true)); // the click, if any, comes in this task
+    };
+    const swallowUp = (up) => {
+      swallow(up);
+      release();
+    };
+    window.addEventListener('pointerup', swallowUp, true);
+    window.addEventListener('click', swallow, true);
   }
 
   function open(kind, x, y, target) {
@@ -63,7 +87,7 @@ export function createContextMenu(root) {
     menu.style.top = `${Math.max(MARGIN, Math.min(y, innerHeight - height - MARGIN))}px`;
     window.addEventListener('pointerdown', outside, true);
     window.addEventListener('wheel', close, true);
-    window.addEventListener('scroll', close, true);
+    window.addEventListener('scroll', pageScroll, true);
     window.addEventListener('resize', close);
   }
 

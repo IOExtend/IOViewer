@@ -8,7 +8,7 @@ export const toolbarGroups = [
   { id: 'sections', items: ['plane', 'box', 'resetSections'] },
   { id: 'measure', items: ['distance'] },
   { id: 'display', items: ['displayMode', 'grids', 'opacity'] },
-  { id: 'view', items: ['fullscreen', 'settings'] },
+  { id: 'view', items: ['fullscreen'] },
 ];
 
 /**

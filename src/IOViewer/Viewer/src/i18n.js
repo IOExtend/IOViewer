@@ -34,7 +34,6 @@ const dictionaries = {
     'tool.grids': 'Оси',
     'tool.opacity': 'Прозрачность',
     'tool.fullscreen': 'Полный экран',
-    'tool.settings': 'Настройки',
     'menu.properties': 'Свойства',
     'menu.hide': 'Скрыть',
     'menu.isolate': 'Изолировать',
@@ -48,6 +47,8 @@ const dictionaries = {
     noCategory: 'Без категории',
     noMatches: 'Ничего не найдено',
     idCopied: 'Id скопирован',
+    copyFailed: 'Не удалось скопировать Id',
+    fullscreenUnavailable: 'Полноэкранный режим недоступен',
     truncated: 'Показано {meshes} из {total} мешей: модель обрезана настройкой MaxMeshVertices',
   },
   en: {
@@ -85,7 +86,6 @@ const dictionaries = {
     'tool.grids': 'Grids',
     'tool.opacity': 'Transparency',
     'tool.fullscreen': 'Full screen',
-    'tool.settings': 'Settings',
     'menu.properties': 'Properties',
     'menu.hide': 'Hide',
     'menu.isolate': 'Isolate',
@@ -99,6 +99,8 @@ const dictionaries = {
     noCategory: 'No category',
     noMatches: 'No matches',
     idCopied: 'Id copied',
+    copyFailed: 'Could not copy Id',
+    fullscreenUnavailable: 'Fullscreen is not available',
     truncated: 'Showing {meshes} of {total} meshes: the model was truncated by the MaxMeshVertices setting',
   },
 };

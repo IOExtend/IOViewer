@@ -10,12 +10,7 @@ import { mountProperties } from './properties.js';
 
 // Copies text; the async clipboard API is missing or refused on some file:// pages, so it falls back to execCommand.
 async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // fall through to the legacy path below
-  }
+  if (await navigator.clipboard?.writeText(text).then(() => true, () => false)) return true;
   const area = document.createElement('textarea');
   area.value = text;
   area.setAttribute('readonly', '');
@@ -104,7 +99,10 @@ export function mountUI({ root, data, scene, controls, picker, selection }) {
   if (document.fullscreenEnabled) {
     toolbar.setHandler('fullscreen', () => {
       const request = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
-      request.catch(() => {}); // a refused request changes nothing; the button follows fullscreenchange
+      request.catch(() => {
+        toolbar.setActive('fullscreen', !!document.fullscreenElement);
+        showToast(root, t('fullscreenUnavailable'));
+      });
     });
     document.addEventListener('fullscreenchange', () => toolbar.setActive('fullscreen', !!document.fullscreenElement));
   }
@@ -113,9 +111,11 @@ export function mountUI({ root, data, scene, controls, picker, selection }) {
   contextMenu.setItem('properties', { handler: (i) => selection.set([i]) });
   for (const id of ['hide', 'isolate', 'showAll', 'zoomTo', 'fitAll']) contextMenu.setItem(id, { handler: actions[id] });
   contextMenu.setItem('copyId', {
-    handler: async (i) => {
-      if (await copyText(String(meta.elements[i].id))) showToast(root, t('idCopied'));
-    },
+    handler: (i) =>
+      copyText(String(meta.elements[i].id)).then(
+        (copied) => showToast(root, t(copied ? 'idCopied' : 'copyFailed')),
+        () => showToast(root, t('copyFailed')),
+      ),
   });
   // Right click on an element that is not selected selects it first, as in Navisworks.
   controls.addEventListener('contextmenu', (e) => {
@@ -128,10 +128,8 @@ export function mountUI({ root, data, scene, controls, picker, selection }) {
 
   installHotkeys(window, {
     ...actions,
-    escape: () => {
-      contextMenu.close();
-      selection.clear();
-    },
+    // Esc closes an open menu and keeps the selection; otherwise it clears the selection.
+    escape: () => (contextMenu.isOpen ? contextMenu.close() : selection.clear()),
   });
   mountStatusBar(document.getElementById('ioviewer-status'), selection, scene.elementCount);
   mountTruncationBanner(root, meta.truncated);

@@ -69,22 +69,56 @@ test('right click on a column selects it and opens the element menu; Hide remove
 test('right click on nothing opens the short menu; Esc, an outside click and the wheel close it', async ({ page }) => {
   await open(page);
   const d2 = await indexOf(page, 'Column D2 Level 1');
+  const d3 = await indexOf(page, 'Column D3 Level 1');
   await page.mouse.click(...(await screenAt(page, d2)));
 
   await page.mouse.click(...blank, { button: 'right' });
   await expect(menu(page).locator('.ioviewer-menu-item span')).toHaveText(['Показать всё', 'Вписать всё', 'Сбросить сечения']);
   expect(await selected(page)).toEqual([d2]); // the short menu keeps the selection
+  // Esc with the menu open closes only the menu; the next Esc clears the selection.
   await page.keyboard.press('Escape');
   await expect(menu(page)).toBeHidden();
+  expect(await selected(page)).toEqual([d2]);
+  await page.keyboard.press('Escape');
   expect(await selected(page)).toEqual([]);
 
+  // A click outside the menu only dismisses it: clicking another column neither selects it nor clears.
+  await page.mouse.click(...(await screenAt(page, d2)));
   await page.mouse.click(...blank, { button: 'right' });
-  await page.mouse.click(600, 120);
+  await page.mouse.click(...(await screenAt(page, d3)));
   await expect(menu(page)).toBeHidden();
+  expect(await selected(page)).toEqual([d2]);
+  await page.mouse.click(...(await screenAt(page, d3))); // the next click works as usual
+  expect(await selected(page)).toEqual([d3]);
+  // The same for a tree row under the press.
+  await rail(page, 'model').click();
+  await sidePanel(page, 'model').locator('.ioviewer-tree').evaluate((t) => (t.scrollTop = 0)); // it scrolled to D3
+  const ducts = await rows(page).filter({ hasText: 'Ducts' }).boundingBox();
+  await page.mouse.click(1200, 40, { button: 'right' }); // background clear of the open panel
+  await expect(menu(page)).toBeVisible();
+  await page.mouse.click(ducts.x + 20, ducts.y + ducts.height / 2); // press on the Ducts category header
+  await expect(menu(page)).toBeHidden();
+  await expect(rows(page).filter({ hasText: 'Supply Duct SA-1' })).toHaveCount(0); // the category did not expand
+  expect(await selected(page)).toEqual([d3]);
 
-  await page.mouse.click(...blank, { button: 'right' });
+  await page.mouse.click(1200, 40, { button: 'right' });
   await page.mouse.wheel(0, 100);
   await expect(menu(page)).toBeHidden();
+});
+
+test('the menu stays open when the tree scrolls to reveal the right-clicked element', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await open(page);
+  await rail(page, 'model').click();
+  const tree = sidePanel(page, 'model').locator('.ioviewer-tree');
+  expect(await tree.evaluate((t) => t.scrollTop)).toBe(0);
+  const twin = await indexOf(page, 'Column Twin');
+  await page.mouse.click(...(await screenAt(page, twin)), { button: 'right' });
+  expect(await selected(page)).toEqual([twin]);
+  await expect(rows(page).filter({ hasText: /^Column Twin(?! Mirrored)/ })).toHaveClass(/selected/);
+  expect(await tree.evaluate((t) => t.scrollTop)).toBeGreaterThan(0); // the row was below the fold
+  await page.waitForTimeout(300);
+  await expect(menu(page)).toBeVisible();
 });
 
 test('the menu stays inside the window near its corner', async ({ page }) => {
@@ -257,6 +291,18 @@ test('toolbar: grouped tools, orbit active, pan and projection switch, later too
   await expect(tool('plane')).toHaveAttribute('title', 'Плоскость сечения');
   await tool('plane').click({ force: true }); // no handler yet: nothing happens, nothing throws
   await expect(tool('fit')).toHaveAttribute('aria-disabled', 'false');
+  await expect(page.locator('.ioviewer-toolbar-group').last().locator('.ioviewer-tool')).toHaveCount(1); // view: fullscreen only
+  await expect(tool('settings')).toHaveCount(0);
+});
+
+test('a refused fullscreen request shows a message and leaves the button off', async ({ page }) => {
+  await page.addInitScript(() => (Element.prototype.requestFullscreen = () => Promise.reject(new TypeError('denied'))));
+  const errors = await open(page);
+  const fullscreen = page.locator('.ioviewer-tool[data-tool="fullscreen"]');
+  await fullscreen.click();
+  await expect(page.locator('.ioviewer-toast')).toHaveText('Полноэкранный режим недоступен');
+  await expect(fullscreen).not.toHaveClass(/active/);
+  expect(errors).toEqual([]);
 });
 
 test('status bar counts the selection; the truncation banner shows and closes', async ({ page }) => {
@@ -303,6 +349,22 @@ test('Copy Id falls back to execCommand when the clipboard API is refused', asyn
   await menuItem(page, 'Копировать Id').click();
   await expect(page.locator('.ioviewer-toast')).toHaveText('Id скопирован');
   expect(await page.evaluate(() => window.__copied)).toEqual([String(await idOf(page, d2))]);
+  expect(await page.locator('textarea').count()).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('Copy Id reports a failure when no way to copy works', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new DOMException('denied')) } });
+    document.execCommand = () => {
+      throw new Error('blocked');
+    };
+  });
+  const errors = await open(page);
+  const d2 = await indexOf(page, 'Column D2 Level 1');
+  await page.mouse.click(...(await screenAt(page, d2)), { button: 'right' });
+  await menuItem(page, 'Копировать Id').click();
+  await expect(page.locator('.ioviewer-toast')).toHaveText('Не удалось скопировать Id');
   expect(await page.locator('textarea').count()).toBe(0);
   expect(errors).toEqual([]);
 });

@@ -68,6 +68,7 @@ test('short right click emits contextmenu, right drag pans without it', async ({
   const errors = await open(page);
   await page.mouse.click(600, 400, { button: 'right' });
   expect(await events(page)).toEqual([{ type: 'contextmenu', x: 600, y: 400 }]);
+  await page.keyboard.press('Escape'); // close the menu it opened: a press outside an open menu only dismisses it
 
   const before = await page.evaluate(() => window.__ioviewer.controls.target.toArray());
   await drag(page, 'right', [500, 400], [600, 450]);
