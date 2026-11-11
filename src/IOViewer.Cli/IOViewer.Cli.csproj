@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>IOViewer.Cli</PackageId>
-    <Description>Command line tool for generating standalone, zero-dependency interactive 3D WebGL/HTML BIM &amp; CAD model viewers.</Description>
+    <Description>Command line tool for generating standalone interactive 3D WebGL/HTML BIM &amp; CAD model viewers with no external dependencies that work offline.</Description>
     <OutputType>Exe</OutputType>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>ioviewer</ToolCommandName>

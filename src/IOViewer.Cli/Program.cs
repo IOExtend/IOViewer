@@ -13,8 +13,9 @@ internal static class Program
         Usage: ioviewer <input.glb|input.obj|input.json> [output.html] [options]
                ioviewer --help | --version
 
-        Generates standalone, zero-dependency interactive 3D WebGL / HTML BIM & CAD
-        model viewers from 3D models (glTF/GLB, Wavefront OBJ, JSON snapshots).
+        Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
+        from 3D models (glTF/GLB, Wavefront OBJ, JSON snapshots). The HTML file has
+        no external dependencies and works offline.
 
         Arguments:
           <input>            Path to input 3D model (.glb, .obj, or .json).

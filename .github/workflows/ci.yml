@@ -42,3 +42,29 @@ jobs:
           dotnet-version: |
             8.0.x
       - run: dotnet build src/IOViewer.Cli/IOViewer.Cli.csproj -c Release
+
+  viewer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/IOViewer/Viewer
+    steps:
+      - uses: actions/checkout@v7
+      # The e2e global setup exports the fixtures with the CLI (`dotnet run`).
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          dotnet-version: |
+            8.0.x
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/IOViewer/Viewer/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      # dist/viewer.js is committed and embedded in the library: it must match the sources.
+      - run: git diff --exit-code dist/
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e

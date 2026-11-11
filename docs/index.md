@@ -4,27 +4,27 @@ title: IOViewer
 
 # IOViewer
 
-**IOViewer** is a fast, 100% managed .NET library and CLI tool for generating standalone, zero-dependency interactive 3D WebGL / HTML BIM & CAD model viewers directly from code or file formats (glTF/GLB, Wavefront OBJ, and JSON).
+**IOViewer** is a fast, 100% managed .NET library and CLI tool for generating standalone interactive 3D WebGL / HTML BIM & CAD model viewers directly from code or file formats (glTF/GLB, Wavefront OBJ, and JSON).
 
-The generated HTML file is completely self-contained, offline-ready, and works in any modern desktop or mobile browser without requiring external servers, WebGL plug-ins, or cloud connectivity.
+The generated HTML is a single file with no external dependencies that works offline: it opens from disk in a current browser with WebGL 2, without servers, plug-ins or network requests. The viewer is built on three.js, embedded in the file.
 
 ## Features
 
-- **Packed Binary Base64 Geometry**: Little-endian `Float32Array` positions and `Uint32Array`/`Uint16Array` indices encoded in base64, delivering ~3x smaller HTML payload and instant GPU buffer uploads.
-- **Relative-To-Center (RTC) Coordinates**: Model coordinates centered around $(0, 0, 0)$ with world offset, eliminating 32-bit WebGL floating point precision jitter on large georeferenced coordinates.
-- **3D ViewCube**: Interactive orientation cube with directional navigation arrows for instant orthographic alignment.
-- **Sectioning & Clipping**:
-  - Arbitrary section planes with interactive in-scene 3D normal gizmo manipulator.
-  - 6-sided Section Box volume with bounding wireframe, scaling slider, invert mode, and fit-to-selection.
-- **Display Modes**: Material colors with transparency, Diffuse Textures with real-world UV box projection, White/Clay architectural model, Wireframe, and global scene opacity slider.
-- **BIM Data Hierarchy & Navigation**: Category tree with element counts, Linked files panel, instant search with autocomplete and camera focus, properties inspector panel, and selection actions (Isolate, Hide, Show All).
-- **Coordination & Spatial Tools**: 3D spatial grids projection, interactive 3D point-to-point measurement, 4D TimeLiner schedule simulation player with status coloring, and clash detection inspection.
-- **Camera Animations**: Cubic Ease-In-Out transitions, Turntable 360° presentation orbit, and Saved Viewpoints Walkthrough Tour player.
+- **Compact geometry**: shared geometry stored once and placed by transforms; 16-bit quantized positions (error at most 0.49 mm), octahedral normals and 16- or 32-bit indices in one base64 block.
+- **Relative-To-Center (RTC) coordinates**: no precision jitter on georeferenced models.
+- **Large models**: geometry merged into spatial chunks per material with few draw calls; hiding, selection and colouring are per-object data, not geometry rebuilds.
+- **Navigation**: orbit around the point under the cursor, pan with the middle or right button, zoom to the cursor, perspective or orthographic camera, and a view cube that follows the camera.
+- **Selection**: click, Ctrl+click, window and crossing box selection, context menu, hotkeys (H, I, Shift+H, F, Esc), model tree by category with search and a properties panel.
+- **Sections**: up to six section planes moved and rotated with an in-scene gizmo, or a section box that keeps or cuts its inside, with face handles and a box around the selection.
+- **Tools**: point-to-point distance, display modes (materials, textures, white, wireframe), grid lines and global opacity.
+- **Coordination data**: saved viewpoints and a viewpoint tour, clash results, a 4D schedule player and linked-file visibility.
+- **Russian and English interface**, chosen from the browser language.
 
 ## Where to go next
 
 - [Getting started](getting-started.md): install the package or CLI tool and generate your first 3D viewer.
 - [Public API](public-api.md): supported surface and key entry points of the library.
+- [Third-party notices](https://github.com/IOExtend/IOViewer/blob/main/THIRD-PARTY-NOTICES.md): the three.js license.
 - [Source on GitHub](https://github.com/IOExtend/IOViewer) and [DeepWiki](https://deepwiki.com/IOExtend/IOViewer) for an automatically generated overview of the repository.
 
 IOViewer is not affiliated with, endorsed by or sponsored by Autodesk. Autodesk, Revit, Navisworks, ViewCube and TimeLiner are trademarks of Autodesk, Inc.

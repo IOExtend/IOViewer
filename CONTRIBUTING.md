@@ -37,12 +37,40 @@ The library is in `src/IOViewer`, the CLI in `src/IOViewer.Cli`, and tests in
 `tests/IOViewer.Tests`. Tests use small synthetic models built in code.
 The repository ships no customer models.
 
+### Viewer
+
+The HTML viewer is a JavaScript project in `src/IOViewer/Viewer` (three.js,
+bundled with esbuild). Its built script `dist/viewer.js` is committed and
+embedded in the library, so .NET work does not need Node.js. To change the
+viewer, install Node.js 24 and run from `src/IOViewer/Viewer`:
+
+```sh
+npm ci            # exact versions from package-lock.json
+npm run build     # rebuilds dist/viewer.js
+npm test          # unit tests (node --test)
+npm run e2e       # builds, exports the fixtures with the CLI and runs Playwright (Chromium)
+```
+
+Commit `dist/viewer.js` together with the source change: CI rebuilds it and
+fails when it differs from the committed file. The end-to-end tests need the
+.NET SDK and a Chromium for Playwright (`npx playwright install chromium`).
+Fixtures are in `tests/fixtures/viewer`.
+
+`npm run perf` runs the manual performance harness in a visible Chromium
+window (for example `PERF_LADDER=25000,200000` measures synthetic models made
+by `tools/SyntheticModel`); its settings are described at the top of
+`test/perf/orbit.perf.js`. It is not part of CI; include its numbers in the
+pull request when a change can affect rendering speed. npm dependencies are
+pinned to exact versions.
+
 ## Clean-room policy
 
 - Write all code independently. Do not use decompiled or leaked source code,
   proprietary headers, vendor SDKs or code copied from other viewers.
-- Do not add third-party JavaScript to the generated HTML. The viewer runs on
-  plain WebGL and must stay self-contained and offline.
+- The only third-party JavaScript in the generated HTML is three.js (MIT),
+  listed in `THIRD-PARTY-NOTICES.md`. Discuss any other runtime dependency
+  first and add its license there. The page must stay self-contained and
+  work offline: no CDN, web fonts or network requests.
 - Do not add customer models, confidential data, vendor files or binaries to
   the repository. Keep private test files outside version control.
 - Do not put personal data in code, documentation, test data or commit
