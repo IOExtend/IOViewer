@@ -5,7 +5,8 @@
   "scripts": {
     "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2020 --outfile=dist/viewer.js",
     "test": "node --test test/unit/*.test.js",
-    "e2e": "npm run build && playwright test"
+    "e2e": "npm run build && playwright test",
+    "perf": "npm run build && playwright test --config playwright.perf.config.js"
   },
   "dependencies": {
     "three": "0.186.1"
