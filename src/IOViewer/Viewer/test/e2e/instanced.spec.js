@@ -66,6 +66,8 @@ const distance = (a, b) => a.reduce((sum, c, i) => sum + Math.abs(c - b[i]), 0);
 const cleared = (now, before) => distance(now, BACKGROUND) < 0.25 * distance(before, BACKGROUND);
 
 test('every shape is an instanced cell, and the building looks as on the merged path in every display mode', async ({ page, browser }) => {
+  // Two pages x three display modes of screenshots: ~30 s with software rendering on CI.
+  test.slow();
   const errors = await open(page);
   const memory = await page.evaluate(() => window.__ioviewer.scene.memory());
   expect(memory).toMatchObject({ chunks: 0, mergedInstances: 0, mergedBytes: 0 });
