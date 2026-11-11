@@ -8,6 +8,7 @@
 // Pipes and joints share 20 geometries (about 100 triangles each) placed by rotated transforms; one element per mesh,
 // five systems (one of them transparent wells), a few properties per element and a 4D schedule over the network.
 // --unique gives every mesh its own copy of its geometry, already placed, as exporters without instancing write it.
+// --textured gives every geometry cylindrical UVs (metres) and the first system a 64 x 64 checker texture.
 
 using System.Diagnostics;
 using System.Globalization;
@@ -17,6 +18,7 @@ using IOViewer.Model;
 int elements = 0;
 string? output = null;
 bool unique = false;
+bool textured = false;
 for (int a = 0; a < args.Length; a++)
 {
     switch (args[a])
@@ -30,6 +32,9 @@ for (int a = 0; a < args.Length; a++)
         case "--unique":
             unique = true;
             break;
+        case "--textured":
+            textured = true;
+            break;
         default:
             Console.Error.WriteLine($"Unknown or incomplete argument '{args[a]}'.");
             return 2;
@@ -37,18 +42,18 @@ for (int a = 0; a < args.Length; a++)
 }
 if (elements <= 0)
 {
-    Console.Error.WriteLine("Usage: SyntheticModel --elements N [--out file.html] [--unique]");
+    Console.Error.WriteLine("Usage: SyntheticModel --elements N [--out file.html] [--unique] [--textured]");
     return 2;
 }
 if (output is null)
 {
     string folder = Path.Combine(Path.GetTempPath(), "ioviewer-perf");
     Directory.CreateDirectory(folder);
-    output = Path.Combine(folder, string.Create(CultureInfo.InvariantCulture, $"synthetic-{elements}{(unique ? "-unique" : "")}.html"));
+    output = Path.Combine(folder, string.Create(CultureInfo.InvariantCulture, $"synthetic-{elements}{(unique ? "-unique" : "")}{(textured ? "-textured" : "")}.html"));
 }
 
 var watch = Stopwatch.StartNew();
-var doc = PipeNetwork.Build(elements);
+var doc = PipeNetwork.Build(elements, textured);
 if (unique) PipeNetwork.Unshare(doc);
 Console.WriteLine($"Built {doc.Elements.Count} elements, {doc.Meshes.Count} meshes, {doc.Geometries.Count} geometries, " +
     $"{PipeNetwork.Triangles(doc):N0} triangles in {watch.Elapsed.TotalSeconds:F1} s");
@@ -78,7 +83,7 @@ static class PipeNetwork
     }
 
     // Random walks of pipes with a joint after each one, mostly horizontal, sometimes a riser; seeded, so every run is equal.
-    public static ViewerDocument Build(int count)
+    public static ViewerDocument Build(int count, bool textured)
     {
         var random = new Random(20261111);
         var doc = new ViewerDocument($"Synthetic pipe network ({count.ToString("N0", CultureInfo.InvariantCulture)} elements)");
@@ -88,6 +93,8 @@ static class PipeNetwork
         }
         int jointBase = doc.Geometries.Count;
         for (int d = 0; d < Diameters.Length; d++) doc.Geometries.Add(Joint(jointBase + d, Diameters[d] * 0.7));
+        if (textured) doc.Textures.Add(Checker());
+        else foreach (var g in doc.Geometries) g.UVs = null; // the untextured page stays as it was
 
         double side = Math.Sqrt(count / 2.0) * 6; // metres; keeps the density about the same at any count
         Vector3d[] directions = [Vector3d.UnitX, -Vector3d.UnitX, Vector3d.UnitY, -Vector3d.UnitY];
@@ -144,6 +151,7 @@ static class PipeNetwork
             doc.Meshes.Add(new ViewerMesh
             {
                 Id = i, ElementId = id, GeometryId = geometry, Transform = transform, Color = color, Opacity = opacity,
+                TextureIndex = textured && system == 0 ? 0 : null,
             });
             var element = new ViewerElement
             {
@@ -172,6 +180,7 @@ static class PipeNetwork
                 Id = mesh.Id,
                 Vertices = source.Vertices.Select(t.Apply).ToList(),
                 Normals = source.Normals!.Select(n => (t.Apply(n) - t.Translation).Normalized()).ToList(),
+                UVs = source.UVs,
                 // A mirrored placement turns the triangles inside out unless their winding is reversed too.
                 Indices = Vector3d.Dot(Vector3d.Cross(t.XAxis, t.YAxis), t.ZAxis) < 0
                     ? source.Indices.Chunk(3).SelectMany(f => new[] { f[0], f[2], f[1] }).ToList()
@@ -194,6 +203,7 @@ static class PipeNetwork
     {
         var vertices = new List<Vector3d>();
         var normals = new List<Vector3d>();
+        var uvs = new List<Vector2d>();
         var indices = new List<int>();
         for (int s = 0; s < Segments; s++)
         {
@@ -203,6 +213,8 @@ static class PipeNetwork
             vertices.Add(n * radius + new Vector3d(length, 0, 0));
             normals.Add(n);
             normals.Add(n);
+            uvs.Add(new Vector2d(angle * radius, 0));
+            uvs.Add(new Vector2d(angle * radius, length));
         }
         for (int s = 0; s < Segments; s++)
         {
@@ -218,10 +230,11 @@ static class PipeNetwork
                 double angle = s * Math.Tau / Segments;
                 vertices.Add(new Vector3d(x, Math.Cos(angle) * radius, Math.Sin(angle) * radius));
                 normals.Add(n);
+                uvs.Add(new Vector2d(angle * radius, x));
             }
             for (int s = 1; s < Segments - 1; s++) indices.AddRange([first, first + s, first + s + 1]);
         }
-        return new ViewerGeometry { Id = id, Vertices = vertices, Normals = normals, Indices = indices };
+        return new ViewerGeometry { Id = id, Vertices = vertices, Normals = normals, Indices = indices, UVs = uvs };
     }
 
     // UV sphere, 10 x 6 bands: 100 triangles.
@@ -248,6 +261,37 @@ static class PipeNetwork
                 if (b < bands - 1) indices.AddRange([p + 1, q, q + 1]);
             }
         }
-        return new ViewerGeometry { Id = id, Vertices = vertices.Select(v => v * radius).ToList(), Normals = vertices, Indices = indices };
+        return new ViewerGeometry
+        {
+            Id = id, Vertices = vertices.Select(v => v * radius).ToList(), Normals = vertices, Indices = indices,
+            // Cylindrical about the local Z axis, in metres.
+            UVs = vertices.Select(v => new Vector2d(Math.Atan2(v.Y, v.X) * radius, v.Z * radius)).ToList(),
+        };
+    }
+
+    // 64 x 64 checker of 8 x 8 pixel squares as a 24-bit BMP, 0.5 m per repeat.
+    private static ViewerTexture Checker()
+    {
+        const int size = 64, header = 54, pixels = size * size * 3;
+        var bmp = new byte[header + pixels];
+        bmp[0] = (byte)'B';
+        bmp[1] = (byte)'M';
+        BitConverter.TryWriteBytes(bmp.AsSpan(2), bmp.Length);
+        BitConverter.TryWriteBytes(bmp.AsSpan(10), header);
+        BitConverter.TryWriteBytes(bmp.AsSpan(14), 40); // BITMAPINFOHEADER
+        BitConverter.TryWriteBytes(bmp.AsSpan(18), size);
+        BitConverter.TryWriteBytes(bmp.AsSpan(22), size);
+        BitConverter.TryWriteBytes(bmp.AsSpan(26), (short)1);
+        BitConverter.TryWriteBytes(bmp.AsSpan(28), (short)24);
+        BitConverter.TryWriteBytes(bmp.AsSpan(34), pixels);
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                byte v = ((x / 8) + (y / 8)) % 2 == 0 ? (byte)235 : (byte)60;
+                bmp.AsSpan(header + (y * size + x) * 3, 3).Fill(v); // rows of 192 bytes need no padding
+            }
+        }
+        return new ViewerTexture { MimeType = "image/bmp", Base64Data = Convert.ToBase64String(bmp), ScaleX = 0.5, ScaleY = 0.5 };
     }
 }
