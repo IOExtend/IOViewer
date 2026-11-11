@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace IOViewer.Model;
 
 /// <summary>
@@ -6,6 +8,7 @@ namespace IOViewer.Model;
 public sealed class ViewerGridSystem
 {
     public string Name { get; set; } = "Grids";
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public List<ViewerGridLine> Lines { get; } = [];
 }
 

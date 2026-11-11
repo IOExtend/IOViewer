@@ -43,6 +43,36 @@ public class JsonAndImportTests
     }
 
     [Fact]
+    public void JsonRoundtrip_KeepsGetterOnlyCollections()
+    {
+        var doc = new ViewerDocument("Collections");
+        var element = new ViewerElement { Id = 7, Name = "Wall" };
+        element.AddProperty("Dimensions", "Width", "200 mm");
+        element.MeshIndices.Add(3);
+        doc.Elements.Add(element);
+        var grids = new ViewerGridSystem();
+        grids.Lines.Add(new ViewerGridLine("A", new(0, 0, 0), new(0, 10, 0)));
+        doc.Grids = grids;
+        var schedule = new ViewerTimeLinerSchedule("4D");
+        var task = new ViewerTimeLinerTask("T1", "Build", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1));
+        task.AttachedElementIds.Add(7);
+        task.Children.Add(new ViewerTimeLinerTask("T1.1", "Sub", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        schedule.Tasks.Add(task);
+        doc.TimeLiner = schedule;
+
+        using var ms = new MemoryStream(Encoding.UTF8.GetBytes(JsonViewerExporter.ExportToString(doc)));
+        var imported = JsonViewerImporter.Load(ms);
+
+        var importedElement = Assert.Single(imported.Elements);
+        Assert.Equal("200 mm", importedElement.Properties["dimensions"]["Width"]);
+        Assert.Equal([3], importedElement.MeshIndices);
+        Assert.Equal("A", Assert.Single(imported.Grids!.Lines).Name);
+        var importedTask = Assert.Single(imported.TimeLiner!.Tasks);
+        Assert.Equal([7L], importedTask.AttachedElementIds);
+        Assert.Equal("T1.1", Assert.Single(importedTask.Children).Id);
+    }
+
+    [Fact]
     public void ObjViewerImporter_ParsesWavefrontObj()
     {
         const string objData = """
