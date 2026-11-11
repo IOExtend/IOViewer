@@ -179,19 +179,6 @@ input:focus-visible {
   overflow: auto;
 }
 
-.ioviewer-name-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ioviewer-name-list li {
-  padding: 4px;
-  border-bottom: 1px solid #262b33;
-  color: var(--text-dim);
-  overflow-wrap: anywhere;
-}
-
 /* Model tree */
 .ioviewer-tree-search {
   box-sizing: border-box;
@@ -736,4 +723,179 @@ input:focus-visible {
   font-size: 11px;
   line-height: 20px;
   text-align: center;
+}
+
+/* Rows of the views, clashes, 4D and links panels: one line each, a long name ends in an ellipsis */
+.ioviewer-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ioviewer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  text-align: left;
+}
+
+button.ioviewer-row,
+label.ioviewer-row {
+  cursor: pointer;
+}
+
+button.ioviewer-row:hover,
+label.ioviewer-row:hover {
+  background: #262b33;
+}
+
+.ioviewer-row[aria-current="true"],
+.ioviewer-row[aria-current="true"]:hover {
+  background: #1e3a8a;
+  color: #bfdbfe;
+}
+
+.ioviewer-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ioviewer-row-count,
+.ioviewer-task-dates,
+.ioviewer-clash-distance {
+  flex: none;
+  font-size: 11px;
+  color: #7c8797;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ioviewer-tour,
+.ioviewer-player-open {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ioviewer-tour svg,
+.ioviewer-player-open svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ioviewer-tour[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Clashes: test headers fold their clashes; the status is a coloured chip */
+.ioviewer-clash-header {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ioviewer-clash-header svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.ioviewer-clash-header[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.ioviewer-clash {
+  padding-left: 26px;
+}
+
+.ioviewer-clash-status {
+  flex: none;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #475569;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.ioviewer-clash-status[data-status="New"] {
+  background: #dc2626;
+}
+
+.ioviewer-clash-status[data-status="Active"] {
+  background: #c2410c;
+}
+
+.ioviewer-clash-status[data-status="Reviewed"] {
+  background: #2563eb;
+}
+
+.ioviewer-clash-status[data-status="Approved"] {
+  background: #15803d;
+}
+
+/* 4D: task rows with a dot in the colour their elements get while active, and the player above the toolbar */
+.ioviewer-task::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.ioviewer-task[data-type="demolish"]::before {
+  background: #ef4444;
+}
+
+.ioviewer-task[data-type="temporary"]::before {
+  background: #fbbf24;
+}
+
+.ioviewer-player {
+  left: 50%;
+  bottom: 102px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(720px, calc(100% - 24px));
+  padding: 6px 10px;
+}
+
+.ioviewer-player-date {
+  flex: none;
+  min-width: 110px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ioviewer-player-slider {
+  flex: 1 1 auto;
+  min-width: 60px;
+  accent-color: var(--accent-text);
+}
+
+.ioviewer-player .ioviewer-segmented {
+  flex: none;
 }

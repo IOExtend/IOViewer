@@ -1,6 +1,6 @@
 import { t } from '../i18n.js';
 import { icons } from './icons.js';
-import { createShell, nameList } from './shell.js';
+import { createShell } from './shell.js';
 import { createToolbar, toolbarGroups } from './toolbar.js';
 import { mountTree } from './tree.js';
 import { createContextMenu } from './contextMenu.js';
@@ -63,19 +63,6 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
         },
       }),
   });
-  // Panels shown only when the document has their data; until their full versions exist they list the names.
-  const listPanel = (name, items, nameOf) =>
-    shell.registerPanel(name, {
-      icon: icons[name],
-      title: t(`panel.${name}`),
-      visible: items.length > 0,
-      render: (body) => body.append(nameList(items.map(nameOf))),
-    });
-  listPanel('views', meta.viewpoints ?? [], (view) => view.name);
-  listPanel('clashes', meta.clashTests ?? [], (test) => `${test.name} (${test.clashes.length})`);
-  listPanel('timeliner', meta.timeliner?.tasks ?? [], (task) => task.name);
-  listPanel('links', meta.linkedFiles ?? [], (file) => file.name);
-
   const properties = document.createElement('aside');
   properties.id = 'ioviewer-properties';
   properties.className = 'ioviewer-floating';

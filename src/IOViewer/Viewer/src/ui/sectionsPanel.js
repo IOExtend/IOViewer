@@ -5,7 +5,7 @@ import { el, iconButton } from './dom.js';
 import { showToast } from './statusBar.js';
 
 // Row of toggle buttons; select(value) is called on click, update(value) marks the pressed one.
-function segmented(label, options, select) {
+export function segmented(label, options, select) {
   const group = el('div', 'ioviewer-segmented');
   group.setAttribute('role', 'group');
   group.setAttribute('aria-label', label);

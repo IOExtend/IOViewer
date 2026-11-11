@@ -14,6 +14,10 @@ import { mountSections } from './ui/sectionsPanel.js';
 import { Measure } from './tools/measure.js';
 import { GridAxes } from './tools/grids.js';
 import { mountDisplay } from './tools/display.js';
+import { mountViews } from './ui/viewsPanel.js';
+import { mountClashes } from './ui/clashesPanel.js';
+import { mountTimeliner } from './ui/timeliner.js';
+import { mountLinks } from './ui/linksPanel.js';
 
 const data = loadModelData();
 document.documentElement.lang = lang;
@@ -99,6 +103,12 @@ const selection = new Selection();
 selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
 const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection, measure });
 mountSections({ root: uiRoot, ...ui, sections, selection });
+const { meta } = data;
+mountViews({ ...ui, controls, views: meta.viewpoints ?? [] });
+const clashes = mountClashes({ ...ui, tests: meta.clashTests ?? [], elements: meta.elements, scene, controls, selection });
+world.add(clashes.group); // overlay, like the measure
+const timeliner = mountTimeliner({ root: uiRoot, ...ui, timeliner: meta.timeliner, elements: meta.elements, scene });
+mountLinks({ ...ui, files: meta.linkedFiles ?? [], elements: meta.elements, scene });
 for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta: data.meta, grids })) ui.onEscape(popover.close);
 ui.toolbar.setHandler('distance', () => {
   measure.setActive(!measure.active);
@@ -150,4 +160,4 @@ controls.resize(); // also schedules the first frame for an empty model
 controls.fitBox(scene.visibleBox(), false);
 const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
-window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, sections, sectionGizmo, measure, grids, ready, get camera() { return controls.camera; } };
+window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, sections, sectionGizmo, measure, grids, clashes, timeliner, ready, get camera() { return controls.camera; } };

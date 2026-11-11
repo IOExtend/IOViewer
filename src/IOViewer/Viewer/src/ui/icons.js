@@ -33,5 +33,7 @@ export const icons = {
   chevron: svg('<path d="M9 6l6 6-6 6"/>'),
   flip: svg('<path d="M4 12h16"/><path d="M9 8l3-4 3 4M9 16l3 4 3-4"/>'),
   remove: svg('<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13M9 7V4h6v3"/>'),
+  play: svg('<path d="M7 4l13 8-13 8z"/>'),
+  pause: svg('<path d="M8 4v16M16 4v16"/>'),
   home: svg('<path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/>'),
 };

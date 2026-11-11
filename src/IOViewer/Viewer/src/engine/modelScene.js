@@ -52,6 +52,7 @@ export class ModelScene {
     this._visible = new Uint8Array(count).fill(1);
     this._highlight = new Uint8Array(count);
     this._highlighted = [];
+    this._tint = new Map(); // instance -> THREE.Color
     this._boxes = new Float32Array(count * 6);
     // Mirrored instances (det < 0) use a copy of their geometry with reversed winding, keyed as -1 - g:
     // DoubleSide would otherwise treat their outer faces as back faces and turn the normals inward.
@@ -126,6 +127,32 @@ export class ModelScene {
     for (const i of previous) this._applyColor(i);
     for (const i of this._highlighted) this._applyColor(i);
     this._changed('appearance');
+  }
+
+  // Colour override for elements (a THREE.Color or CSS colour; null removes it); the selection highlight still wins.
+  setTint(indices, color) {
+    const tint = color === null ? null : new THREE.Color(color);
+    for (const index of indices) {
+      for (const i of this.instancesOf(index)) {
+        if (tint) this._tint.set(i, tint);
+        else this._tint.delete(i);
+        this._applyColor(i);
+      }
+    }
+    this._changed('appearance');
+  }
+
+  // Copy of every instance's visibility, for restoreVisibility.
+  visibilityState() {
+    return this._visible.slice();
+  }
+
+  restoreVisibility(state) {
+    if (state.length !== this._visible.length) {
+      throw new RangeError(`Visibility state has ${state.length} instances, the model has ${this._visible.length}.`);
+    }
+    for (let i = 0; i < state.length; i++) this._setInstanceVisible(i, state[i] === 1);
+    this._changed('visibility');
   }
 
   // Instance numbers (0..instanceCount-1) of an element.
@@ -302,7 +329,7 @@ export class ModelScene {
 
   _applyColor(i) {
     const bucket = this._buckets[this._bucketOf[i]];
-    const color = this._highlight[i] ? HIGHLIGHT_COLOR : this._mode === 'white' ? WHITE_COLOR : bucket.color;
+    const color = this._highlight[i] ? HIGHLIGHT_COLOR : this._tint.get(i) ?? (this._mode === 'white' ? WHITE_COLOR : bucket.color);
     bucket.mesh.setColorAt(this._batchId[i], color);
   }
 

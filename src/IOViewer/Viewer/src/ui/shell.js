@@ -8,13 +8,14 @@ const ORDER = ['model', 'views', 'sections', 'clashes', 'timeliner', 'links'];
 /**
  * Left icon rail with floating panels; one panel is open at a time and its active rail icon closes it.
  * registerPanel(name, { icon, title, render(body), visible = true }): `icon` is an SVG string from icons.js,
- * `render` fills the panel body once at registration, `visible: false` leaves the rail icon out (no data).
+ * `render` fills the panel body once at registration, `visible: false` leaves the rail icon out (no data),
+ * `onClose()` runs whenever the panel closes (its icon, its ×, or another panel opening).
  */
 export function createShell(root) {
   const rail = el('nav', 'ioviewer-rail ioviewer-floating');
   rail.setAttribute('aria-label', t('panels'));
   root.append(rail);
-  const panels = new Map(); // name -> { button, panel }
+  const panels = new Map(); // name -> { button, panel, onClose }
   let open = null;
 
   function get(name) {
@@ -24,12 +25,13 @@ export function createShell(root) {
   }
 
   function closePanel(name) {
-    const { button, panel } = get(name);
+    const { button, panel, onClose } = get(name);
     if (open !== name) return;
     panel.hidden = true;
     button.classList.remove('active');
     button.setAttribute('aria-expanded', 'false');
     open = null;
+    onClose?.();
   }
 
   function openPanel(name) {
@@ -42,7 +44,7 @@ export function createShell(root) {
     open = name;
   }
 
-  function registerPanel(name, { icon, title, render, visible = true }) {
+  function registerPanel(name, { icon, title, render, visible = true, onClose }) {
     const rank = ORDER.indexOf(name);
     if (rank < 0) throw new RangeError(`Unknown panel: ${name}`);
     if (panels.has(name)) throw new Error(`Panel ${name} is already registered.`);
@@ -66,16 +68,9 @@ export function createShell(root) {
     const body = el('div', 'ioviewer-panel-body');
     panel.append(header, body);
     root.append(panel);
-    panels.set(name, { button, panel });
+    panels.set(name, { button, panel, onClose });
     render(body);
   }
 
   return { rail, openPanel, closePanel, registerPanel };
-}
-
-// Plain list of names for panels that only list their data.
-export function nameList(names) {
-  const list = el('ul', 'ioviewer-name-list');
-  for (const name of names) list.append(el('li', '', String(name ?? '')));
-  return list;
 }
