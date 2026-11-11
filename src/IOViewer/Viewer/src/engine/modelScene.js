@@ -28,7 +28,7 @@ export function reversedWinding(geometry) {
 /**
  * The model as one BatchedMesh per material (a material is either opaque or transparent).
  * Elements are addressed by their index in META `elements` (0..n-1); per-instance visibility and colour
- * change without rebuilding. Every visual change dispatches `{type: 'change'}` on `root`.
+ * change without rebuilding. Every visual change dispatches `{type: 'change', detail: {kind}}` on `root`.
  */
 export class ModelScene {
   constructor(data) {
@@ -94,23 +94,23 @@ export class ModelScene {
 
   setVisible(indices, visible) {
     for (const index of indices) {
-      for (const i of this._instancesOf(index)) this._setInstanceVisible(i, visible);
+      for (const i of this.instancesOf(index)) this._setInstanceVisible(i, visible);
     }
-    this._changed();
+    this._changed('visibility');
   }
 
   showAll() {
     for (let i = 0; i < this._visible.length; i++) this._setInstanceVisible(i, true);
-    this._changed();
+    this._changed('visibility');
   }
 
   isolate(indices) {
     const keep = new Uint8Array(this._visible.length);
     for (const index of indices) {
-      for (const i of this._instancesOf(index)) keep[i] = 1;
+      for (const i of this.instancesOf(index)) keep[i] = 1;
     }
     for (let i = 0; i < keep.length; i++) this._setInstanceVisible(i, keep[i] === 1);
-    this._changed();
+    this._changed('visibility');
   }
 
   setHighlighted(indices) {
@@ -118,19 +118,39 @@ export class ModelScene {
     this._highlighted = [];
     for (const i of previous) this._highlight[i] = 0;
     for (const index of indices) {
-      for (const i of this._instancesOf(index)) {
+      for (const i of this.instancesOf(index)) {
         this._highlight[i] = 1;
         this._highlighted.push(i);
       }
     }
     for (const i of previous) this._applyColor(i);
     for (const i of this._highlighted) this._applyColor(i);
-    this._changed();
+    this._changed('appearance');
+  }
+
+  // Instance numbers (0..instanceCount-1) of an element.
+  instancesOf(index) {
+    this._checkElement(index);
+    return this._elementInstances.subarray(this._elementStart[index], this._elementStart[index + 1]);
+  }
+
+  // True when at least one instance of the element is shown.
+  isVisible(index) {
+    return this.instancesOf(index).some((i) => this._visible[i] === 1);
+  }
+
+  get instanceCount() {
+    return this._batchId.length;
+  }
+
+  // Where instance i is drawn (its bucket BatchedMesh and id there) and its element index (-1 = none).
+  instance(i) {
+    return { mesh: this._buckets[this._bucketOf[i]].mesh, batchId: this._batchId[i], element: this._elementOf[i] };
   }
 
   elementBox(index) {
     const box = new THREE.Box3();
-    for (const i of this._instancesOf(index)) this._expandBox(box, i);
+    for (const i of this.instancesOf(index)) this._expandBox(box, i);
     return box;
   }
 
@@ -154,14 +174,14 @@ export class ModelScene {
       bucket.material.wireframe = mode === 'wireframe';
     }
     for (let i = 0; i < this._batchId.length; i++) this._applyColor(i);
-    this._changed();
+    this._changed('appearance');
   }
 
   setOpacity(opacity) {
     if (!(opacity >= 0 && opacity <= 1)) throw new RangeError(`Opacity must be within 0..1, got ${opacity}.`);
     this._opacity = opacity;
     for (const bucket of this._buckets) this._applyOpacity(bucket);
-    this._changed();
+    this._changed('appearance');
   }
 
   setClipping(planes, intersection) {
@@ -170,7 +190,7 @@ export class ModelScene {
       material.clipIntersection = intersection;
       material.needsUpdate = true;
     }
-    this._changed();
+    this._changed('appearance');
   }
 
   _createBuckets(meta, geometryKey, materialOf) {
@@ -260,7 +280,7 @@ export class ModelScene {
       texture.repeat.set(1 / source.sx, 1 / source.sy);
       image.onload = () => {
         texture.needsUpdate = true;
-        this._changed();
+        this._changed('appearance');
       };
       image.src = `data:${source.mime};base64,${source.data}`;
       this._textures.set(index, texture);
@@ -291,11 +311,6 @@ export class ModelScene {
     this._buckets[this._bucketOf[i]].mesh.setVisibleAt(this._batchId[i], visible);
   }
 
-  _instancesOf(index) {
-    this._checkElement(index);
-    return this._elementInstances.subarray(this._elementStart[index], this._elementStart[index + 1]);
-  }
-
   _checkElement(index) {
     if (!Number.isInteger(index) || index < 0 || index >= this.elementCount) {
       throw new RangeError(`Element index ${index} is out of range 0..${this.elementCount - 1}.`);
@@ -309,7 +324,8 @@ export class ModelScene {
     box.max.set(Math.max(box.max.x, b[o + 3]), Math.max(box.max.y, b[o + 4]), Math.max(box.max.z, b[o + 5]));
   }
 
-  _changed() {
-    this.root.dispatchEvent({ type: 'change' });
+  // kind: 'visibility' (the shown set changed) or 'appearance' (only how it looks).
+  _changed(kind) {
+    this.root.dispatchEvent({ type: 'change', detail: { kind } });
   }
 }

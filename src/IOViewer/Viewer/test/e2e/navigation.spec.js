@@ -114,7 +114,7 @@ test('shift drag emits boxselect: dashed overlay for crossing, solid for window'
   await page.keyboard.up('Shift');
   expect(overlay).toEqual({ style: 'dashed', width: '200px' });
   expect(await events(page)).toEqual([
-    { type: 'boxselect', rect: { x: 500, y: 400, width: 200, height: 100 }, mode: 'crossing' },
+    { type: 'boxselect', rect: { x: 500, y: 400, width: 200, height: 100 }, mode: 'crossing', ctrl: false, shift: true },
   ]);
 
   await drag(page, 'left', [500, 400], [700, 500], 'Shift');

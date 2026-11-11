@@ -194,7 +194,8 @@ export class NavigationControls extends EventTarget {
         x: Math.min(d.down.x, point.x), y: Math.min(d.down.y, point.y),
         width: Math.abs(point.x - d.down.x), height: Math.abs(point.y - d.down.y),
       };
-      this.dispatchEvent(detail('boxselect', { rect, mode: boxSelectMode(d.down.x, point.x) }));
+      const mode = boxSelectMode(d.down.x, point.x);
+      this.dispatchEvent(detail('boxselect', { rect, mode, ctrl: e.ctrlKey, shift: e.shiftKey }));
     } else if (!d.moved && d.button === 0) {
       this.dispatchEvent(detail('click', { x: point.x, y: point.y, button: 0, ctrl: e.ctrlKey, shift: e.shiftKey }));
     } else if (!d.moved && d.button === 2) {

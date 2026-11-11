@@ -3,6 +3,10 @@ import { loadModelData } from './data.js';
 import { ModelScene } from './engine/modelScene.js';
 import { lang, t } from './i18n.js';
 import { NavigationControls } from './nav/controls.js';
+import { Picker } from './engine/picking.js';
+import { Selection } from './select/selection.js';
+import { selectInRect, screenBoxes } from './select/boxSelect.js';
+import { mountProperties } from './ui/properties.js';
 
 const data = loadModelData();
 document.documentElement.lang = lang;
@@ -54,11 +58,50 @@ function requestRender() {
 }
 scene.root.addEventListener('change', requestRender);
 
-const controls = new NavigationControls(camera, canvas, { visibleBox: () => scene.visibleBox() });
-controls.addEventListener('change', requestRender);
-scene.root.addEventListener('change', () => {
+const picker = new Picker(renderer, scene, camera);
+const controls = new NavigationControls(camera, canvas, {
+  pick: (x, y) => picker.pick(x, y)?.point ?? null,
+  visibleBox: () => scene.visibleBox(),
+});
+controls.addEventListener('change', () => {
+  picker.camera = controls.camera; // swaps with the projection
+  requestRender();
+});
+scene.root.addEventListener('change', (e) => {
+  if (e.detail.kind !== 'visibility') return; // a highlight must not walk every instance for the bounds
   controls.invalidateBounds();
   controls.resize();
+});
+
+const selection = new Selection();
+selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
+const properties = document.createElement('aside');
+properties.id = 'ioviewer-properties';
+document.getElementById('ioviewer-ui').append(properties);
+mountProperties(properties, selection, data);
+
+// Click selects, Ctrl+click toggles; a click on nothing clears unless a modifier is held.
+controls.addEventListener('click', (e) => {
+  const { x, y, ctrl, shift } = e.detail;
+  const hit = picker.pick(x, y);
+  if (ctrl) {
+    if (hit) selection.toggle(hit.element);
+  } else if (hit) selection.set([hit.element]);
+  else if (!shift) selection.clear();
+});
+// Box select replaces the selection, Ctrl+box adds to it; a sliver (< 4 px either way) counts as a click on nothing.
+controls.addEventListener('boxselect', (e) => {
+  const { rect, mode, ctrl, shift } = e.detail;
+  if (rect.width < 4 || rect.height < 4) {
+    if (!ctrl && !shift) selection.clear();
+    return;
+  }
+  const found = selectInRect(rect, mode, screenBoxes(scene, controls.camera, canvas.getBoundingClientRect()));
+  selection.set(ctrl ? [...selection.values(), ...found] : found);
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  selection.clear();
 });
 
 window.addEventListener('resize', () => {
@@ -69,4 +112,4 @@ renderer.setSize(window.innerWidth, window.innerHeight, false);
 controls.resize(); // also schedules the first frame for an empty model
 controls.fitBox(scene.visibleBox(), false);
 
-window.__ioviewer = { scene, controls, ready, get camera() { return controls.camera; } };
+window.__ioviewer = { scene, controls, picker, selection, ready, get camera() { return controls.camera; } };

@@ -48,3 +48,72 @@ body {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.8);
 }
+
+#ioviewer-properties {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 320px;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 8px 12px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  pointer-events: auto;
+}
+
+#ioviewer-properties[hidden] {
+  display: none;
+}
+
+#ioviewer-properties header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ioviewer-properties-title {
+  flex: 1;
+  margin: 4px 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ioviewer-properties-close {
+  border: 0;
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+  color: inherit;
+}
+
+#ioviewer-properties h3 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+#ioviewer-properties table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#ioviewer-properties th,
+#ioviewer-properties td {
+  padding: 2px 0;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+#ioviewer-properties th {
+  width: 40%;
+  padding-right: 8px;
+  font-weight: normal;
+  color: #4b5563;
+}

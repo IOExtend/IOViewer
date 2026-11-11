@@ -2,10 +2,26 @@ const dictionaries = {
   ru: {
     elements: 'Элементов',
     noGeometry: 'Нет геометрии',
+    selected: 'Выбрано',
+    close: 'Закрыть',
+    elementGroup: 'Элемент',
+    id: 'Id',
+    category: 'Категория',
+    type: 'Тип',
+    level: 'Уровень',
+    link: 'Связанный файл',
   },
   en: {
     elements: 'Elements',
     noGeometry: 'No geometry',
+    selected: 'Selected',
+    close: 'Close',
+    elementGroup: 'Element',
+    id: 'Id',
+    category: 'Category',
+    type: 'Type',
+    level: 'Level',
+    link: 'Link',
   },
 };
 
