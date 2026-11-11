@@ -16,17 +16,17 @@ jobs:
         os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
+          global-json-file: global.json
           dotnet-version: |
             8.0.x
-            10.0.x
       - run: dotnet restore IOViewer.slnx
       - run: dotnet build IOViewer.slnx -c Release --no-restore
       - run: dotnet test IOViewer.slnx -c Release --no-build
       - run: dotnet pack IOViewer.slnx -c Release --no-build -o artifacts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.os }}
           path: artifacts/*.nupkg
@@ -35,10 +35,10 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
+          global-json-file: global.json
           dotnet-version: |
             8.0.x
-            10.0.x
       - run: dotnet build src/IOViewer.Cli/IOViewer.Cli.csproj -c Release

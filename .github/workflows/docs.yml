@@ -29,16 +29,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
+          global-json-file: global.json
       - run: dotnet tool restore
       - run: dotnet docfx docfx.json --warningsAsErrors
-      - run: rm -f _site/manifest.json
-      - uses: actions/upload-pages-artifact@v4
+      # manifest.json records the build machine paths and is not part of the site.
+      - run: rm _site/manifest.json
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
@@ -54,4 +53,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

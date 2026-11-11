@@ -1,6 +1,23 @@
 # Changelog
 
-All notable changes to the `IOViewer` library and CLI are documented in this file.
+All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html); versions before 1.0 may change the
+API between minor releases.
+
+## [Unreleased]
+
+### Fixed
+- The `IOViewer` package now includes the XML documentation file, so existing API comments show in IntelliSense.
+- The release workflow runs only for version tags again, fails on any `gh release` error and no longer overwrites assets of an existing release.
+- `tools/pack-release.ps1` fails when creating the source archive fails.
+- Documentation no longer claims `.mtl` material support or mesh simplification, neither of which exists.
+
+### Changed
+- Tests run on both .NET 8 and .NET 10.
+- `global.json`, CI workflows and repository settings follow the shared IOExtend conventions: SDK 10.0.100 without prerelease, NuGet vulnerability audit, Dependabot, LF line endings, issue and pull request templates.
+- Copyright holder is `mahach666` in the license, package metadata and README.
+- README and documentation state that IOViewer is not affiliated with Autodesk.
+- `SECURITY.md` and `CONTRIBUTING.md` describe supported versions, security scope, development setup and the clean-room policy.
 
 ## [0.1.0] - 2026-11-11
 

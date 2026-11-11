@@ -1,31 +1,89 @@
 # Contributing to IOViewer
 
-## Reporting Bugs
+## Reporting bugs
 
 Open a [GitHub issue](https://github.com/IOExtend/IOViewer/issues) with:
-- The `IOViewer` / `ioviewer` version.
-- The command line or C# API call used, with confidential or personal paths removed.
-- A minimal description of how to reproduce the issue.
-- Expected and actual results, including relevant error messages or stack traces.
 
-Do not attach proprietary models if they contain confidential or customer data.
+- The IOViewer version (`ioviewer --version` or the package version).
+- The command line or API call used, with confidential values and personal paths removed.
+- A minimal description of how to reproduce the problem.
+- Expected and actual results, including relevant error messages.
 
-Report security vulnerabilities privately through the **Security** tab.
+Do not attach models if they contain confidential or customer data.
+A minimal description is better than sharing a confidential model.
 
-## Code Conventions & Clean-Room Policy
+Report security issues through GitHub private vulnerability reporting in
+the Security tab. Do not open public issues for security vulnerabilities.
 
-- **Clean-Room Development**: All code must be independently authored without decompiled proprietary source code, proprietary headers, or vendor SDKs.
-- Do not commit proprietary project data or third-party binaries to the repository.
-- Keep nullable reference types enabled (`<Nullable>enable</Nullable>`).
-- Warnings are treated as errors (`<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`).
-- Zero native or third-party library dependencies for core HTML generation and exporting functionality.
+## Proposing changes
 
-## Releases & NuGet Publishing
+Open an issue first for larger changes so the scope and approach can be
+discussed before implementation. Keep changes focused on the agreed problem.
 
-Push a tag matching the package version, such as `v0.1.0`, to trigger the `release.yml` workflow.
-The workflow builds and tests the solution, packs release packages and symbols, generates archives with checksums, publishes the GitHub Release, and publishes packages to NuGet.org via Trusted Publishing (GitHub Actions OIDC).
-The NuGet policy on NuGet.org must name this repository (`IOExtend/IOViewer`), workflow `release.yml`, publisher `GitHubActions`, package pattern `IOViewer*`, and owner `mahach`.
+## Development setup
 
-## Licensing Contributions
+Install the .NET SDK specified by `global.json`. It currently specifies
+10.0.100, allows roll-forward to the latest feature band, and excludes
+prerelease SDKs. Tests run on .NET 8 and .NET 10, so both runtimes are needed.
 
-All contributions are licensed under the [MIT License](LICENSE). By submitting a pull request, you confirm that you have the right to contribute your code under that license.
+From the repository root, run:
+
+```sh
+dotnet build IOViewer.slnx -c Release
+dotnet test IOViewer.slnx -c Release
+```
+
+The library is in `src/IOViewer`, the CLI in `src/IOViewer.Cli`, and tests in
+`tests/IOViewer.Tests`. Tests use small synthetic models built in code.
+The repository ships no customer models.
+
+## Clean-room policy
+
+- Write all code independently. Do not use decompiled or leaked source code,
+  proprietary headers, vendor SDKs or code copied from other viewers.
+- Do not add third-party JavaScript to the generated HTML. The viewer runs on
+  plain WebGL and must stay self-contained and offline.
+- Do not add customer models, confidential data, vendor files or binaries to
+  the repository. Keep private test files outside version control.
+- Do not put personal data in code, documentation, test data or commit
+  metadata. Use your GitHub noreply address as the commit email.
+
+## Code conventions
+
+- Follow the surrounding code and repository formatting settings.
+- Keep nullable reference types enabled.
+- Warnings are treated as errors.
+- Write short English comments that explain why.
+- Document new and changed public APIs with XML documentation comments.
+- Do not write console output from the library. Only the CLI writes to the
+  console, with diagnostics on standard error.
+- Do not add runtime dependencies to the library without discussing it first.
+
+## Pull requests
+
+Include:
+
+- A description of the problem and the change.
+- Tests for behavior changes, including relevant errors and edge cases.
+- The build and test commands run, their results, and any skipped checks.
+- A note on how the generated HTML changes when the viewer template is affected.
+
+Write commit messages in the imperative mood, for example,
+"Fix section box clipping on rotated models".
+
+## Releases
+
+Push a tag matching the package version, such as `v0.2.0`, to run `release.yml`.
+The workflow builds and tests the solution, attaches packages, symbols, source and checksums to a GitHub release,
+and publishes the NuGet packages through Trusted Publishing. The release notes are the section of `CHANGELOG.md` for the version, so add that section before the tag.
+The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
+
+## Licensing contributions
+
+Contributions are licensed under the MIT license. By submitting a
+contribution, you confirm that you have the right to contribute it under
+that license.
+
+## Questions
+
+Ask questions in GitHub Discussions or repository issues.

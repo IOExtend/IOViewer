@@ -25,5 +25,5 @@
 ### Importers (`IOViewer.Importers`)
 
 - `GlbViewerImporter`: Reads binary glTF 2.0 (`.glb`) files into `ViewerDocument`.
-- `ObjViewerImporter`: Reads Wavefront OBJ and MTL files into `ViewerDocument`.
+- `ObjViewerImporter`: Reads Wavefront OBJ geometry into `ViewerDocument`. Material (`.mtl`) files are not read.
 - `JsonViewerImporter`: Reads JSON document snapshots into `ViewerDocument`.
