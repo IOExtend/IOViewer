@@ -270,7 +270,7 @@ test(`tree: ${LARGE_ELEMENTS} rows scroll with fewer than 200 row nodes`, async 
   expect(errors).toEqual([]);
 });
 
-test('toolbar: grouped tools, orbit active, pan and projection switch, later tools disabled with a tooltip', async ({ page }) => {
+test('toolbar: grouped tools, orbit active, pan and projection switch, tools carry a tooltip', async ({ page }) => {
   await open(page);
   await expect(page.locator('.ioviewer-toolbar-label')).toHaveText(['Навигация', 'Сечения', 'Измерения', 'Отображение', 'Вид']);
   const tool = (id) => page.locator(`.ioviewer-tool[data-tool="${id}"]`);
@@ -288,9 +288,8 @@ test('toolbar: grouped tools, orbit active, pan and projection switch, later too
   expect(await page.evaluate(() => window.__ioviewer.camera.isPerspectiveCamera)).toBe(true);
 
   await expect(tool('plane')).toHaveAttribute('aria-disabled', 'false');
-  await expect(tool('distance')).toHaveAttribute('aria-disabled', 'true');
+  await expect(tool('distance')).toHaveAttribute('aria-disabled', 'false');
   await expect(tool('distance')).toHaveAttribute('title', 'Расстояние');
-  await tool('distance').click({ force: true }); // no handler yet: nothing happens, nothing throws
   await expect(tool('fit')).toHaveAttribute('aria-disabled', 'false');
   await expect(page.locator('.ioviewer-toolbar-group').last().locator('.ioviewer-tool')).toHaveCount(1); // view: fullscreen only
   await expect(tool('settings')).toHaveCount(0);

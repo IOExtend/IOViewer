@@ -78,6 +78,13 @@ const dictionaries = {
     'sections.fitSelection': 'По выделенному',
     'sections.showGizmo': 'Показывать манипулятор',
     'sections.maxPlanes': 'Не больше 6 плоскостей',
+    'unit.m': 'м',
+    'display.materials': 'Материалы',
+    'display.textures': 'Текстуры',
+    'display.white': 'Белый',
+    'display.wireframe': 'Каркас',
+    'opacity.label': 'Непрозрачность',
+    'opacity.value': '{value} %',
     truncated: 'Показано {meshes} из {total} мешей: модель обрезана настройкой MaxMeshVertices',
   },
   en: {
@@ -159,14 +166,22 @@ const dictionaries = {
     'sections.fitSelection': 'Fit to selection',
     'sections.showGizmo': 'Show gizmo',
     'sections.maxPlanes': 'At most 6 planes',
+    'unit.m': 'm',
+    'display.materials': 'Materials',
+    'display.textures': 'Textures',
+    'display.white': 'White',
+    'display.wireframe': 'Wireframe',
+    'opacity.label': 'Opacity',
+    'opacity.value': '{value}%',
     truncated: 'Showing {meshes} of {total} meshes: the model was truncated by the MaxMeshVertices setting',
   },
 };
 
 export const lang = (globalThis.navigator?.language ?? '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 
-export function t(key) {
-  const text = dictionaries[lang][key];
+// `language` is for tests; the UI always uses `lang`.
+export function t(key, language = lang) {
+  const text = dictionaries[language][key];
   if (text === undefined) throw new Error(`Missing UI string '${key}'.`);
   return text;
 }

@@ -26,7 +26,9 @@ async function copyText(text) {
 
 /**
  * Builds the viewer UI inside `root` (#ioviewer-ui) and wires it to the model.
- * Returns { shell, toolbar, contextMenu } so features can register panels, enable tools and menu items.
+ * Returns { shell, toolbar, contextMenu, onEscape } so features can register panels, enable tools and menu items;
+ * onEscape(handler) adds a handler that Esc tries, in order, after closing the context menu and before clearing the
+ * selection: it returns true when it used the key.
  */
 export function mountUI({ root, data, scene, controls, picker, selection }) {
   const { meta } = data;
@@ -126,13 +128,17 @@ export function mountUI({ root, data, scene, controls, picker, selection }) {
     contextMenu.open('element', x, y, hit.element);
   });
 
+  const escapeHandlers = [];
   installHotkeys(window, {
     ...actions,
-    // Esc closes an open menu and keeps the selection; otherwise it clears the selection.
-    escape: () => (contextMenu.isOpen ? contextMenu.close() : selection.clear()),
+    // Esc closes an open menu and keeps the selection; otherwise a feature may use it; otherwise it clears the selection.
+    escape: () => {
+      if (contextMenu.isOpen) return contextMenu.close();
+      if (!escapeHandlers.some((handle) => handle())) selection.clear();
+    },
   });
   mountStatusBar(document.getElementById('ioviewer-status'), selection, scene.elementCount);
   mountTruncationBanner(root, meta.truncated);
 
-  return { shell, toolbar, contextMenu };
+  return { shell, toolbar, contextMenu, onEscape: (handler) => escapeHandlers.push(handler) };
 }

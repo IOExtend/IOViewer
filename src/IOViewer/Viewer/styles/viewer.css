@@ -670,3 +670,70 @@ input:focus-visible {
 .ioviewer-panel-body > .ioviewer-check {
   margin-top: 10px;
 }
+
+/* Display popovers above their toolbar buttons */
+.ioviewer-popover {
+  position: fixed;
+  z-index: 10;
+  padding: 4px 0;
+}
+
+.ioviewer-display-modes {
+  min-width: 160px;
+}
+
+.ioviewer-display-modes .ioviewer-menu-item[aria-checked="true"] {
+  color: var(--accent-text);
+}
+
+.ioviewer-display-modes .ioviewer-menu-item[aria-checked="true"]::after {
+  content: "\2713";
+}
+
+.ioviewer-opacity {
+  width: 200px;
+  padding: 8px 12px;
+}
+
+.ioviewer-opacity-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+}
+
+.ioviewer-opacity-slider {
+  width: 100%;
+  accent-color: var(--accent-text);
+}
+
+/* Screen-space labels over the scene: measured distance, grid axis names */
+.ioviewer-measure-label,
+.ioviewer-grid-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.ioviewer-measure-label {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(17, 19, 23, 0.85);
+  border: 1px solid #facc15;
+  color: #fde68a;
+  font-variant-numeric: tabular-nums;
+}
+
+.ioviewer-grid-label {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border: 1px solid #93c5fd;
+  border-radius: 11px;
+  background: rgba(17, 19, 23, 0.8);
+  color: #dbeafe;
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+}

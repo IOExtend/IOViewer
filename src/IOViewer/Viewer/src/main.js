@@ -11,6 +11,9 @@ import { mountUI } from './ui/app.js';
 import { Sections } from './tools/sections.js';
 import { SectionGizmo } from './tools/sectionGizmo.js';
 import { mountSections } from './ui/sectionsPanel.js';
+import { Measure } from './tools/measure.js';
+import { GridAxes } from './tools/grids.js';
+import { mountDisplay } from './tools/display.js';
 
 const data = loadModelData();
 document.documentElement.lang = lang;
@@ -42,8 +45,10 @@ world.add(scene.root);
 const sections = new Sections(scene, scene.visibleBox());
 const sectionGizmo = new SectionGizmo(sections, canvas);
 world.add(sectionGizmo.group); // outside scene.root: the picking id pass renders only the model
-const options = data.meta.options ?? {};
-scene.setDisplayMode(options.initialWireframe ? 'wireframe' : options.initialWhiteMode ? 'white' : 'materials');
+const uiRoot = document.getElementById('ioviewer-ui');
+const measure = new Measure(uiRoot);
+const grids = new GridAxes(uiRoot, data.meta.grids ?? []);
+world.add(measure.group, grids.group); // overlays too
 
 if (data.meta.instances.count === 0) {
   const message = document.getElementById('ioviewer-message');
@@ -59,7 +64,11 @@ function requestRender() {
   frameRequested = true;
   requestAnimationFrame(() => {
     frameRequested = false;
+    const rect = canvas.getBoundingClientRect();
+    controls.camera.updateMatrixWorld(); // the screen labels project with it before render() would update it
     sectionGizmo.update(controls.camera);
+    measure.update(controls.camera, rect);
+    grids.update(controls.camera, rect);
     renderer.render(world, controls.camera);
     viewCube.update();
     resolveReady();
@@ -68,6 +77,8 @@ function requestRender() {
 scene.root.addEventListener('change', requestRender);
 sections.addEventListener('change', requestRender);
 sectionGizmo.addEventListener('change', requestRender);
+measure.addEventListener('change', requestRender);
+grids.addEventListener('change', requestRender);
 
 const picker = new Picker(renderer, scene, camera);
 const controls = new NavigationControls(camera, canvas, {
@@ -86,15 +97,24 @@ scene.root.addEventListener('change', (e) => {
 
 const selection = new Selection();
 selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
-const uiRoot = document.getElementById('ioviewer-ui');
 const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection });
 mountSections({ root: uiRoot, ...ui, sections, selection });
+for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta: data.meta, grids })) ui.onEscape(popover.close);
+ui.toolbar.setHandler('distance', () => {
+  measure.setActive(!measure.active);
+  ui.toolbar.setActive('distance', measure.active);
+});
+ui.toolbar.setActive('distance', false);
+ui.onEscape(() => measure.clear());
 
 // Click selects, Ctrl+click toggles; a click on nothing clears unless a modifier is held.
+// With the distance tool on, a click on the model places a measure point instead and the selection stays.
 controls.addEventListener('click', (e) => {
   const { x, y, ctrl, shift } = e.detail;
   const hit = picker.pick(x, y);
-  if (ctrl) {
+  if (measure.active) {
+    if (hit) measure.add(hit.point);
+  } else if (ctrl) {
     if (hit) selection.toggle(hit.element);
   } else if (hit) selection.set([hit.element]);
   else if (!shift) selection.clear();
@@ -121,4 +141,4 @@ controls.resize(); // also schedules the first frame for an empty model
 controls.fitBox(scene.visibleBox(), false);
 const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
-window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, sections, sectionGizmo, ready, get camera() { return controls.camera; } };
+window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, sections, sectionGizmo, measure, grids, ready, get camera() { return controls.camera; } };

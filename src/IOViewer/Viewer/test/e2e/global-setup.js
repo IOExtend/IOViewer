@@ -6,11 +6,11 @@ export const viewerDir = path.resolve(import.meta.dirname, '../..');
 export const fixturesDir = path.resolve(viewerDir, '../../../tests/fixtures/viewer');
 export const LARGE_ELEMENTS = 20000;
 
-// Exports a JSON document to test-results/<name>.html with the CLI, as a user would.
-function exportHtml(jsonPath, name) {
+// Exports a JSON document to test-results/<name>.html with the CLI, as a user would; `options` are extra CLI flags.
+function exportHtml(jsonPath, name, options = []) {
   // The CLI targets net8.0 and net10.0, so `dotnet run` needs an explicit framework.
   const args = ['run', '--project', '../../IOViewer.Cli', '-c', 'Release', '-f', 'net10.0', '--',
-    jsonPath, '-o', `test-results/${name}.html`];
+    jsonPath, '-o', `test-results/${name}.html`, ...options];
   try {
     execFileSync('dotnet', args, { cwd: viewerDir, stdio: 'pipe' });
   } catch (error) {
@@ -38,11 +38,13 @@ function largeModel(count) {
   return { Title: 'Large Model', Elements: elements, Meshes: meshes, Geometries: [{ Id: 1, Vertices: corners, Indices: faces }] };
 }
 
-// Exports every committed fixture, plus a generated large model for the tree virtualization test.
+// Exports every committed fixture, the building again opening in white mode, and a generated large model for the
+// tree virtualization test.
 export default function globalSetup() {
   for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith('.json'))) {
     exportHtml(path.join(fixturesDir, file), path.basename(file, '.json'));
   }
+  exportHtml(path.join(fixturesDir, 'building.json'), 'building-white', ['--white-mode']);
   mkdirSync(path.join(viewerDir, 'test-results'), { recursive: true });
   const large = path.join(viewerDir, 'test-results', 'large.json');
   writeFileSync(large, JSON.stringify(largeModel(LARGE_ELEMENTS)));

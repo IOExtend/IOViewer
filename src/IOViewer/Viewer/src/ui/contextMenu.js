@@ -1,5 +1,5 @@
 import { t } from '../i18n.js';
-import { el } from './dom.js';
+import { el, swallowPress } from './dom.js';
 
 // Menu layouts: item ids in order, '-' is a separator. Labels come from t('menu.<id>').
 export const menus = {
@@ -8,11 +8,6 @@ export const menus = {
 };
 const shortcuts = { hide: 'H', isolate: 'I', showAll: 'Shift+H', zoomTo: 'F' };
 const MARGIN = 4; // px kept free between the menu and the window edge
-
-function swallow(e) {
-  e.preventDefault();
-  e.stopPropagation();
-}
 
 /**
  * Right-click menu. open(kind, x, y, target) shows menus[kind] at client (x, y), kept inside the window;
@@ -42,21 +37,11 @@ export function createContextMenu(root) {
     if (!root.contains(e.target)) close();
   }
 
-  // Swallows the dismissing press: its pointerdown, pointerup and the click that follows.
+  // The dismissing press only closes the menu.
   function outside(e) {
     if (menu.contains(e.target)) return;
     close();
-    swallow(e);
-    const release = () => {
-      window.removeEventListener('pointerup', swallowUp, true);
-      setTimeout(() => window.removeEventListener('click', swallow, true)); // the click, if any, comes in this task
-    };
-    const swallowUp = (up) => {
-      swallow(up);
-      release();
-    };
-    window.addEventListener('pointerup', swallowUp, true);
-    window.addEventListener('click', swallow, true);
+    swallowPress(e);
   }
 
   function open(kind, x, y, target) {

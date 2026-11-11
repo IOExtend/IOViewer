@@ -79,6 +79,7 @@ async function drag(page, from, to, steps = 8) {
 
 test('a Z plane through the middle cuts the roof away; flipping it brings the roof back and cuts the ground slab; reset restores', async ({ page }) => {
   const errors = await open(page);
+  await page.evaluate(() => window.__ioviewer.grids.setVisible(false)); // axis 2 runs across the sampled slab rim
   const roof = await indexOf(page, 'Roof Slab');
   const ground = await indexOf(page, 'Ground Slab');
   // Roof top near its back edge (seen past the roof there is only background) and the ground slab rim right of the

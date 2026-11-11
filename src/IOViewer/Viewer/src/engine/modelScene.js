@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
+export const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
 const HIGHLIGHT_COLOR = new THREE.Color('#f59e0b');
 const WHITE_COLOR = new THREE.Color().setRGB(0.92, 0.92, 0.93, THREE.SRGBColorSpace);
 
