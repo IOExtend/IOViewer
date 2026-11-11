@@ -11,6 +11,10 @@ API between minor releases.
 - The release workflow runs only for version tags again, fails on any `gh release` error and no longer overwrites assets of an existing release.
 - `tools/pack-release.ps1` fails when creating the source archive fails.
 - Documentation no longer claims `.mtl` material support or mesh simplification, neither of which exists.
+- The logo on the documentation site no longer covers half of the page; it is sized to the navigation bar.
+
+### Added
+- Links to the DeepWiki overview of the repository in the README and on the documentation site.
 
 ### Changed
 - Tests run on both .NET 8 and .NET 10.

@@ -25,6 +25,6 @@ The generated HTML file is completely self-contained, offline-ready, and works i
 
 - [Getting started](getting-started.md): install the package or CLI tool and generate your first 3D viewer.
 - [Public API](public-api.md): supported surface and key entry points of the library.
-- [Source on GitHub](https://github.com/IOExtend/IOViewer).
+- [Source on GitHub](https://github.com/IOExtend/IOViewer) and [DeepWiki](https://deepwiki.com/IOExtend/IOViewer) for an automatically generated overview of the repository.
 
 IOViewer is not affiliated with, endorsed by or sponsored by Autodesk. Autodesk, Revit, Navisworks, ViewCube and TimeLiner are trademarks of Autodesk, Inc.
