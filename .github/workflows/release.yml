@@ -62,5 +62,15 @@ jobs:
             Write-Host "Creating release $tagName..."
             gh release create $tagName @files --title "IOViewer v$version" --notes-file release-notes.md
           }
+      # Trusted publishing: the NuGet policy for this repository and workflow file exchanges the GitHub OIDC token for a short-lived key.
+      - uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: mahach
       - name: Publish NuGet packages
-        run: dotnet nuget push artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
+        shell: pwsh
+        run: |
+          foreach ($package in Get-ChildItem artifacts -Filter *.nupkg) {
+            dotnet nuget push $package.FullName --api-key '${{ steps.nuget-login.outputs.NUGET_API_KEY }}' --source https://api.nuget.org/v3/index.json --skip-duplicate
+            if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed for $($package.Name) with exit code $LASTEXITCODE" }
+          }
