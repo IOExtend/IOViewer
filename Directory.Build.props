@@ -16,7 +16,7 @@
   <PropertyGroup>
     <Version>0.1.0</Version>
     <Authors>mahach666</Authors>
-    <Copyright>Copyright (c) 2026 IOExtend</Copyright>
+    <Copyright>Copyright (c) 2026 mahach666</Copyright>
     <Product>IOViewer</Product>
     <Description>Fast, pure managed .NET library and CLI tool for generating standalone, zero-dependency interactive 3D WebGL/HTML BIM &amp; CAD model viewers.</Description>
     <NeutralLanguage>en</NeutralLanguage>
@@ -24,7 +24,7 @@
     <PackageProjectUrl>https://github.com/IOExtend/IOViewer</PackageProjectUrl>
     <RepositoryUrl>https://github.com/IOExtend/IOViewer</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageTags>bim;cad;webgl;html-viewer;3d-viewer;threejs;revit;ifc;navisworks;gltf;glb;obj;timeliner;4d;viewcube;section-box;measure;grids</PackageTags>
+    <PackageTags>bim;cad;webgl;html-viewer;3d-viewer;revit;ifc;navisworks;gltf;glb;obj;timeliner;4d;viewcube;section-box;measure;grids</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
@@ -35,11 +35,17 @@
   </ItemGroup>
 
   <PropertyGroup Condition="'$(MSBuildProjectExtension)' == '.csproj'">
-    <GenerateDocumentationFile Condition="'$(IsPackable)' == 'true'">true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
+
+  <!-- Report known-vulnerable packages, direct and transitive, as warnings (NU1901-NU1904). -->
+  <PropertyGroup>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(CI)' == 'true' Or '$(GITHUB_ACTIONS)' == 'true' Or '$(TF_BUILD)' == 'true'">

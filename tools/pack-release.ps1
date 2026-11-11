@@ -65,7 +65,8 @@ New-Zip $cliNet10 (Join-Path $Output "IOViewer-Cli-$version-net10.0.zip")
 Write-Host "Archiving repository source tree..."
 $sourceZip = Join-Path $Output "IOViewer-$version-source.zip"
 if (Test-Path -LiteralPath $sourceZip) { Remove-Item -LiteralPath $sourceZip }
-git archive --format=zip --prefix="IOViewer-$version/" HEAD -o $sourceZip
+& git -C $root archive --format=zip --prefix="IOViewer-$version/" --output=$sourceZip HEAD
+if ($LASTEXITCODE -ne 0) { throw "git archive failed with exit code $LASTEXITCODE" }
 
 # 5. Pack NuGet Packages
 Write-Host "Packing NuGet packages..."

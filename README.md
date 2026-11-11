@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 
-IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone, zero-dependency interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, JSON, or sibling libraries ([RvtIO](https://github.com/IOExtend/RvtIO), [IfcIO](https://github.com/IOExtend/IfcIO), and [NwcIO](https://github.com/IOExtend/NwcIO)).
+IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone, zero-dependency interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Geometry read by sibling libraries ([RvtIO](https://github.com/IOExtend/RvtIO), [IfcIO](https://github.com/IOExtend/IfcIO), and [NwcIO](https://github.com/IOExtend/NwcIO)) can be passed in by building a `ViewerDocument` in code; IOViewer has no direct dependency on them.
 
 The generated HTML file is completely self-contained, offline-ready, and works in any modern browser without external servers or cloud dependencies.
 
@@ -128,11 +128,12 @@ The documentation site with API references and guides is at <https://ioextend.gi
 ## Limitations
 
 - Version 0.1.0 is an initial release. The API can evolve before 1.0.
-- Standalone HTML export generates self-contained files (assets inlined in HTML). Extremely large assemblies with millions of triangles should be exported with LOD simplification.
+- Standalone HTML export generates self-contained files with all geometry inlined. IOViewer does not simplify meshes, so models with millions of triangles produce large files; reduce them before export.
+- The OBJ importer reads geometry only; `.mtl` material files are not read.
 
 ## Build from source and tests
 
-Use the .NET SDK selected by `global.json`, which specifies 10.0.100 with `latestFeature` roll-forward.
+Use the .NET SDK selected by `global.json`, which specifies 10.0.100 with `latestFeature` roll-forward and excludes prerelease SDKs.
 
 From the repository root:
 
@@ -152,3 +153,5 @@ Report vulnerabilities through GitHub private vulnerability reporting in the rep
 ## License and trademarks
 
 IOViewer is licensed under the [MIT License](LICENSE). Copyright holder: mahach666.
+
+IOViewer is not affiliated with, endorsed by or sponsored by Autodesk. Autodesk, Revit, Navisworks, ViewCube and TimeLiner are trademarks of Autodesk, Inc. They are used here only to describe compatibility and familiar features. The viewer is written from scratch and includes no Autodesk code or binaries.

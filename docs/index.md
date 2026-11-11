@@ -4,7 +4,7 @@ title: IOViewer
 
 # IOViewer
 
-**IOViewer** is a fast, 100% managed .NET library and CLI tool for generating standalone, zero-dependency interactive 3D WebGL / HTML BIM & CAD model viewers directly from code or file formats (glTF/GLB, Wavefront OBJ, JSON, and IOExtend models).
+**IOViewer** is a fast, 100% managed .NET library and CLI tool for generating standalone, zero-dependency interactive 3D WebGL / HTML BIM & CAD model viewers directly from code or file formats (glTF/GLB, Wavefront OBJ, and JSON).
 
 The generated HTML file is completely self-contained, offline-ready, and works in any modern desktop or mobile browser without requiring external servers, WebGL plug-ins, or cloud connectivity.
 
@@ -26,3 +26,5 @@ The generated HTML file is completely self-contained, offline-ready, and works i
 - [Getting started](getting-started.md): install the package or CLI tool and generate your first 3D viewer.
 - [Public API](public-api.md): supported surface and key entry points of the library.
 - [Source on GitHub](https://github.com/IOExtend/IOViewer).
+
+IOViewer is not affiliated with, endorsed by or sponsored by Autodesk. Autodesk, Revit, Navisworks, ViewCube and TimeLiner are trademarks of Autodesk, Inc.
