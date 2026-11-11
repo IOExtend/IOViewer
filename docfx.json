@@ -20,6 +20,8 @@
     "globalMetadata": {
       "_appTitle": "IOViewer",
       "_appFooter": "IOViewer is licensed under the MIT License.",
+      "_appLogoPath": "images/ioviewer-logo.svg",
+      "_appFaviconPath": "images/favicon.ico",
       "_enableSearch": true
     },
     "template": ["default", "modern"]
