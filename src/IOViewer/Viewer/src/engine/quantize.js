@@ -40,14 +40,21 @@ export function octDecodeInto(out, offset, a, b) {
   out[offset + 2] = z / length;
 }
 
-// Positions of META geometry g (3 per vertex, geometry-local): u16 steps with `q` decoded, f32 as written.
-export function geometryPositions(data, g) {
+// Positions view of META geometry g as written: u16 steps (with `q`) or f32; any other combination throws.
+export function positionsView(data, g) {
   const view = data.view(g.positions);
   if (!g.q) {
     if (!(view instanceof Float32Array)) throw new Error(`Geometry positions of type '${g.positions.t}' need a "q" origin and step.`);
     return view;
   }
   if (!(view instanceof Uint16Array)) throw new Error(`Quantized geometry positions must be u16, got '${g.positions.t}'.`);
+  return view;
+}
+
+// Positions of META geometry g (3 per vertex, geometry-local): u16 steps with `q` decoded, f32 as written.
+export function geometryPositions(data, g) {
+  const view = positionsView(data, g);
+  if (!g.q) return view;
   const [ox, oy, oz] = g.q.o;
   const s = g.q.s;
   const positions = new Float32Array(view.length);
@@ -61,11 +68,17 @@ export function geometryPositions(data, g) {
 
 // Unit normals of META geometry g (3 per vertex): i16 octahedral pairs decoded, f32 as written; null without normals.
 export function geometryNormals(data, g) {
-  if (!g.normals) return null;
-  const view = data.view(g.normals);
-  if (view instanceof Float32Array) return view;
-  if (!(view instanceof Int16Array)) throw new Error(`Geometry normals must be i16 or f32, got '${g.normals.t}'.`);
+  const view = normalsView(data, g);
+  if (!(view instanceof Int16Array)) return view;
   const normals = new Float32Array((view.length / 2) * 3);
   for (let v = 0; v < view.length / 2; v++) octDecodeInto(normals, v * 3, view[v * 2], view[v * 2 + 1]);
   return normals;
+}
+
+// Normals view of META geometry g as written: i16 octahedral pairs or f32 x3; null without normals; others throw.
+export function normalsView(data, g) {
+  if (!g.normals) return null;
+  const view = data.view(g.normals);
+  if (!(view instanceof Float32Array || view instanceof Int16Array)) throw new Error(`Geometry normals must be i16 or f32, got '${g.normals.t}'.`);
+  return view;
 }

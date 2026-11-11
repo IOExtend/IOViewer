@@ -32,8 +32,7 @@ const near = (a, b, tolerance = 1e-3) => a.every((v, i) => Math.abs(v - b[i]) <=
 const colorOf = (page, i) =>
   page.evaluate((i) => {
     const { scene } = window.__ioviewer;
-    const { mesh, batchId } = scene.instance(scene.instancesOf(i)[0]);
-    return mesh.getColorAt(batchId, mesh.material.color.clone()).toArray();
+    return scene.instanceColor(scene.instancesOf(i)[0]).toArray();
   }, i);
 const css = (page, color) => page.evaluate((c) => window.__ioviewer.scene.instance(0).mesh.material.color.clone().set(c).toArray(), color);
 

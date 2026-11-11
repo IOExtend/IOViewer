@@ -2,6 +2,7 @@ const dictionaries = {
   ru: {
     elements: 'Элементов',
     noGeometry: 'Нет геометрии',
+    contextLost: 'Видеокарта сброшена — перезагрузите страницу',
     selected: 'Выбрано',
     close: 'Закрыть',
     elementGroup: 'Элемент',
@@ -105,6 +106,7 @@ const dictionaries = {
   en: {
     elements: 'Elements',
     noGeometry: 'No geometry',
+    contextLost: 'The graphics context was lost — reload the page',
     selected: 'Selected',
     close: 'Close',
     elementGroup: 'Element',

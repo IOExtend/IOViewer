@@ -1,4 +1,4 @@
-// Regenerates building.json, empty.json and escaping.json; run from the repository root: dotnet run tests/fixtures/viewer/generate-fixtures.cs -- tests/fixtures/viewer
+// Regenerates building.json, empty.json, escaping.json and textured.json; run from the repository root: dotnet run tests/fixtures/viewer/generate-fixtures.cs -- tests/fixtures/viewer
 #:project ../../../src/IOViewer/IOViewer.csproj
 #:property PublishAot=false
 #:property JsonSerializerIsReflectionEnabledByDefault=true
@@ -181,6 +181,7 @@ string buildingPath = Path.Combine(outDir, "building.json");
 JsonViewerExporter.Save(doc, buildingPath);
 JsonViewerExporter.Save(new ViewerDocument("Empty Model"), Path.Combine(outDir, "empty.json"));
 JsonViewerExporter.Save(Escaping(), Path.Combine(outDir, "escaping.json"));
+JsonViewerExporter.Save(Textured(), Path.Combine(outDir, "textured.json"));
 
 // Round-trip check: everything the viewer needs must survive JsonViewerImporter.
 var back = JsonViewerImporter.Load(buildingPath);
@@ -215,6 +216,68 @@ ViewerDocument Escaping()
         hostile.Meshes.Add(new ViewerMesh { Id = k, Name = names[k], ElementId = e.Id, Vertices = v, Indices = i, Normals = n, Color = concrete });
     }
     return hostile;
+}
+
+// A smooth, checker-textured cylinder (cylindrical UVs in metres, 0.5 m per checker repeat) next to an untextured box,
+// for the textures display mode and smooth shading.
+ViewerDocument Textured()
+{
+    var textured = new ViewerDocument("Textured");
+    textured.Textures.Add(Checker());
+    const int sides = 48;
+    const double radius = 2, height = 3;
+    var v = new List<Vector3d>();
+    var n = new List<Vector3d>();
+    var uv = new List<Vector2d>();
+    var idx = new List<int>();
+    for (int k = 0; k <= sides; k++)
+    {
+        double a = k * Math.Tau / sides;
+        var side = new Vector3d(Math.Cos(a), Math.Sin(a), 0);
+        for (int z = 0; z < 2; z++)
+        {
+            v.Add(new Vector3d(side.X * radius, side.Y * radius, z * height));
+            n.Add(side);
+            uv.Add(new Vector2d(a * radius, z * height));
+        }
+        if (k < sides) idx.AddRange([k * 2, k * 2 + 2, k * 2 + 3, k * 2, k * 2 + 3, k * 2 + 1]);
+    }
+    var tank = new ViewerElement { Id = 600001, Name = "Textured Tank", Category = "Equipment", TypeName = "Tank", Level = "Level 1" };
+    tank.MeshIndices.Add(0);
+    textured.Elements.Add(tank);
+    textured.Meshes.Add(new ViewerMesh { Id = 0, Name = tank.Name, ElementId = tank.Id, Vertices = v, Indices = idx, Normals = n, UVs = uv, Color = concrete, TextureIndex = 0 });
+    var plain = new ViewerElement { Id = 600002, Name = "Plain Box", Category = "Walls", TypeName = "Generic 200", Level = "Level 1" };
+    plain.MeshIndices.Add(1);
+    textured.Elements.Add(plain);
+    var (bv, bi, bn) = Box(new(3, -1, 0), new(5, 1, 2));
+    textured.Meshes.Add(new ViewerMesh { Id = 1, Name = plain.Name, ElementId = plain.Id, Vertices = bv, Indices = bi, Normals = bn, Color = steel });
+    return textured;
+}
+
+// 64 x 64 checker of 8 x 8 pixel squares as a 24-bit BMP, 0.5 m per repeat.
+static ViewerTexture Checker()
+{
+    const int size = 64, header = 54, pixels = size * size * 3;
+    var bmp = new byte[header + pixels];
+    bmp[0] = (byte)'B';
+    bmp[1] = (byte)'M';
+    BitConverter.TryWriteBytes(bmp.AsSpan(2), bmp.Length);
+    BitConverter.TryWriteBytes(bmp.AsSpan(10), header);
+    BitConverter.TryWriteBytes(bmp.AsSpan(14), 40); // BITMAPINFOHEADER
+    BitConverter.TryWriteBytes(bmp.AsSpan(18), size);
+    BitConverter.TryWriteBytes(bmp.AsSpan(22), size);
+    BitConverter.TryWriteBytes(bmp.AsSpan(26), (short)1);
+    BitConverter.TryWriteBytes(bmp.AsSpan(28), (short)24);
+    BitConverter.TryWriteBytes(bmp.AsSpan(34), pixels);
+    for (int y = 0; y < size; y++)
+    {
+        for (int x = 0; x < size; x++)
+        {
+            byte value = ((x / 8) + (y / 8)) % 2 == 0 ? (byte)235 : (byte)60;
+            bmp.AsSpan(header + (y * size + x) * 3, 3).Fill(value); // rows of 192 bytes need no padding
+        }
+    }
+    return new ViewerTexture { MimeType = "image/bmp", Base64Data = Convert.ToBase64String(bmp), ScaleX = 0.5, ScaleY = 0.5 };
 }
 
 // Axis-aligned box with 4 vertices per face so each face has its own flat normal.

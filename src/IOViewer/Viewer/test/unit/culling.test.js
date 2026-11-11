@@ -7,10 +7,11 @@ import { MotionDetail } from '../../src/engine/motionDetail.js';
 
 const view = (array) => ({ array, n: array.length });
 
-// ModelScene over unit cubes (12 triangles) at the given x positions along the X axis, one element each, all in
-// material 0 (opacity `opacity`); scale[i] (default 1) sizes cube i.
-function cubes(xs, { opacity = 1, scale = [] } = {}) {
-  const box = new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+// ModelScene over unit cubes (12 triangles, or 12 * segments^2) at the given x positions along the X axis, one element
+// each, all in material 0 (opacity `opacity`); scale[i] (default 1) sizes cube i. Each cube is its own chunk, so the
+// chunk culling of these tests is per instance.
+function cubes(xs, { opacity = 1, scale = [], segments = 1 } = {}) {
+  const box = new THREE.BoxGeometry(1, 1, 1, segments, segments, segments).toNonIndexed();
   const positions = box.getAttribute('position').array;
   const indices = Uint32Array.from({ length: positions.length / 3 }, (_, i) => i);
   const matrix = new Float32Array(xs.length * 12);
@@ -30,7 +31,7 @@ function cubes(xs, { opacity = 1, scale = [] } = {}) {
     },
     elements: xs.map((_, i) => ({ id: i + 1, name: `E${i}` })),
   };
-  return new ModelScene({ meta, view: (v) => v.array });
+  return new ModelScene({ meta, view: (v) => v.array }, { chunkVertices: positions.length / 3 });
 }
 
 // Camera on -Y looking along +Y at the origin.
@@ -43,11 +44,9 @@ function camera(distance = 10) {
   return c;
 }
 
-// Batch ids the bucket would draw for `cam`, in draw order.
+// Elements a render with `cam` would draw, ascending.
 function drawn(scene, cam) {
-  const mesh = scene.root.children[0];
-  mesh.onBeforeRender(null, null, cam, mesh.geometry, mesh.material);
-  return [...mesh._indirectTexture.image.data.subarray(0, mesh._multiDrawCount)].map((id) => scene.instance(id).element);
+  return scene.drawnInstances(cam).map((i) => scene.instance(i).element);
 }
 
 test('outsideFrustum keeps spheres touching the frustum and drops those beyond a plane', () => {
@@ -96,23 +95,17 @@ test('detailThreshold of the scene fits the budget; a model within it is drawn w
   const scene = cubes([0, 2], { scale: [1, 0.01] });
   const cam = camera();
   assert.equal(scene.detailThreshold(cam, 800, 1e9), 0);
-  const t = scene.detailThreshold(cam, 800, 100); // one cube costs 80 + 12
+  const t = scene.detailThreshold(cam, 800, 20); // one cube costs 12 triangles
   scene.setDetail(t, 800);
   assert.deepEqual(drawn(scene, cam), [0]);
 });
 
-test('a transparent bucket is drawn back to front', () => {
+test('unit spheres are the cube centres (three sorts transparent chunks back to front by them)', () => {
   const scene = cubes([0, 2, 4], { opacity: 0.5 });
-  const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
-  cam.position.set(-10, 0, 0); // looks along +X: x = 4 is farthest
-  cam.up.set(0, 0, 1);
-  cam.lookAt(0, 0, 0);
-  cam.updateMatrixWorld();
-  assert.deepEqual(drawn(scene, cam), [2, 1, 0]);
-  cam.position.set(14, 0, 0);
-  cam.lookAt(0, 0, 0);
-  cam.updateMatrixWorld();
-  assert.deepEqual(drawn(scene, cam), [0, 1, 2]);
+  const spheres = scene.root.children.map((mesh) => mesh.geometry.boundingSphere);
+  assert.deepEqual(spheres.map((s) => s.center.toArray()).sort((a, b) => a[0] - b[0]), [[0, 0, 0], [2, 0, 0], [4, 0, 0]]);
+  for (const s of spheres) assert.ok(Math.abs(s.radius - Math.sqrt(3) / 2) < 1e-6);
+  assert.ok(scene.root.children.every((mesh) => mesh.material.transparent && !mesh.material.depthWrite));
 });
 
 // Drives a MotionDetail through one frame: requested at `at`, drawn after `wait` ms, taking `cpu` ms of script.
@@ -163,10 +156,15 @@ test('MotionDetail: a near/far change (hide, isolate, show all) is no camera mot
   assert.equal(frame(detail, cam, 40), 3);
 });
 
-test('MotionDetail: endless slow frames shrink the budget to its floor, and the view never empties', () => {
-  // 12 000 cubes (~1.1 M cost, over the floor) from 1 m down to 1 mm across.
+// 12 000 cubes of 108 triangles (~1.3 M, over the budget floor) from 1 m down to 1 mm across.
+let big;
+const bigScene = () => {
   const xs = Array.from({ length: 12000 }, (_, i) => -10 + (i % 2000) / 100);
-  const scene = cubes(xs, { scale: xs.map((_, i) => 1 / (1 + (i % 1000))) });
+  return (big ??= cubes(xs, { segments: 3, scale: xs.map((_, i) => 1 / (1 + (i % 1000))) }));
+};
+
+test('MotionDetail: endless slow frames shrink the budget to its floor, and the view never empties', () => {
+  const scene = bigScene();
   const detail = new MotionDetail(scene, () => {}, 5e6);
   const cam = camera(30);
   let cutFrames = 0;
@@ -212,4 +210,29 @@ test('MotionDetail: slow frames while moving shrink the budget', () => {
   const detail = new MotionDetail(stubScene(2), () => {}, 4e6);
   for (let k = 0; k < 20; k++) frame(detail, cam, k * 60, { wait: 50, cpu: 5, move: 0.01 });
   assert.ok(detail.budget < 4e6 && detail.budget >= 1e6, `budget ${detail.budget}`);
+});
+
+test('MotionDetail starting at totalCost stays at full detail when moving frames measure 33 ms', () => {
+  const scene = bigScene();
+  const cam = camera(30);
+  const detail = new MotionDetail(scene, () => {}, scene.totalCost);
+  for (let k = 0; k < 60; k++) {
+    frame(detail, cam, k * 33, { wait: 31, cpu: 2, move: 0.001 });
+    assert.equal(detail.minPixels, 0, `frame ${k}`);
+  }
+  assert.equal(detail.budget, scene.totalCost);
+});
+
+test('MotionDetail starting at totalCost shrinks below totalCost when frames measure 60 ms', () => {
+  const scene = bigScene();
+  const cam = camera(30);
+  const detail = new MotionDetail(scene, () => {}, scene.totalCost);
+  let cut = 0;
+  for (let k = 0; k < 20; k++) {
+    frame(detail, cam, k * 60, { wait: 55, cpu: 5, move: 0.001 });
+    if (detail.minPixels > 0) cut++;
+  }
+  scene.setDetail(0);
+  assert.ok(detail.budget < scene.totalCost, `budget ${detail.budget}`);
+  assert.ok(cut > 0);
 });

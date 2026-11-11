@@ -140,3 +140,92 @@ test('highlight, visibility and display modes change the picture without errors'
   expect((await shot()).equals(before)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+// Grey levels (0..255) of the screen pixels in `clip`, row by row; the PNG is decoded by the page itself.
+async function greys(page, clip) {
+  const png = await page.screenshot({ clip });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height });
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, image.width, image.height);
+    return Array.from({ length: data.length / 4 }, (_, i) => (data[i * 4] + data[i * 4 + 1] + data[i * 4 + 2]) / 3);
+  }, png.toString('base64'));
+}
+
+// How many neighbouring pixels differ by more than 1.5 grey levels across the middle 80 % of the textured fixture's
+// cylinder, along the screen row through its centre: smooth shading changes by at most one level per pixel there, flat
+// shading stays constant over a facet and jumps at its edge.
+async function cylinderJumps(page) {
+  const [x0, x1, y] = await page.evaluate(() => {
+    const { camera } = window.__ioviewer;
+    camera.updateMatrixWorld();
+    const right = camera.position.clone().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const screen = (p) => {
+      const v = p.project(camera);
+      return [((v.x + 1) / 2) * innerWidth, ((1 - v.y) / 2) * innerHeight];
+    };
+    const centre = window.__ioviewer.scene.elementBox(0).getCenter(camera.position.clone()); // the tank, RTC
+    const [a] = screen(centre.clone().addScaledVector(right, -1.6));
+    const [b, y] = screen(centre.clone().addScaledVector(right, 1.6));
+    return [Math.round(a), Math.round(b), Math.round(y)];
+  });
+  const row = await greys(page, { x: x0, y, width: x1 - x0, height: 1 });
+  return row.slice(1).filter((g, i) => Math.abs(g - row[i]) > 1.5).length;
+}
+
+test('curved surfaces are shaded smoothly from the baked normals, not flat per facet', async ({ page }) => {
+  const { errors } = await open(page, 'textured');
+  const geometries = await page.evaluate(() =>
+    window.__ioviewer.scene.root.children.map((m) => ({ itemSize: m.geometry.getAttribute('normal')?.itemSize, normalized: m.geometry.getAttribute('normal')?.normalized })),
+  );
+  expect(geometries.length).toBeGreaterThan(0);
+  expect(geometries.every((g) => g.itemSize === 2 && g.normalized)).toBe(true);
+  const smooth = await cylinderJumps(page);
+  // The defect this guards against: without a `normal` attribute three shades Lambert flat, per 7.5° facet, as here.
+  await page.evaluate(() => {
+    for (const { material } of window.__ioviewer.scene._buckets) {
+      material.flatShading = true;
+      material.needsUpdate = true;
+    }
+    window.__ioviewer.scene.setOpacity(1);
+  });
+  await nextFrame(page);
+  const flat = await cylinderJumps(page);
+  expect(smooth).toBe(0);
+  expect(flat).toBeGreaterThanOrEqual(2);
+  expect(errors).toEqual([]);
+});
+
+test('context lost shows the reload message', async ({ page }) => {
+  await open(page, 'building');
+  await expect(page.locator('#ioviewer-message')).toBeHidden();
+  await page.evaluate(() => document.getElementById('ioviewer-canvas').getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
+  await expect(page.locator('#ioviewer-message')).toHaveText('Видеокарта сброшена — перезагрузите страницу');
+  await expect(page.locator('#ioviewer-message')).toBeVisible();
+});
+
+test('pick element with index > 4096 (large fixture)', async ({ page }) => {
+  const { errors } = await open(page, 'large');
+  for (const element of [4097, 15123, 19999]) {
+    // Zoomed onto the element (it is 0.3 m among 20000), the centre of its top face.
+    const hit = await page.evaluate((element) => {
+      const { scene, controls, picker, camera } = window.__ioviewer;
+      const box = scene.elementBox(element);
+      controls.fitBox(box, false);
+      camera.updateMatrixWorld();
+      const top = box.getCenter(box.min.clone());
+      top.z = box.max.z;
+      const p = top.clone().project(camera);
+      const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
+      const found = picker.pick(rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height);
+      return found && { element: found.element, distance: found.point.distanceTo(top), slot: scene.instance(scene.instancesOf(element)[0]).slot };
+    }, element);
+    expect(hit.element).toBe(element);
+    expect(hit.distance).toBeLessThan(0.01);
+  }
+  expect(errors).toEqual([]);
+});

@@ -194,8 +194,7 @@ test('an element of an opaque and a transparent mesh is picked through its glazi
   const colours = await page.evaluate((i) => {
     const { scene } = window.__ioviewer;
     return [...scene.instancesOf(i)].map((n) => {
-      const { mesh, batchId } = scene.instance(n);
-      return { transparent: mesh.material.transparent, hex: mesh.getColorAt(batchId, mesh.material.color.clone()).getHexString() };
+      return { transparent: scene.instance(n).mesh.material.transparent, hex: scene.instanceColor(n).getHexString() };
     });
   }, wall);
   expect(colours).toHaveLength(2);

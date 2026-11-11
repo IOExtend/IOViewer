@@ -254,11 +254,7 @@ for (const run of RUNS) {
       const gl = document.createElement('canvas').getContext('webgl2');
       const info = gl.getExtension('WEBGL_debug_renderer_info');
       const { scene } = window.__ioviewer;
-      let triangles = 0;
-      for (let i = 0; i < scene.instanceCount; i++) {
-        const { mesh, batchId } = scene.instance(i);
-        triangles += mesh.getGeometryRangeAt(mesh.getGeometryIdAt(batchId)).count / 3;
-      }
+      const triangles = scene.memory().triangles;
       return {
         readyMs: window.__perfReady,
         domContentLoadedMs: nav.domContentLoadedEventStart,

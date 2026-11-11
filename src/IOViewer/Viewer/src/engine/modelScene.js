@@ -1,13 +1,15 @@
 import * as THREE from 'three';
-import { detailThreshold, frustumPlanes, outsideFrustum, screenRadius, viewMetrics } from './culling.js';
-import { geometryNormals, geometryPositions } from './quantize.js';
+import { detailThreshold, frustumPlanes, outsideFrustum, viewMetrics } from './culling.js';
+import { normalsView, positionsView } from './quantize.js';
+import { CHUNK_VERTICES, F32, bakeChunk, bakeSource, drawSpan, placeSlot, prefixByRadius, sortByRadius, splitCells } from './chunks.js';
+import { patchLambert } from './slotShader.js';
 
 export const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
-const HIGHLIGHT_COLOR = new THREE.Color('#f59e0b');
-const WHITE_COLOR = new THREE.Color().setRGB(0.92, 0.92, 0.93, THREE.SRGBColorSpace);
-// Drawing one instance costs about as much as this many of its triangles (measured: ANGLE/D3D11 multi-draw on an
-// integrated GPU spends ~0.14 µs per draw and ~1.8 ns per triangle).
-const DRAW_COST = 80;
+const HIGHLIGHT = [245, 158, 11]; // #f59e0b
+const WHITE = [235, 235, 237]; // sRGB (0.92, 0.92, 0.93)
+const NO_SLOT = 0xffffffff; // an instance without vertices has no slot
+const ROW = 2048; // slots per slot-texture row (the shaders use slot & 2047, slot >> 11)
+const RANGE_LIMIT = 256; // up to this many changed slots are uploaded one by one, more as the whole texture
 
 // True when the linear part of instance i (12 floats per instance, columns first) has a negative determinant.
 export function isMirrored(matrices, i) {
@@ -30,18 +32,36 @@ export function reversedWinding(geometry) {
   return reversed;
 }
 
+// The CPU copy of a GPU array is dropped once three has uploaded it (three's documented onUpload pattern).
+function release() {
+  this.array = null;
+}
+function attr(array, itemSize, normalized = false, Type = THREE.BufferAttribute) {
+  return new Type(array, itemSize, normalized).onUpload(release);
+}
+const colorBytes = (color) => {
+  const hex = color.getHex(THREE.SRGBColorSpace);
+  return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
+};
+
 /**
- * The model as one BatchedMesh per material (a material is either opaque or transparent).
- * Elements are addressed by their index in META `elements` (0..n-1); per-instance visibility and colour
- * change without rebuilding. Every visual change dispatches `{type: 'change', detail: {kind}}` on `root`.
- * Visibility has layers: the user's (setVisible, isolate, showAll) and named ones (setLayerHidden, e.g. the 4D schedule
- * or a linked file); an instance is drawn when the user shows it and no named layer hides it.
- * Each frame every bucket lists only its shown instances inside the camera's frustum (one tight loop over typed
- * arrays instead of three's per-instance objects); setDetail can also leave out instances smaller on screen than a
- * given radius, which the viewer uses while the camera moves (detailThreshold picks it for a cost budget).
+ * The model as merged spatial chunks: per material, the instances are split into chunks of up to CHUNK_VERTICES
+ * vertices of nearby instances, baked into world space once (quantized positions, octahedral normals) and drawn with
+ * one call each. Every instance with vertices owns a slot; its colour and shown flag live in a slot texture the shader
+ * reads, so selecting, hiding or tinting rewrites a few texels and never rebuilds geometry.
+ * Elements are addressed by their index in META `elements` (0..n-1). Every visual change dispatches
+ * `{type: 'change', detail: {kind}}` on `root`. Visibility has layers: the user's (setVisible, isolate, showAll) and
+ * named ones (setLayerHidden, e.g. the 4D schedule or a linked file); an instance is drawn when the user shows it and
+ * no named layer hides it.
+ * Within a chunk the slots are ordered by size, largest first, and each frame draws the index range from the first to
+ * the last shown slot (hidden slots inside it are dropped by the shader); setDetail can also cut that range where the
+ * slots get smaller on screen than a given radius, which the viewer uses while the camera moves (detailThreshold
+ * picks it for a cost budget in triangles).
+ * options (tests and the performance harness, from window.IOVIEWER_TEST): chunkVertices, noHideBranch; and
+ * maxTextureSize (the renderer's).
  */
 export class ModelScene {
-  constructor(data) {
+  constructor(data, options = {}) {
     const { meta } = data;
     const instances = meta.instances;
     const count = instances.count;
@@ -55,41 +75,30 @@ export class ModelScene {
     this._meta = meta;
     this._mode = 'materials';
     this._opacity = 1;
+    this._picking = false;
     this._textures = new Map();
     this._elementOf = data.view(instances.element).slice(); // own copy: the BIN block is released after load
     this._bucketOf = new Uint32Array(count);
-    this._batchId = new Uint32Array(count);
     this._visible = new Uint8Array(count).fill(1); // the user's layer
     this._layers = new Map(); // name -> Uint8Array, 1 = hidden by that layer
     this._layerHides = new Uint8Array(count); // how many named layers hide the instance
     this._highlight = new Uint8Array(count);
     this._highlighted = [];
-    this._tint = new Map(); // instance -> THREE.Color
+    this._tint = new Map(); // instance -> sRGB bytes [r, g, b]
     this._boxes = new Float32Array(count * 6);
-    // Mirrored instances (det < 0) use a copy of their geometry with reversed winding, keyed as -1 - g:
-    // DoubleSide would otherwise treat their outer faces as back faces and turn the normals inward.
-    const geometryKey = new Int32Array(count);
-    for (let i = 0; i < count; i++) geometryKey[i] = isMirrored(matrices, i) ? -1 - geometryOf[i] : geometryOf[i];
-    this._buckets = this._createBuckets(meta, geometryKey, materialOf);
+    this._minPixels = 0;
+    this._viewHeight = 1;
+    this.visibleCost = 0;
+    const noHideBranch = !!options.noHideBranch;
+    this.slotUniforms = { slotInfo: { value: null }, slotState: { value: null } };
+    this._buckets = this._createBuckets(meta, materialOf, noHideBranch);
     this._indexElements();
 
-    const geometries = new Map();
     const matrix = new THREE.Matrix4();
     const box = new THREE.Box3();
     for (let i = 0; i < count; i++) {
-      const key = geometryKey[i];
-      const bucket = this._buckets[this._bucketOf[i]];
-      let geometryId = bucket.geometryIds.get(key);
-      if (geometryId === undefined) {
-        geometryId = bucket.mesh.addGeometry(this._geometry(data, geometries, key, bucket.texture !== null));
-        bucket.geometryIds.set(key, geometryId);
-      }
       const m = matrices.subarray(i * 12, i * 12 + 12);
       matrix.set(m[0], m[3], m[6], m[9], m[1], m[4], m[7], m[10], m[2], m[5], m[8], m[11], 0, 0, 0, 1);
-      const id = bucket.mesh.addInstance(geometryId);
-      bucket.mesh.setMatrixAt(id, matrix);
-      bucket.mesh.setColorAt(id, bucket.color);
-      this._batchId[i] = id;
       const local = meta.geometries[geometryOf[i]].bbox;
       box.min.fromArray(local.min);
       box.max.fromArray(local.max);
@@ -97,8 +106,12 @@ export class ModelScene {
       box.min.toArray(this._boxes, i * 6);
       box.max.toArray(this._boxes, i * 6 + 3);
     }
-    for (const bucket of this._buckets) bucket.geometryIds = null;
-    this._prepareCulling();
+    this._build(data, geometryOf, matrices, options.chunkVertices ?? CHUNK_VERTICES, options.maxTextureSize ?? Infinity);
+    for (let i = 0; i < count; i++) {
+      this._applyColor(i);
+      this._draw(i);
+    }
+    this._flush();
   }
 
   elementId(index) {
@@ -144,7 +157,7 @@ export class ModelScene {
 
   // Colour override for elements (a THREE.Color or CSS colour; null removes it); the selection highlight still wins.
   setTint(indices, color) {
-    const tint = color === null ? null : new THREE.Color(color);
+    const tint = color === null ? null : colorBytes(new THREE.Color(color));
     for (const index of indices) {
       for (const i of this.instancesOf(index)) {
         if (tint) this._tint.set(i, tint);
@@ -195,12 +208,44 @@ export class ModelScene {
   }
 
   get instanceCount() {
-    return this._batchId.length;
+    return this._slotOf.length;
   }
 
-  // Where instance i is drawn (its bucket BatchedMesh and id there) and its element index (-1 = none).
+  // Where instance i is drawn (its chunk mesh and slot; null and -1 without vertices) and its element (-1 = none).
   instance(i) {
-    return { mesh: this._buckets[this._bucketOf[i]].mesh, batchId: this._batchId[i], element: this._elementOf[i] };
+    const slot = this._slotOf[i];
+    if (slot === NO_SLOT) return { mesh: null, element: this._elementOf[i], slot: -1 };
+    return { mesh: this._units[this._slotUnit[slot]].mesh, element: this._elementOf[i], slot };
+  }
+
+  // The colour instance i is drawn with (highlight, tint, white mode or material), linear, in `target`.
+  instanceColor(i, target = new THREE.Color()) {
+    const slot = this._slotOf[i];
+    const [r, g, b] = slot === NO_SLOT ? this._colorOf(i) : this._state.image.data.subarray(slot * 4, slot * 4 + 3);
+    return target.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
+  }
+
+  // Element of a slot, -1 for an instance without one.
+  slotElement(slot) {
+    return this._elementOf[this._slotInstance[slot]];
+  }
+
+  // Runs fn with `material` on every chunk's triangles (and triangles shown in wireframe mode), e.g. for picking.
+  withMaterial(material, fn) {
+    this._picking = true;
+    for (const unit of this._units) {
+      unit.mesh.material = material;
+      this._showUnit(unit);
+    }
+    try {
+      return fn();
+    } finally {
+      this._picking = false;
+      for (const unit of this._units) {
+        unit.mesh.material = unit.bucket.material;
+        this._showUnit(unit);
+      }
+    }
   }
 
   // Box of all the element's instances, in `box` when given (callers looping over many elements reuse one).
@@ -221,6 +266,7 @@ export class ModelScene {
 
   setDisplayMode(mode) {
     if (!DISPLAY_MODES.includes(mode)) throw new Error(`Unknown display mode '${mode}'.`);
+    const white = (mode === 'white') !== (this._mode === 'white');
     this._mode = mode;
     for (const bucket of this._buckets) {
       const map = mode === 'textures' && bucket.texture !== null ? this._texture(bucket.texture) : null;
@@ -228,9 +274,10 @@ export class ModelScene {
         bucket.material.map = map;
         bucket.material.needsUpdate = true;
       }
-      bucket.material.wireframe = mode === 'wireframe';
     }
-    for (let i = 0; i < this._batchId.length; i++) this._applyColor(i);
+    if (mode === 'wireframe') this._buildLines();
+    for (const unit of this._units) this._showUnit(unit);
+    if (white) for (let i = 0; i < this._slotOf.length; i++) this._applyColor(i);
     this._changed('appearance');
   }
 
@@ -241,48 +288,96 @@ export class ModelScene {
     this._changed('appearance');
   }
 
-  // While minPixels > 0, renders leave out instances whose bounding sphere is smaller on screen than minPixels
-  // (radius, CSS px) in a view `viewHeight` CSS px high; 0 draws everything shown again.
+  // While minPixels > 0, renders leave out slots whose bounding sphere is smaller on screen than minPixels (radius, CSS
+  // px, taken at the nearest point of its chunk) in a view `viewHeight` CSS px high; 0 draws everything shown again.
   setDetail(minPixels, viewHeight = 1) {
     this._minPixels = minPixels;
     this._viewHeight = viewHeight;
   }
 
-  // The radius for setDetail that keeps the cost of drawing what `camera` sees within `budget` (in triangles, a draw
-  // counting as DRAW_COST of them); 0 when everything fits. Sets visibleCost to the cost of all that is in view (at
-  // most; the whole model when it fits the budget anyway).
+  // Cost (triangles) of drawing everything.
+  get totalCost() {
+    return this._totalCost;
+  }
+
+  // The radius for setDetail that keeps the triangles drawn of what `camera` sees within `budget`; 0 when everything
+  // fits. Sets visibleCost to the cost of all that is in view (the whole model when it fits the budget anyway).
   detailThreshold(camera, viewHeight, budget) {
     this.visibleCost = this._totalCost;
     if (this._totalCost <= budget) return 0;
     camera.updateMatrixWorld();
     const planes = frustumPlanes(camera, this._planes);
-    const view = viewMetrics(camera, viewHeight, this._view);
-    const pixels = this._pixels;
-    const s = this._spheres;
+    const view = viewMetrics(camera, viewHeight, this._detailView);
+    const pixels = this._pixels.fill(-1);
+    const alpha = this._state.image.data;
     let visible = 0;
-    for (let i = 0; i < pixels.length; i++) {
-      const o = i * 4;
-      const x = s[o], y = s[o + 1], z = s[o + 2], r = s[o + 3];
-      if (!this._shown(i) || outsideFrustum(planes, x, y, z, r)) {
-        pixels[i] = -1;
-        continue;
+    for (const unit of this._units) {
+      const s = unit.sphere;
+      if (unit.shown === 0 || outsideFrustum(planes, s[0], s[1], s[2], s[3])) continue;
+      const near = nearDepth(view, s);
+      const scale = view[7] ? (near > 0 ? view[6] / near : Infinity) : view[6];
+      for (let slot = unit.slotBase; slot < unit.slotBase + unit.n; slot++) {
+        if (alpha[slot * 4 + 3] === 0) continue;
+        pixels[slot] = this._slotRadius[slot] * scale;
+        visible += this._slotCost[slot];
       }
-      pixels[i] = screenRadius(view, r, (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5]);
-      visible += this._cost[i];
     }
     this.visibleCost = visible;
-    return detailThreshold(pixels, this._cost, budget);
+    return detailThreshold(pixels, this._slotCost, budget);
   }
 
-  // What the last render drew: { drawn, inView } instances (inView: shown and inside the frustum).
+  // What the latest render drew, in triangles: { drawn, inView, draws } over the chunks it drew (inView: their shown
+  // span; drawn: after the detail cut).
   drawStats() {
+    let latest = -Infinity;
+    for (const unit of this._units) latest = Math.max(latest, unit.lastFrame);
     let drawn = 0;
     let inView = 0;
-    for (const bucket of this._buckets) {
-      drawn += bucket.mesh._multiDrawCount;
-      inView += bucket.inView ?? 0;
+    let draws = 0;
+    for (const unit of this._units) {
+      if (unit.lastFrame !== latest) continue;
+      const s = unit.starts;
+      inView += (s[unit.last + 1] - s[unit.first]) / 3;
+      drawn += (s[Math.max(unit.end, unit.first)] - s[unit.first]) / 3;
+      draws++;
     }
-    return { drawn, inView };
+    return { drawn, inView, draws };
+  }
+
+  // Test helper: the instances a render with `camera` would draw (three's sphere test per chunk, then its range),
+  // ascending.
+  drawnInstances(camera) {
+    camera.updateMatrixWorld();
+    const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    const renderer = { info: { render: { frame: -1 } } };
+    const sphere = new THREE.Sphere();
+    const drawn = [];
+    for (const unit of this._units) {
+      const object = this._mode === 'wireframe' && !this._picking ? unit.lines : unit.mesh;
+      if (!object?.visible || !frustum.intersectsSphere(sphere.set(sphere.center.fromArray(unit.sphere), unit.sphere[3]))) continue;
+      object.onBeforeRender(renderer, null, camera, object.geometry, object.material, null);
+      for (let k = unit.first; k < unit.end; k++) {
+        const slot = unit.slotBase + k;
+        if (this._state.image.data[slot * 4 + 3]) drawn.push(this._slotInstance[slot]);
+      }
+    }
+    return drawn.sort((a, b) => a - b);
+  }
+
+  // GPU and CPU-mirror sizes in bytes, and counts.
+  memory() {
+    return {
+      gpuBytes: this._mergedBytes + this._lineBytes + this._stateBytes,
+      mergedBytes: this._mergedBytes,
+      instancedBytes: 0,
+      stateBytes: this._stateBytes,
+      lineBytes: this._lineBytes,
+      chunks: this._units.length,
+      cells: 0,
+      mergedInstances: this._slotInstance.length,
+      instancedInstances: 0,
+      triangles: this._totalCost,
+    };
   }
 
   setClipping(planes, intersection) {
@@ -294,137 +389,237 @@ export class ModelScene {
     this._changed('appearance');
   }
 
-  // Bounding spheres (model space: root is never moved) and draw costs per instance, each bucket's instances by batch
-  // id, and the draw-list fill.
-  _prepareCulling() {
-    const count = this._batchId.length;
-    const b = this._boxes;
-    this._spheres = new Float32Array(count * 4);
-    this._cost = new Float32Array(count);
-    this._pixels = new Float32Array(count);
-    this._planes = new Float64Array(24);
-    this._view = new Float64Array(8);
-    this._minPixels = 0;
-    this._viewHeight = 1;
-    this.visibleCost = 0;
-    const range = {};
-    for (const bucket of this._buckets) {
-      const n = bucket.mesh.maxInstanceCount;
-      Object.assign(bucket, { members: new Uint32Array(n), starts: new Uint32Array(n), counts: new Uint32Array(n) });
-      bucket.mesh.onBeforeRender = (renderer, scene, camera, geometry, material) => this._fillDraws(bucket, camera, geometry, material);
-    }
-    for (let i = 0; i < count; i++) {
-      const o = i * 6;
-      const s = this._spheres;
-      s[i * 4] = (b[o] + b[o + 3]) / 2;
-      s[i * 4 + 1] = (b[o + 1] + b[o + 4]) / 2;
-      s[i * 4 + 2] = (b[o + 2] + b[o + 5]) / 2;
-      s[i * 4 + 3] = Math.hypot(b[o + 3] - b[o], b[o + 4] - b[o + 1], b[o + 5] - b[o + 2]) / 2;
-      const bucket = this._buckets[this._bucketOf[i]];
-      const id = this._batchId[i];
-      bucket.mesh.getGeometryRangeAt(bucket.mesh.getGeometryIdAt(id), range);
-      bucket.members[id] = i;
-      bucket.starts[id] = range.start;
-      bucket.counts[id] = range.count;
-      this._cost[i] = DRAW_COST + range.count / 3;
-    }
-    this._totalCost = this._cost.reduce((sum, c) => sum + c, 0);
-  }
-
-  // BatchedMesh.onBeforeRender replacement: the multi-draw list of the bucket's shown instances in the frustum (and,
-  // with setDetail, large enough on screen); transparent buckets sorted back to front.
-  _fillDraws(bucket, camera, geometry, material) {
-    const mesh = bucket.mesh;
-    // As three does: in wireframe the draw ranges are in the line index three makes, two entries per triangle index.
-    const wire = material.wireframe ? 2 : 1;
-    const bytes = !material.wireframe ? geometry.getIndex().array.BYTES_PER_ELEMENT : geometry.attributes.position.count > 65535 ? 4 : 2;
-    const planes = frustumPlanes(camera, this._planes);
-    const minPixels = this._minPixels;
-    const sorted = material.transparent;
-    const view = minPixels > 0 || sorted ? viewMetrics(camera, this._viewHeight, this._view) : null;
-    const { members, starts, counts } = bucket;
-    const s = this._spheres;
-    const order = sorted ? (bucket.order ??= new Float64Array(members.length)) : null;
-    const draws = sorted ? (bucket.draws ??= new Uint32Array(members.length)) : mesh._indirectTexture.image.data;
-    let n = 0;
-    let inView = 0;
-    let near = Infinity, far = -Infinity;
-    for (let id = 0; id < members.length; id++) {
-      const i = members[id];
-      if (this._visible[i] === 0 || this._layerHides[i] !== 0) continue;
-      const o = i * 4;
-      const x = s[o], y = s[o + 1], z = s[o + 2], r = s[o + 3];
-      if (outsideFrustum(planes, x, y, z, r)) continue;
-      inView++;
-      if (view) {
-        const depth = (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5];
-        if (minPixels > 0 && screenRadius(view, r, depth) < minPixels) continue;
-        if (sorted) {
-          order[n] = depth;
-          near = Math.min(near, depth);
-          far = Math.max(far, depth);
-        }
+  // Slots (numbered chunk by chunk), the chunks with their baked GPU data, and the slot textures.
+  _build(data, geometryOf, matrices, chunkVertices, maxTextureSize) {
+    const count = geometryOf.length;
+    const meta = this._meta;
+    const sources = new Map();
+    const source = (g) => {
+      let s = sources.get(g);
+      if (!s) {
+        const geometry = meta.geometries[g];
+        const indices = data.view(geometry.indices);
+        const uvs = geometry.uvs ? data.view(geometry.uvs) : null;
+        s = bakeSource(positionsView(data, geometry), geometry.q ?? null, normalsView(data, geometry), indices, uvs);
+        sources.set(g, s);
       }
-      draws[n++] = id;
+      return s;
+    };
+    const kind = new Uint8Array(count);
+    const origins = new Float64Array(count * 3);
+    const centres = new Float32Array(count * 3);
+    const weight = new Uint32Array(count);
+    const radius = new Float32Array(count);
+    const mirrored = new Uint8Array(count);
+    const groups = new Map(); // bucket * 2 + (f32 ? 1 : 0) -> instances
+    const b = this._boxes;
+    for (let i = 0; i < count; i++) {
+      const s = source(geometryOf[i]);
+      if (s.vertices === 0) continue;
+      kind[i] = placeSlot(matrices, i, s, origins.subarray(i * 3, i * 3 + 3));
+      mirrored[i] = isMirrored(matrices, i) ? 1 : 0;
+      weight[i] = s.vertices;
+      for (let a = 0; a < 3; a++) centres[i * 3 + a] = (b[i * 6 + a] + b[i * 6 + 3 + a]) / 2;
+      radius[i] = Math.hypot(b[i * 6 + 3] - b[i * 6], b[i * 6 + 4] - b[i * 6 + 1], b[i * 6 + 5] - b[i * 6 + 2]) / 2;
+      const key = this._bucketOf[i] * 2 + (kind[i] === F32 ? 1 : 0);
+      let list = groups.get(key);
+      if (!list) groups.set(key, (list = []));
+      list.push(i);
     }
-    if (sorted) this._sortBackToFront(bucket, n, near, far);
-    bucket.inView = inView;
-    const ids = mesh._indirectTexture.image.data;
-    for (let k = 0; k < n; k++) {
-      const id = ids[k];
-      mesh._multiDrawStarts[k] = starts[id] * bytes * wire;
-      mesh._multiDrawCounts[k] = counts[id] * wire;
+    const leaves = [];
+    for (const key of [...groups.keys()].sort((x, y) => x - y)) {
+      for (const leaf of splitCells(centres, weight, groups.get(key), chunkVertices)) leaves.push(sortByRadius(leaf, radius));
     }
-    mesh._indirectTexture.needsUpdate = true;
-    mesh._multiDrawCount = n;
-    mesh._multiDrawBytesPerElement = bytes;
+    const slots = leaves.reduce((sum, leaf) => sum + leaf.length, 0);
+    if (slots >= 2 ** 24) throw new RangeError(`${slots} drawable instances exceed the limit of ${2 ** 24}.`);
+    const height = Math.max(1, Math.ceil(slots / ROW));
+    if (height > maxTextureSize) throw new RangeError(`${slots} drawable instances need a ${ROW}x${height} texture, over this GPU's limit of ${maxTextureSize}.`);
+    const info = new Float32Array(ROW * height * 4);
+    this._state = new THREE.DataTexture(new Uint8Array(ROW * height * 4), ROW, height);
+    this._state.colorSpace = THREE.SRGBColorSpace; // SRGB8_ALPHA8: the GPU decodes the colour bytes exactly
+    this._state.onUpdate = () => {
+      this._fullPending = false;
+      this._pendingRanges = 0;
+    };
+    this._fullPending = true;
+    this._pendingRanges = 0;
+    this._dirty = new Uint32Array(RANGE_LIMIT);
+    this._dirtyCount = 0;
+    const infoTexture = new THREE.DataTexture(info, ROW, height, THREE.RGBAFormat, THREE.FloatType);
+    infoTexture.needsUpdate = true;
+    this.slotUniforms.slotInfo.value = infoTexture;
+    this.slotUniforms.slotState.value = this._state;
+    this._stateBytes = ROW * height * 20;
+
+    this._slotOf = new Uint32Array(count).fill(NO_SLOT);
+    this._slotInstance = new Uint32Array(slots);
+    this._slotUnit = new Uint32Array(slots);
+    this._slotRadius = new Float32Array(slots);
+    this._slotCost = new Float32Array(slots);
+    this._pixels = new Float32Array(slots);
+    this._planes = new Float64Array(24);
+    this._detailView = new Float64Array(8);
+    this._frameView = new Float64Array(8);
+    this._frameViewAt = NaN;
+    this._units = [];
+    this._mergedBytes = 0;
+    this._lineBytes = 0;
+    const ctx = { matrices, geometryOf, mirrored, kind, origins, source, textured: false };
+    // Source indices for the wireframe lines, built on first use (after the BIN block has been released).
+    this._lineSources = new Map();
+    let slotBase = 0;
+    for (const leaf of leaves) {
+      const bucket = this._buckets[this._bucketOf[leaf[0]]];
+      ctx.textured = bucket.texture !== null;
+      const baked = bakeChunk(leaf, ctx);
+      for (let j = 0; j < leaf.length; j++) {
+        const i = leaf[j];
+        const slot = slotBase + j;
+        this._slotOf[i] = slot;
+        this._slotInstance[slot] = i;
+        this._slotUnit[slot] = this._units.length;
+        this._slotRadius[slot] = radius[i];
+        this._slotCost[slot] = (baked.indexStart[j + 1] - baked.indexStart[j]) / 3;
+        info.set(baked.origins.subarray(j * 3, j * 3 + 3), slot * 4);
+        info[slot * 4 + 3] = baked.steps[j];
+        const g = geometryOf[i];
+        if (!this._lineSources.has(g)) this._lineSources.set(g, source(g).indices.slice());
+      }
+      this._units.push(this._chunk(bucket, leaf, slotBase, baked, mirrored, geometryOf));
+      slotBase += leaf.length;
+    }
+    this._lineMembers = { mirrored, geometryOf: geometryOf.slice() };
+    this._totalCost = this._slotCost.reduce((sum, c) => sum + c, 0);
   }
 
-  // Writes the bucket's n listed draws (bucket.draws, depths in bucket.order) to its indirect list, farthest first:
-  // depth quantized into the high part of one number and the batch id in the low part, so a plain numeric sort works.
-  _sortBackToFront(bucket, n, near, far) {
-    const { order, draws, members } = bucket;
-    const span = Math.max(far - near, 1e-9);
-    const levels = Math.floor(2 ** 52 / members.length) - 1;
-    for (let k = 0; k < n; k++) order[k] = Math.round(((far - order[k]) / span) * levels) * members.length + draws[k];
-    const keys = order.subarray(0, n).sort();
-    const ids = bucket.mesh._indirectTexture.image.data;
-    for (let k = 0; k < n; k++) ids[k] = keys[k] % members.length;
+  _chunk(bucket, members, slotBase, baked, mirrored, geometryOf) {
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.instanceCount = 1;
+    geometry.setAttribute('q', attr(baked.q, 4));
+    geometry.setAttribute('normal', attr(baked.o, 2, true)); // octahedral, see slotShader
+    if (baked.uv) geometry.setAttribute('uv', attr(baked.uv, 2));
+    geometry.setAttribute('slotBase', attr(new Float32Array([slotBase]), 1, false, THREE.InstancedBufferAttribute));
+    geometry.setIndex(attr(baked.index, 1));
+    // Drives three's frustum test and its back-to-front sort of transparent chunks.
+    const sphere = chunkSphere(this._boxes, members);
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(sphere[0], sphere[1], sphere[2]), sphere[3]);
+    this._mergedBytes += baked.q.byteLength + baked.o.byteLength + (baked.uv?.byteLength ?? 0) + baked.index.byteLength;
+    const mesh = new THREE.Mesh(geometry, bucket.material);
+    const unit = {
+      bucket, mesh, lines: null, slotBase, n: members.length, sphere, shown: 0, first: 0, last: -1, end: 0, dirty: false,
+      starts: baked.indexStart, vertices: baked.q.length / 4, f32: baked.q instanceof Float32Array, members: members.slice(),
+      lastFrame: -Infinity,
+    };
+    mesh.onBeforeRender = (renderer, scene, camera, g) => this._range(unit, renderer, camera, g, 1);
+    mesh.visible = false;
+    this.root.add(mesh);
+    return unit;
   }
 
-  _createBuckets(meta, geometryKey, materialOf) {
+  // Wireframe: per chunk, LineSegments over the same attributes and a line index of 6 entries per triangle (a,b,
+  // b,c, c,a), as three's own wireframe draws; a slot's line range is twice its triangle range.
+  _buildLines() {
+    if (!this._lineSources) return;
+    const { mirrored, geometryOf } = this._lineMembers;
+    for (const unit of this._units) {
+      const triangles = unit.starts[unit.n];
+      const index = unit.vertices > 65536 ? new Uint32Array(triangles * 2) : new Uint16Array(triangles * 2);
+      let at = 0;
+      let base = 0;
+      for (const i of unit.members) {
+        const src = this._lineSources.get(geometryOf[i]);
+        const flip = mirrored[i] === 1;
+        for (let t = 0; t < src.length; t += 3) {
+          const a = src[t] + base;
+          const b = src[t + (flip ? 2 : 1)] + base;
+          const c = src[t + (flip ? 1 : 2)] + base;
+          index[at++] = a;
+          index[at++] = b;
+          index[at++] = b;
+          index[at++] = c;
+          index[at++] = c;
+          index[at++] = a;
+        }
+        base += this._meta.geometries[geometryOf[i]].positions.n / 3;
+      }
+      const source = unit.mesh.geometry;
+      const geometry = new THREE.InstancedBufferGeometry();
+      geometry.instanceCount = 1;
+      for (const name of ['q', 'normal', 'uv', 'slotBase']) if (source.attributes[name]) geometry.setAttribute(name, source.attributes[name]);
+      geometry.setIndex(attr(index, 1));
+      geometry.boundingSphere = source.boundingSphere;
+      this._lineBytes += index.byteLength;
+      unit.lines = new THREE.LineSegments(geometry, unit.bucket.material);
+      unit.lines.onBeforeRender = (renderer, scene, camera, g) => this._range(unit, renderer, camera, g, 2);
+      this.root.add(unit.lines);
+      unit.members = null;
+    }
+    this._lineSources = null;
+    this._lineMembers = null;
+  }
+
+  // onBeforeRender of a chunk (also in the picking pass): its draw range = the shown span, cut by the detail radius.
+  _range(unit, renderer, camera, geometry, wire) {
+    if (unit.dirty) this._span(unit);
+    let end = unit.last + 1;
+    if (this._minPixels > 0 && end > unit.first) {
+      const frame = renderer.info.render.frame;
+      if (frame !== this._frameViewAt) {
+        viewMetrics(camera, this._viewHeight, this._frameView);
+        this._frameViewAt = frame;
+      }
+      const view = this._frameView;
+      const near = nearDepth(view, unit.sphere);
+      const rMin = view[7] ? (near > 0 ? (this._minPixels * near) / view[6] : 0) : this._minPixels / view[6];
+      end = Math.min(end, prefixByRadius(this._slotRadius, unit.slotBase + unit.first, unit.slotBase + end, rMin) - unit.slotBase);
+    }
+    const [start, count] = drawSpan(unit.starts, unit.first, end);
+    geometry.setDrawRange(start * wire, count * wire);
+    unit.end = end;
+    unit.lastFrame = renderer.info.render.frame;
+  }
+
+  // First and last shown slot of the unit (from the alpha bytes).
+  _span(unit) {
+    const alpha = this._state.image.data;
+    let first = 0;
+    while (first < unit.n && alpha[(unit.slotBase + first) * 4 + 3] === 0) first++;
+    let last = unit.n - 1;
+    while (last >= first && alpha[(unit.slotBase + last) * 4 + 3] === 0) last--;
+    unit.first = first < unit.n ? first : 0;
+    unit.last = first < unit.n ? last : -1;
+    unit.dirty = false;
+  }
+
+  // A unit with nothing shown is never submitted; in wireframe mode its lines are drawn instead of its triangles,
+  // except while picking (faces are picked, as before).
+  _showUnit(unit) {
+    const wire = this._mode === 'wireframe' && !this._picking;
+    unit.mesh.visible = unit.shown > 0 && !wire;
+    if (unit.lines) unit.lines.visible = unit.shown > 0 && wire;
+  }
+
+  _createBuckets(meta, materialOf, noHideBranch) {
     const byMaterial = new Map();
     const buckets = [];
-    for (let i = 0; i < geometryKey.length; i++) {
+    for (let i = 0; i < materialOf.length; i++) {
       const m = materialOf[i];
       let bucket = byMaterial.get(m);
       if (!bucket) {
-        bucket = { index: buckets.length, instances: 0, vertices: 0, indices: 0, geometryIds: new Map() };
+        const source = meta.materials[m];
+        bucket = {
+          index: buckets.length,
+          bytes: source.color.map((c) => Math.round(c * 255)), // META colours are bytes / 255: exact
+          opacity: source.opacity,
+          texture: source.texture,
+          // The material colour stays white: the slot colour multiplies it in the shader.
+          material: patchLambert(new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }), this.slotUniforms, noHideBranch),
+        };
+        this._applyOpacity(bucket);
         byMaterial.set(m, bucket);
         buckets.push(bucket);
       }
       this._bucketOf[i] = bucket.index;
-      bucket.instances++;
-      const key = geometryKey[i];
-      if (!bucket.geometryIds.has(key)) {
-        bucket.geometryIds.set(key, -1);
-        const source = meta.geometries[key < 0 ? -1 - key : key];
-        bucket.vertices += source.positions.n / 3;
-        bucket.indices += source.indices.n;
-      }
-    }
-    for (const [m, bucket] of byMaterial) {
-      const source = meta.materials[m];
-      bucket.color = new THREE.Color().setRGB(...source.color, THREE.SRGBColorSpace);
-      bucket.opacity = source.opacity;
-      bucket.texture = source.texture;
-      bucket.material = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
-      bucket.mesh = new THREE.BatchedMesh(bucket.instances, bucket.vertices, bucket.indices, bucket.material);
-      // _fillDraws culls each instance; three's whole-mesh test would first walk every geometry's vertices for bounds.
-      bucket.mesh.frustumCulled = false;
-      bucket.geometryIds = new Map();
-      this._applyOpacity(bucket);
-      this.root.add(bucket.mesh);
     }
     return buckets;
   }
@@ -441,34 +636,6 @@ export class ModelScene {
     });
     this._elementStart = start;
     this._elementInstances = list;
-  }
-
-  // Geometry for a key: g for geometry g, -1 - g for its reversed-winding copy (mirrored instances).
-  _geometry(data, cache, key, withUv) {
-    const g = key < 0 ? -1 - key : key;
-    const source = this._meta.geometries[g];
-    let base = cache.get(key);
-    if (!base && key < 0) {
-      base = reversedWinding(this._geometry(data, cache, g, false));
-      cache.set(key, base);
-    } else if (!base) {
-      base = new THREE.BufferGeometry();
-      base.setAttribute('position', new THREE.BufferAttribute(geometryPositions(data, source), 3));
-      base.setIndex(new THREE.BufferAttribute(data.view(source.indices), 1));
-      // Normals are in geometry-local space; the batching shader rotates them with the instance matrix.
-      const normals = geometryNormals(data, source);
-      if (normals) base.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-      else base.computeVertexNormals();
-      cache.set(key, base);
-    }
-    if (!withUv) return base;
-    const textured = new THREE.BufferGeometry();
-    textured.setIndex(base.index);
-    textured.setAttribute('position', base.getAttribute('position'));
-    textured.setAttribute('normal', base.getAttribute('normal'));
-    const uvs = source.uvs ? data.view(source.uvs) : new Float32Array((source.positions.n / 3) * 2);
-    textured.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    return textured;
   }
 
   _texture(index) {
@@ -497,13 +664,19 @@ export class ModelScene {
     if (material.transparent !== transparent) material.needsUpdate = true;
     material.opacity = opacity;
     material.transparent = transparent;
-    material.depthWrite = !transparent; // _fillDraws sorts transparent buckets back to front
+    material.depthWrite = !transparent; // three sorts transparent chunks back to front
+  }
+
+  // sRGB bytes instance i is drawn with: highlight, else tint, else white in white mode, else the material's.
+  _colorOf(i) {
+    return this._highlight[i] ? HIGHLIGHT : this._tint.get(i) ?? (this._mode === 'white' ? WHITE : this._buckets[this._bucketOf[i]].bytes);
   }
 
   _applyColor(i) {
-    const bucket = this._buckets[this._bucketOf[i]];
-    const color = this._highlight[i] ? HIGHLIGHT_COLOR : this._tint.get(i) ?? (this._mode === 'white' ? WHITE_COLOR : bucket.color);
-    bucket.mesh.setColorAt(this._batchId[i], color);
+    const slot = this._slotOf[i];
+    if (slot === NO_SLOT) return;
+    this._state.image.data.set(this._colorOf(i), slot * 4);
+    this._markDirty(slot);
   }
 
   _setInstanceVisible(i, visible) {
@@ -522,8 +695,41 @@ export class ModelScene {
     return this._visible[i] === 1 && this._layerHides[i] === 0;
   }
 
+  // Writes the slot's shown flag (alpha 255/0); its chunk recounts its span before the next draw.
   _draw(i) {
-    this._buckets[this._bucketOf[i]].mesh.setVisibleAt(this._batchId[i], this._shown(i));
+    const slot = this._slotOf[i];
+    if (slot === NO_SLOT) return;
+    const alpha = this._shown(i) ? 255 : 0;
+    const data = this._state.image.data;
+    if (data[slot * 4 + 3] === alpha) return;
+    data[slot * 4 + 3] = alpha;
+    this._markDirty(slot);
+    const unit = this._units[this._slotUnit[slot]];
+    unit.shown += alpha ? 1 : -1;
+    unit.dirty = true;
+    this._showUnit(unit);
+  }
+
+  _markDirty(slot) {
+    if (this._dirtyCount < RANGE_LIMIT) this._dirty[this._dirtyCount] = slot;
+    this._dirtyCount++;
+  }
+
+  // Uploads the changed slots: a few one by one (three merges ranges in a row), many, or before the first upload, as
+  // the whole texture.
+  _flush() {
+    const n = this._dirtyCount;
+    if (n === 0) return;
+    this._dirtyCount = 0;
+    const texture = this._state;
+    if (this._fullPending || this._pendingRanges + n > RANGE_LIMIT) {
+      texture.clearUpdateRanges();
+      this._fullPending = true;
+    } else {
+      for (let k = 0; k < n; k++) texture.addUpdateRange(this._dirty[k] * 4, 4);
+      this._pendingRanges += n;
+    }
+    texture.needsUpdate = true;
   }
 
   _checkElement(index) {
@@ -541,6 +747,25 @@ export class ModelScene {
 
   // kind: 'visibility' (the shown set changed) or 'appearance' (only how it looks).
   _changed(kind) {
+    this._flush();
     this.root.dispatchEvent({ type: 'change', detail: { kind } });
   }
+}
+
+// Depth of the nearest point of sphere s (x, y, z, r) along the view direction (see culling.viewMetrics).
+function nearDepth(view, s) {
+  return (s[0] - view[0]) * view[3] + (s[1] - view[1]) * view[4] + (s[2] - view[2]) * view[5] - s[3];
+}
+
+// Sphere (x, y, z, r) around the boxes of the instances: centre of their joint box, radius to its corners.
+function chunkSphere(boxes, members) {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const i of members) {
+    for (let a = 0; a < 3; a++) {
+      min[a] = Math.min(min[a], boxes[i * 6 + a]);
+      max[a] = Math.max(max[a], boxes[i * 6 + 3 + a]);
+    }
+  }
+  return Float64Array.of((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2);
 }

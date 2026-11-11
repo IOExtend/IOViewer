@@ -326,3 +326,63 @@ test('screenshot: a measurement and the grid labels', async ({ page }) => {
   await frame(page);
   await page.screenshot({ path: SCREENSHOT });
 });
+
+test.describe('without float render targets', () => {
+  test.beforeEach(({ page }) => page.addInitScript(() => (window.IOVIEWER_TEST = { pickFloat: false })));
+
+  test('pick + measure with pickFloat:false: the slab is picked and two clicks 6 m apart measure 6.00 m', async ({ page }) => {
+    const errors = await open(page);
+    expect(await page.evaluate(() => window.__ioviewer.picker._float)).toBe(false);
+    const slab = await indexOf(page, 'Ground Slab');
+    const [a, b] = [await screenOfWorld(page, A), await screenOfWorld(page, B)];
+    expect(await page.evaluate(([x, y]) => window.__ioviewer.picker.pick(x, y)?.element, a)).toBe(slab);
+    await tool(page, 'distance').click();
+    await page.mouse.click(...a);
+    await page.mouse.click(...b);
+    expect(Math.abs((await page.evaluate(() => window.__ioviewer.measure.distance)) - 6)).toBeLessThanOrEqual(0.05);
+    expect(errors).toEqual([]);
+  });
+});
+
+test('textures mode changes pixels and returns pixel-identical', async ({ page }) => {
+  const errors = await open(page, 'textured');
+  const materials = await shot(page);
+  await tool(page, 'displayMode').click();
+  await expect(modeItem(page, 'textures')).toBeEnabled();
+  await modeItem(page, 'textures').click();
+  // The texture image decodes asynchronously; the scene redraws when it is ready.
+  await expect.poll(async () => (await shot(page)).equals(materials)).toBe(false);
+  await tool(page, 'displayMode').click();
+  await modeItem(page, 'materials').click();
+  expect((await shot(page)).equals(materials)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('wireframe click still selects the face\'s element', async ({ page }) => {
+  const errors = await open(page);
+  await page.evaluate(() => window.__ioviewer.scene.setDisplayMode('wireframe'));
+  const slab = await indexOf(page, 'Ground Slab');
+  await page.mouse.click(...(await screenOfWorld(page, A))); // between the slab's edges: only its face is there
+  expect(await selected(page)).toEqual([slab]);
+  expect(errors).toEqual([]);
+});
+
+test('wireframe lines have no black (NaN-shaded) pixels', async ({ page }) => {
+  const errors = await open(page);
+  await page.evaluate(() => window.__ioviewer.scene.setDisplayMode('wireframe'));
+  const png = await shot(page);
+  const black = await page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height });
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, image.width, image.height);
+    let count = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i] + data[i + 1] + data[i + 2] === 0) count++;
+    return count;
+  }, png.toString('base64'));
+  expect(black).toBe(0); // today's engine draws none; flat shading of lines drew thousands
+  expect(errors).toEqual([]);
+});

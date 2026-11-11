@@ -1,77 +1,84 @@
 import * as THREE from 'three';
-import { isClipped } from '../tools/sectionMath.js';
+import { SLOT_DECODE, SLOT_PARS } from './slotShader.js';
 
-// Id pass: three's batching chunks place each instance (matrix, visibility via the multi-draw list) and the
-// clipping chunks cut it like the visible material; the colour is the instance's element index + 1 (0 = none).
+// Pick pass: the chunks' own slot decoding places every vertex, three's clipping chunks cut it like the visible
+// material and hidden slots leave the clip volume; the output is the interpolated RTC surface point and slot + 1
+// (0 = nothing). vSlot carries the slot in two exact halves (a non-flat varying, constant over a triangle).
 const VERTEX = /* glsl */ `
-#include <batching_pars_vertex>
+#include <common>
+${SLOT_PARS}
 #include <clipping_planes_pars_vertex>
-uniform highp sampler2D elementIds;
-flat varying vec4 vElement;
+varying vec3 vPos;
+varying vec2 vSlot;
 void main() {
-  #include <begin_vertex>
-  #include <batching_vertex>
+  ${SLOT_DECODE}
+  vec3 transformed = slotPosition;
   #include <project_vertex>
   #include <clipping_planes_vertex>
-  int size = textureSize( elementIds, 0 ).x;
-  int j = int( getIndirectIndex( gl_DrawID ) );
-  vElement = texelFetch( elementIds, ivec2( j % size, j / size ), 0 );
+  vec4 wp = vec4( transformed, 1.0 );
+  #ifdef USE_INSTANCING
+  wp = instanceMatrix * wp;
+  #endif
+  vPos = ( modelMatrix * wp ).xyz;
+  vSlot = vec2( float( slot >> 12 ), float( slot & 4095 ) );
+  if ( state.a < 0.5 ) gl_Position = vec4( 0.0, 0.0, 2.0, 1.0 );
 }`;
 
+// IO_PICK_RGBA8: slot + 1 as 4 bytes, little-endian; IO_PICK_DEPTH: the fragment depth packed into 4 bytes.
 const FRAGMENT = /* glsl */ `
+#include <common>
+#include <packing>
 #include <clipping_planes_pars_fragment>
-flat varying vec4 vElement;
+varying vec3 vPos;
+varying vec2 vSlot;
 void main() {
   #include <clipping_planes_fragment>
-  gl_FragColor = vElement;
+  float id = floor( vSlot.x + 0.5 ) * 4096.0 + floor( vSlot.y + 0.5 ) + 1.0;
+  #if defined( IO_PICK_DEPTH )
+  gl_FragColor = packDepthToRGBA( gl_FragCoord.z );
+  #elif defined( IO_PICK_RGBA8 )
+  gl_FragColor = vec4( mod( id, 256.0 ), mod( floor( id / 256.0 ), 256.0 ), mod( floor( id / 65536.0 ), 256.0 ), floor( id / 16777216.0 ) ) / 255.0;
+  #else
+  gl_FragColor = vec4( vPos, id );
+  #endif
 }`;
 
-function idMaterial(maxInstances) {
-  const size = Math.ceil(Math.sqrt(maxInstances));
-  const ids = new THREE.DataTexture(new Uint8Array(size * size * 4), size, size);
-  return new THREE.ShaderMaterial({
+function pickMaterial(uniforms, define) {
+  const material = new THREE.ShaderMaterial({
     vertexShader: VERTEX,
     fragmentShader: FRAGMENT,
-    uniforms: { elementIds: { value: ids } },
+    uniforms,
+    defines: define ? { [define]: '' } : {},
     side: THREE.DoubleSide,
     clipping: true,
   });
+  material.index0AttributeName = 'q';
+  return material;
 }
 
-// A point is cut away exactly as the material's own shader cuts it.
-const clipped = (point, material) => isClipped(point, material.clippingPlanes ?? [], material.clipIntersection);
-
 /**
- * GPU picking over ModelScene: the shown, unclipped model is drawn once into a 1x1 target through a view offset
- * at the cursor, so the cost does not grow with the element count; the exact point is then found by casting a ray
- * at the found element's own instances only. `camera` is public: set it when the active camera changes.
+ * GPU picking over ModelScene: the shown, unclipped model is drawn once into a 1x1 target through a view offset at the
+ * cursor, so the cost does not grow with the element count. With float targets (EXT_color_buffer_float) one pass gives
+ * the slot and the exact surface point; without them (or options.pickFloat === false) two RGBA8 passes give the slot
+ * and the depth, from which the point is unprojected. `camera` is public: set it when the active camera changes.
  */
 export class Picker {
-  constructor(renderer, modelScene, camera) {
+  constructor(renderer, modelScene, camera, options = {}) {
     this.renderer = renderer;
     this.scene = modelScene;
     this.camera = camera;
-    this._target = new THREE.WebGLRenderTarget(1, 1);
-    this._pixel = new Uint8Array(4);
-    this._raycaster = new THREE.Raycaster();
-    this._probe = new THREE.Mesh(new THREE.BufferGeometry());
-    this._probe.geometry.boundingBox = new THREE.Box3();
-    this._probe.geometry.boundingSphere = new THREE.Sphere();
-    this._materials = new Map(); // bucket BatchedMesh -> its id material
-    const ids = new Map(); // bucket BatchedMesh -> the texels of its element ids, as Uint32
-    for (let i = 0; i < modelScene.instanceCount; i++) {
-      const { mesh, batchId, element } = modelScene.instance(i);
-      let texels = ids.get(mesh);
-      if (!texels) {
-        const material = idMaterial(mesh.maxInstanceCount);
-        this._materials.set(mesh, material);
-        texels = new Uint32Array(material.uniforms.elementIds.value.image.data.buffer);
-        ids.set(mesh, texels);
-      }
-      // Little-endian like the BIN block: byte 0 (red) holds the low bits. Element -1 stays 0, never picked.
-      texels[batchId] = element + 1;
+    const uniforms = modelScene.slotUniforms;
+    this._float = options.pickFloat !== false && renderer.extensions.has('EXT_color_buffer_float');
+    if (this._float) {
+      this._material = pickMaterial(uniforms, null);
+      this._target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.FloatType });
+      this._pixel = new Float32Array(4);
+    } else {
+      this._material = pickMaterial(uniforms, 'IO_PICK_RGBA8');
+      this._depthMaterial = pickMaterial(uniforms, 'IO_PICK_DEPTH');
+      this._target = new THREE.WebGLRenderTarget(1, 1);
+      this._pixel = new Uint8Array(4);
     }
-    for (const material of this._materials.values()) material.uniforms.elementIds.value.needsUpdate = true;
   }
 
   // { element, point } under the client pixel, or null for background and meshes without an element.
@@ -80,64 +87,37 @@ export class Picker {
     const x = Math.floor(clientX - rect.left);
     const y = Math.floor(clientY - rect.top);
     if (!(x >= 0 && y >= 0 && x < rect.width && y < rect.height)) return null;
-    const element = this._elementAt(x, y, rect);
+    const pixel = this._render(this._material, x, y, rect);
+    const slot = (this._float ? Math.round(pixel[3]) : new Uint32Array(pixel.buffer)[0]) - 1;
+    if (slot < 0) return null;
+    const element = this.scene.slotElement(slot);
     if (element < 0) return null;
-    const ndc = new THREE.Vector2(((x + 0.5) / rect.width) * 2 - 1, 1 - ((y + 0.5) / rect.height) * 2);
-    return { element, point: this._point(element, ndc) };
+    if (this._float) return { element, point: new THREE.Vector3(pixel[0], pixel[1], pixel[2]) };
+    const [r, g, b, a] = this._render(this._depthMaterial, x, y, rect);
+    const depth = r / 256 + g / 65536 + b / 16777216 + a / 255 / 16777216; // three's unpackRGBAToDepth on the bytes
+    const ndc = new THREE.Vector3(((x + 0.5) / rect.width) * 2 - 1, 1 - ((y + 0.5) / rect.height) * 2, depth * 2 - 1);
+    return { element, point: ndc.unproject(this.camera) };
   }
 
-  _elementAt(x, y, rect) {
+  // Draws the model with `material` into the 1x1 target at pixel (x, y) and reads it back.
+  _render(material, x, y, rect) {
     const { renderer, camera } = this;
     const previous = { target: renderer.getRenderTarget(), color: renderer.getClearColor(new THREE.Color()), alpha: renderer.getClearAlpha() };
-    const swapped = [];
+    const source = this.scene._buckets[0]?.material; // setClipping gives every bucket the same planes
+    material.clippingPlanes = source?.clippingPlanes ?? null;
+    material.clipIntersection = source?.clipIntersection ?? false;
     camera.updateMatrixWorld();
     camera.setViewOffset(rect.width, rect.height, x, y, 1, 1);
     try {
-      for (const [mesh, material] of this._materials) {
-        material.clippingPlanes = mesh.material.clippingPlanes;
-        material.clipIntersection = mesh.material.clipIntersection;
-        swapped.push([mesh, mesh.material]);
-        mesh.material = material;
-      }
       renderer.setRenderTarget(this._target);
       renderer.setClearColor(0x000000, 0);
-      renderer.render(this.scene.root, camera);
+      this.scene.withMaterial(material, () => renderer.render(this.scene.root, camera));
       renderer.readRenderTargetPixels(this._target, 0, 0, 1, 1, this._pixel);
     } finally {
-      for (const [mesh, material] of swapped) mesh.material = material;
       renderer.setRenderTarget(previous.target);
       renderer.setClearColor(previous.color, previous.alpha);
       camera.clearViewOffset();
     }
-    return new Uint32Array(this._pixel.buffer)[0] - 1;
-  }
-
-  // Nearest unclipped hit on the element's shown instances; the GPU pass already found it, so a ray that slips
-  // past an edge by rounding falls back to the element's box.
-  _point(element, ndc) {
-    const raycaster = this._raycaster;
-    raycaster.setFromCamera(ndc, this.camera);
-    const probe = this._probe;
-    const hits = [];
-    for (const i of this.scene.instancesOf(element)) {
-      const { mesh, batchId } = this.scene.instance(i);
-      if (!mesh.getVisibleAt(batchId)) continue;
-      const geometryId = mesh.getGeometryIdAt(batchId);
-      const range = mesh.getGeometryRangeAt(geometryId);
-      probe.material = mesh.material;
-      probe.geometry.index = mesh.geometry.index;
-      probe.geometry.attributes = mesh.geometry.attributes;
-      probe.geometry.setDrawRange(range.start, range.count);
-      mesh.getBoundingBoxAt(geometryId, probe.geometry.boundingBox);
-      mesh.getBoundingSphereAt(geometryId, probe.geometry.boundingSphere);
-      mesh.getMatrixAt(batchId, probe.matrixWorld).premultiply(mesh.matrixWorld);
-      const found = [];
-      probe.raycast(raycaster, found);
-      for (const hit of found) if (!clipped(hit.point, mesh.material)) hits.push(hit);
-    }
-    if (hits.length > 0) return hits.reduce((a, b) => (b.distance < a.distance ? b : a)).point;
-    const box = this.scene.elementBox(element);
-    const ray = raycaster.ray;
-    return ray.intersectBox(box, new THREE.Vector3()) ?? ray.closestPointToPoint(box.getCenter(new THREE.Vector3()), new THREE.Vector3());
+    return this._pixel;
   }
 }

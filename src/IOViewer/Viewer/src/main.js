@@ -45,9 +45,12 @@ camera.add(headlight, headlight.target);
 headlight.target.position.set(0, 0, -1);
 world.add(camera);
 
-const scene = new ModelScene(data);
+// Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat.
+const testOptions = window.IOVIEWER_TEST ?? {};
+const scene = new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
 data.releaseBinary(); // the scene has copied what it needs
-const motionDetail = new MotionDetail(scene, requestRender);
+// Starting at the whole model's cost, a GPU that draws it in time orbits at full detail; a slower one shrinks it.
+const motionDetail = new MotionDetail(scene, requestRender, scene.totalCost);
 world.add(scene.root);
 // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
 const sections = new Sections(scene, scene.visibleBox());
@@ -58,11 +61,14 @@ const measure = new Measure(uiRoot);
 const grids = new GridAxes(uiRoot, data.meta.grids ?? []);
 world.add(measure.group, grids.group); // overlays too
 
-if (data.meta.instances.count === 0) {
+function showMessage(text) {
   const message = document.getElementById('ioviewer-message');
-  message.textContent = t('noGeometry');
+  message.textContent = text;
   message.hidden = false;
 }
+if (data.meta.instances.count === 0) showMessage(t('noGeometry'));
+// The model's GPU buffers keep no CPU copy, so a lost context cannot be rebuilt: say so instead of a blank page.
+canvas.addEventListener('webglcontextlost', () => showMessage(t('contextLost')));
 
 let resolveReady;
 const ready = new Promise((resolve) => (resolveReady = resolve));
@@ -91,7 +97,7 @@ sectionGizmo.addEventListener('change', requestRender);
 measure.addEventListener('change', requestRender);
 grids.addEventListener('change', requestRender);
 
-const picker = new Picker(renderer, scene, camera);
+const picker = new Picker(renderer, scene, camera, { pickFloat: testOptions.pickFloat });
 const controls = new NavigationControls(camera, canvas, {
   pick: (x, y) => picker.pick(x, y)?.point ?? null,
   visibleBox: () => scene.visibleBox(),
