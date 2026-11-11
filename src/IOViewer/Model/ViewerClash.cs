@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace IOViewer.Model;
 
 public enum ViewerClashStatus
@@ -18,6 +20,13 @@ public sealed class ViewerClashResult
     public string Name { get; set; } = string.Empty;
     public string Element1Name { get; set; } = string.Empty;
     public string Element2Name { get; set; } = string.Empty;
+
+    /// <summary>Id of the first clashing element, if known.</summary>
+    public long? Element1Id { get; set; }
+
+    /// <summary>Id of the second clashing element, if known.</summary>
+    public long? Element2Id { get; set; }
+
     public Vector3d Point { get; set; }
     public double Distance { get; set; }
     public ViewerClashStatus Status { get; set; } = ViewerClashStatus.Active;
@@ -42,6 +51,7 @@ public sealed class ViewerClashResult
 public sealed class ViewerClashTest
 {
     public string Name { get; set; } = "Clash Test";
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public List<ViewerClashResult> Clashes { get; } = [];
 
     public ViewerClashTest() { }

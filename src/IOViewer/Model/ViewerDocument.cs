@@ -29,6 +29,11 @@ public sealed class ViewerDocument
     public List<ViewerMesh> Meshes { get; set; } = [];
 
     /// <summary>
+    /// Geometries shared between meshes via <see cref="ViewerMesh.GeometryId"/>.
+    /// </summary>
+    public List<ViewerGeometry> Geometries { get; set; } = [];
+
+    /// <summary>
     /// Material definitions with colors, opacity, and surface properties.
     /// </summary>
     public List<ViewerMaterial> Materials { get; set; } = [];
@@ -81,15 +86,32 @@ public sealed class ViewerDocument
     }
 
     /// <summary>
-    /// Computes and updates the overall 3D bounding box from all meshes.
+    /// Computes and updates the overall 3D bounding box from all meshes, including shared geometry and mesh transforms.
     /// </summary>
     public BoundingBox3d ComputeBoundingBox()
     {
+        var geometries = new Dictionary<int, ViewerGeometry>();
+        foreach (var g in Geometries)
+        {
+            geometries[g.Id] = g;
+        }
+
         var box = BoundingBox3d.Empty;
         foreach (var mesh in Meshes)
         {
-            var mb = mesh.ComputeBoundingBox();
-            box = box.Encapsulate(mb);
+            mesh.ComputeBoundingBox();
+            var transform = mesh.Transform ?? Transform3d.Identity;
+            foreach (var v in mesh.Vertices)
+            {
+                box = box.Encapsulate(transform.Apply(v));
+            }
+            if (mesh.GeometryId is int id && geometries.TryGetValue(id, out var geometry))
+            {
+                foreach (var v in geometry.Vertices)
+                {
+                    box = box.Encapsulate(transform.Apply(v));
+                }
+            }
         }
         BoundingBox = box;
         return box;
