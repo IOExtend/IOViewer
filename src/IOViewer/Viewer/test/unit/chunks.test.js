@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  F32, GENERAL, MERGED_CAP, VERBATIM, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, planShapes, prefixByRadius, sortByRadius,
-  splitByCount, splitCells,
+  F32, GENERAL, MERGED_CAP, VERBATIM, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, planShapes, prefixByRadius, select,
+  sortByRadius, splitByCount, splitCells,
 } from '../../src/engine/chunks.js';
 import { GRID, octDecodeInto } from '../../src/engine/quantize.js';
 
@@ -284,4 +284,66 @@ test('cells: exactly ceil(n / limit) leaves of at most limit instances, each ins
     }
     assert.ok(seen.every((c) => c === 1));
   }
+});
+
+test('select: the k smallest first, scanning O(n) keys also on run-like orders (two runs, a rotation)', () => {
+  const next = random(5);
+  for (const n of [1001, 100001]) {
+    const half = Math.floor(n / 2);
+    const orders = {
+      runs: (i) => (i < half ? half + i : i - half), // two ascending runs, the second lower
+      interleaved: (i) => (i < half ? 2 * i + 1 : 2 * (i - half)),
+      ascending: (i) => i,
+      descending: (i) => n - i,
+      shuffled: () => next(),
+    };
+    for (const [name, value] of Object.entries(orders)) {
+      for (const k of [1, Math.floor(n / 3), half, n - 1]) {
+        const keys = Float64Array.from({ length: n }, (_, i) => value(i) * 2 ** 20 + i);
+        const scanned = select(keys, k);
+        assert.ok(scanned <= 8 * n, `${name} n=${n} k=${k}: ${scanned} keys scanned`);
+        let low = -Infinity;
+        for (let i = 0; i < k; i++) low = Math.max(low, keys[i]);
+        for (let i = k; i < n; i++) assert.ok(keys[i] > low, `${name} n=${n} k=${k}`);
+      }
+    }
+  }
+});
+
+test('cells: splitting two runs or a rotation scans O(n log cells) keys (a median-of-three pivot scanned 1.6e10)', () => {
+  const n = 500000;
+  const half = n / 2;
+  for (const [name, position] of Object.entries({ runs: (i) => (i < half ? half + i : i - half), rotation: (i) => (i + half) % n })) {
+    const centres = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) centres[i * 3] = position(i);
+    const leaves = splitByCount(centres, Uint32Array.from({ length: n }, (_, i) => i), 1024);
+    assert.equal(leaves.length, Math.ceil(n / 1024));
+    const depth = Math.ceil(Math.log2(leaves.length));
+    assert.ok(leaves.scanned <= 8 * n * depth, `${name}: ${leaves.scanned} keys scanned, bound ${8 * n * depth}`);
+  }
+});
+
+test('cells: a leaf is also bounded in extent, centres within maxRadius of its middle', () => {
+  // 200 instances on a line 0..199 m: the count limit alone keeps one leaf; maxRadius 10 m splits it into runs.
+  const n = 200;
+  const centres = Float32Array.from({ length: n * 3 }, (_, k) => (k % 3 === 0 ? k / 3 : 0));
+  const members = Uint32Array.from({ length: n }, (_, i) => i);
+  assert.equal(splitByCount(centres, members, 1024).length, 1);
+  const leaves = splitByCount(centres, members, 1024, 10);
+  assert.ok(leaves.length >= 10);
+  const seen = new Uint8Array(n);
+  for (const leaf of leaves) {
+    const sorted = [...leaf].sort((a, b) => a - b);
+    assert.equal(sorted[sorted.length - 1] - sorted[0], leaf.length - 1); // a run of neighbours
+    assert.ok((sorted[sorted.length - 1] - sorted[0]) / 2 <= 10);
+    for (const i of leaf) seen[i]++;
+  }
+  assert.ok(seen.every((c) => c === 1));
+  // A single instance is a leaf however wide its neighbours are.
+  assert.deepEqual(splitByCount(Float32Array.from([0, 0, 0, 100, 0, 0]), Uint32Array.from([0, 1]), 1024, 1).map((l) => [...l]), [[0], [1]]);
+});
+
+test('plan: the draws counted are the cells a shape really takes when given', () => {
+  const shapes = [{ k: 100, bytes: 100, cells: 5 }, { k: 90, bytes: 100, cells: 2 }, { k: 80, bytes: 100, cells: 1 }];
+  assert.deepEqual([...planShapes(shapes, { cap: 0, maxDraws: 6 })], [1, 0, 1]);
 });

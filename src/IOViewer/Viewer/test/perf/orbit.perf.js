@@ -306,7 +306,7 @@ for (const run of RUNS) {
         const times = [];
         for (let k = 0; k < 10; k++) {
           const start = performance.now();
-          window.__ioviewer.picker.pick(x, y);
+          window.__ioviewer.picker.pick(x + (k % 2), y); // another pixel each time: the picker reuses an unchanged pick
           times.push(performance.now() - start);
         }
         return times;

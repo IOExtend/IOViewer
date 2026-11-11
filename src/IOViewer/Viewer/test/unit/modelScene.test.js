@@ -233,7 +233,7 @@ test('an instance with a non-finite box gets no slot and leaves the bounds alone
 });
 
 // Every shape instanced (test options): no merged chunks at all.
-const INSTANCED = { mergedCap: 0, minRepeats: 1 };
+const INSTANCED = { mergedCap: 0, minRepeats: 1, cellExtent: 1 }; // cells as wide as the model: one per shape
 // Instance count the cell mesh of instance i gets for the next render.
 function count(scene, i) {
   const { mesh } = scene.instance(i);
@@ -327,7 +327,7 @@ test('over the cap a shape used 16 times becomes a cell; one used 15 times and a
     { x: 0, geometry: 1 },
   ];
   const materials = [{ color: [0.2, 0.4, 0.6], opacity: 1, texture: null }, { color: [0.6, 0.4, 0.2], opacity: 1, texture: null }];
-  const scene = model(items, { geometries: [quantizedCube(), quantizedCube()], materials, options: { mergedCap: 0 } });
+  const scene = model(items, { geometries: [quantizedCube(), quantizedCube()], materials, options: { mergedCap: 0, cellExtent: 1 } });
   const { cells, mergedInstances, instancedInstances } = scene.memory();
   assert.deepEqual({ cells, mergedInstances, instancedInstances }, { cells: 1, mergedInstances: 16, instancedInstances: 16 });
   assert.ok(scene.instance(0).mesh.isInstancedMesh);
@@ -356,4 +356,33 @@ test('cell wireframe: three\'s wireframe over the cell\'s geometry and matrices;
   scene.setClipping([new THREE.Plane(new THREE.Vector3(1, 0, 0), 0)], true);
   const m = wire.material;
   assert.deepEqual([m.opacity, m.transparent, m.depthWrite, m.clipIntersection, m.clippingPlanes.length], [0.5, true, false, true, 1]);
+});
+
+test('over the cap, cells are bounded in extent: one shape spread along 190 m takes several cells', () => {
+  const scene = model(Array.from({ length: 20 }, (_, i) => ({ x: i * 10 })), { options: { mergedCap: 0, minRepeats: 1 } });
+  const { cells, instancedInstances } = scene.memory();
+  assert.equal(instancedInstances, 20);
+  assert.ok(cells >= 4, `${cells} cells`);
+  const box = scene.visibleBox();
+  const cap = box.min.distanceTo(box.max) * 0.1 + Math.sqrt(3) / 2; // centres' spread + an instance's own radius
+  for (const unit of scene._units) assert.ok(unit.sphere[3] <= cap + 1e-9, `${unit.sphere[3]} > ${cap}`);
+});
+
+test('a unit the detail cut leaves empty is hidden for that frame, counted in view, and shown again after', () => {
+  // Two chunks: a 10 m cube and a 0.1 m cube beside it.
+  const scene = model([{ x: 0, scale: 10 }, { x: 8, scale: 0.1 }], { options: { chunkVertices: 36 } });
+  const big = scene.instance(0).mesh;
+  const small = scene.instance(1).mesh;
+  const c = camera();
+  const threshold = scene.detailThreshold(c, 800, 12); // room for one cube's 12 triangles: the large one stays
+  assert.ok(threshold > 0);
+  scene.setDetail(threshold, 800);
+  assert.deepEqual([big.visible, small.visible], [true, false]);
+  big.onBeforeRender({ info: { render: { frame: 7 } } }, null, c, big.geometry, big.material, null);
+  assert.deepEqual(scene.drawStats(), { drawn: 12, inView: 24, draws: 1 });
+  scene.setDetail(0);
+  assert.deepEqual([big.visible, small.visible], [true, true]);
+  // Without a fresh detailThreshold (a still frame) nothing is hidden.
+  scene.setDetail(threshold, 800);
+  assert.equal(small.visible, true);
 });

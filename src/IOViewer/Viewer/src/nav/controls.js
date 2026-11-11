@@ -23,6 +23,7 @@ export class NavigationControls extends EventTarget {
     this._orthographic = new THREE.OrthographicCamera(-1, 1, 1, -1);
     this.camera = camera;
     this._drag = null;
+    this._wheelPick = null; // { point } picked for the wheel notches of the current animation frame
     this._animation = 0;
     this._overlay = null;
     this._bounds = null;
@@ -256,7 +257,12 @@ export class NavigationControls extends EventTarget {
   _wheel(e) {
     e.preventDefault();
     this._stopAnimation();
-    const point = this.pick(e.clientX, e.clientY) ?? this.target;
+    // One pick per animation frame: notches arriving within a frame zoom towards the same point.
+    if (!this._wheelPick) {
+      this._wheelPick = { point: this.pick(e.clientX, e.clientY) };
+      requestAnimationFrame(() => (this._wheelPick = null));
+    }
+    const point = this._wheelPick.point ?? this.target;
     const r = zoomTowards(this.camera.position, this.target, point, e.deltaY > 0 ? 1 / WHEEL_STEP : WHEEL_STEP);
     this._set(r.position, r.target);
   }

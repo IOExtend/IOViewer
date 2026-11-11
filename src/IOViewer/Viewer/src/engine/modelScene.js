@@ -15,6 +15,12 @@ const ROW = 2048; // slots per slot-texture row (the shaders use slot & 2047, sl
 const RANGE_LIMIT = 256; // up to this many changed slots are uploaded one by one, more as the whole texture
 const MIN_REPEATS = 16; // fewer instances of a shape stay merged even above the cap
 const PER_CELL = 1024; // instances per remainder cell
+// A cell's centres lie within this share of the model's diagonal: a cell spread over the site is drawn whole by the
+// 1-pixel pick pass and sized by its nearest point by the detail cut. Measured at 1M synthetic elements on an
+// integrated GPU (cells / pick / CPU per still frame): unbounded 1024 / 61 ms / 4 ms; 0.1: 4766 / 20 ms / 23 ms;
+// 0.06: over 8192 cells, 9.5 ms. Each draw costs three ~5 us of CPU, so merged-chunk extents (0.035) are out of reach.
+const CELL_EXTENT = 0.1;
+const MAX_CELLS = 8192; // remainder draws at most
 const INSTANCED_COST = 1.4; // an instanced triangle against a merged one (measured 1.58 / 1.16 ns per triangle)
 
 // True when the linear part of instance i (12 floats per instance, columns first) has a negative determinant.
@@ -64,9 +70,11 @@ const colorBytes = (color) => {
  * picks it for a cost budget in triangles).
  * A model whose merged data would exceed MERGED_CAP bytes draws its repeated shapes (a geometry with one material,
  * mirrored or not, used at least 16 times) as instanced cells instead: three's InstancedMesh over the shape's own
- * vertex data with the same slots, slot textures and material, up to 1024 nearby instances (one draw) per cell.
+ * vertex data with the same slots, slot textures and material, up to 1024 nearby instances within a tenth of the
+ * model's diagonal (one draw) per cell.
  * options (tests and the performance harness, from window.IOVIEWER_TEST): chunkVertices, noHideBranch, slotLimit,
- * mergedCap, minRepeats; and maxTextureSize (the renderer's). A model over the slot limit throws ModelTooLargeError.
+ * mergedCap, minRepeats, cellExtent; and maxTextureSize (the renderer's). A model over the slot limit throws
+ * ModelTooLargeError.
  * Instances with a non-finite box (NaN or infinite matrix or geometry box) get no slot and take no part in the bounds.
  */
 export class ModelScene {
@@ -301,9 +309,27 @@ export class ModelScene {
 
   // While minPixels > 0, renders leave out slots whose bounding sphere is smaller on screen than minPixels (radius, CSS
   // px, taken at the nearest point of its chunk) in a view `viewHeight` CSS px high; 0 draws everything shown again.
+  // A unit whose largest shown slot is below the cut (as detailThreshold measured it for this frame) is hidden for the
+  // frame, so three skips it whole instead of submitting an empty draw (a few microseconds each, thousands of cells).
   setDetail(minPixels, viewHeight = 1) {
     this._minPixels = minPixels;
     this._viewHeight = viewHeight;
+    for (const unit of this._cut) this._showUnit(unit);
+    this._cut.length = 0;
+    const scales = this._unitScale;
+    if (!(minPixels > 0) || !scales) return;
+    this._unitScale = null; // measured for this frame only
+    this._cutInView = 0;
+    this._cutFrame = null; // the frame that draws with this cut, set by the first unit it draws
+    this._units.forEach((unit, u) => {
+      if (!(scales[u] >= 0) || unit.shown === 0) return;
+      if (unit.dirty) this._span(unit);
+      if (this._slotRadius[unit.slotBase + unit.first] * scales[u] >= minPixels) return;
+      unit.mesh.visible = false;
+      if (unit.lines) unit.lines.visible = false;
+      this._cut.push(unit);
+      this._cutInView += unitTriangles(unit, unit.first, unit.last + 1);
+    });
   }
 
   // Cost (triangles) of drawing everything.
@@ -321,12 +347,15 @@ export class ModelScene {
     const view = viewMetrics(camera, viewHeight, this._detailView);
     const pixels = this._pixels.fill(-1);
     const alpha = this._state.image.data;
+    const scales = (this._unitScale = new Float64Array(this._units.length).fill(-1)); // for setDetail
     let visible = 0;
-    for (const unit of this._units) {
+    for (let u = 0; u < this._units.length; u++) {
+      const unit = this._units[u];
       const s = unit.sphere;
       if (unit.shown === 0 || outsideFrustum(planes, s[0], s[1], s[2], s[3])) continue;
       const near = nearDepth(view, s);
       const scale = view[7] ? (near > 0 ? view[6] / near : Infinity) : view[6];
+      scales[u] = scale;
       for (let slot = unit.slotBase; slot < unit.slotBase + unit.n; slot++) {
         if (alpha[slot * 4 + 3] === 0) continue;
         pixels[slot] = this._slotRadius[slot] * scale;
@@ -343,14 +372,12 @@ export class ModelScene {
     let latest = -Infinity;
     for (const unit of this._units) latest = Math.max(latest, unit.lastFrame);
     let drawn = 0;
-    let inView = 0;
+    let inView = this._cutFrame === latest ? this._cutInView : 0; // units the cut left out whole
     let draws = 0;
-    // Triangles of the unit's slots a..b-1.
-    const triangles = (unit, a, b) => (unit.cell ? (b - a) * unit.triangles : (unit.starts[b] - unit.starts[a]) / 3);
     for (const unit of this._units) {
       if (unit.lastFrame !== latest) continue;
-      inView += triangles(unit, unit.first, Math.max(unit.last + 1, unit.first));
-      drawn += triangles(unit, unit.first, Math.max(unit.end, unit.first));
+      inView += unitTriangles(unit, unit.first, Math.max(unit.last + 1, unit.first));
+      drawn += unitTriangles(unit, unit.first, Math.max(unit.end, unit.first));
       draws++;
     }
     return { drawn, inView, draws };
@@ -401,7 +428,7 @@ export class ModelScene {
         material.needsUpdate = true;
       }
     }
-    this._changed('appearance');
+    this._changed('clipping');
   }
 
   // Slots (numbered unit by unit: chunks, then cells), the chunks with their baked GPU data, the instanced cells, and
@@ -452,13 +479,25 @@ export class ModelScene {
       const bytes = s.vertices * ((quantizable ? 12 : 20) + (textured ? 8 : 0)) + s.indices.length * (s.vertices > 65535 ? 4 : 2);
       return { k: members.length, bytes, members, textured };
     });
-    const instanced = planShapes(shapes, { cap: options.mergedCap ?? MERGED_CAP, minRepeats: options.minRepeats ?? MIN_REPEATS, perCell: PER_CELL });
+    const cap = options.mergedCap ?? MERGED_CAP;
+    const minRepeats = options.minRepeats ?? MIN_REPEATS;
+    if (shapes.reduce((sum, s) => sum + s.k * s.bytes, 0) > cap) {
+      // The cells of every candidate, so that the plan counts the draws they really take.
+      const box = this.visibleBox();
+      const maxRadius = box.isEmpty() ? Infinity : box.min.distanceTo(box.max) * (options.cellExtent ?? CELL_EXTENT);
+      for (const shape of shapes) {
+        if (shape.k < minRepeats) continue;
+        shape.leaves = splitByCount(centres, shape.members, PER_CELL, maxRadius);
+        shape.cells = shape.leaves.length;
+      }
+    }
+    const instanced = planShapes(shapes, { cap, minRepeats, perCell: PER_CELL, maxDraws: MAX_CELLS });
     const groups = new Map(); // bucket * 2 + (f32 ? 1 : 0) -> merged instances
     const uses = new Uint32Array(meta.geometries.length); // merged slots per geometry still to bake
     const cells = [];
     shapes.forEach((shape, k) => {
       if (instanced[k]) {
-        for (const cell of splitByCount(centres, shape.members, PER_CELL)) cells.push({ shape, members: sortByRadius(cell, radius) });
+        for (const cell of shape.leaves) cells.push({ shape, members: sortByRadius(cell, radius) });
         return;
       }
       for (const i of shape.members) {
@@ -506,6 +545,10 @@ export class ModelScene {
     this._frameView = new Float64Array(8);
     this._frameViewAt = NaN;
     this._units = [];
+    this._cut = []; // units the detail cut hides for the current frame
+    this._unitScale = null;
+    this._cutInView = 0;
+    this._cutFrame = -1;
     this._mergedBytes = 0;
     this._instancedBytes = 0;
     this._lineBytes = 0;
@@ -737,6 +780,7 @@ export class ModelScene {
     }
     unit.end = end;
     unit.lastFrame = renderer.info.render.frame;
+    if (this._cutFrame === null && this._minPixels > 0) this._cutFrame = unit.lastFrame;
   }
 
   // First and last shown slot of the unit (from the alpha bytes).
@@ -909,11 +953,17 @@ export class ModelScene {
     box.max.set(Math.max(box.max.x, b[o + 3]), Math.max(box.max.y, b[o + 4]), Math.max(box.max.z, b[o + 5]));
   }
 
-  // kind: 'visibility' (the shown set changed) or 'appearance' (only how it looks).
+  // kind: 'visibility' (the shown set changed), 'clipping' (the section planes changed) or 'appearance' (only how it
+  // looks).
   _changed(kind) {
     this._flush();
     this.root.dispatchEvent({ type: 'change', detail: { kind } });
   }
+}
+
+// Triangles of a unit's slots a..b-1.
+function unitTriangles(unit, a, b) {
+  return b <= a ? 0 : unit.cell ? (b - a) * unit.triangles : (unit.starts[b] - unit.starts[a]) / 3;
 }
 
 // Depth of the nearest point of sphere s (x, y, z, r) along the view direction (see culling.viewMetrics).

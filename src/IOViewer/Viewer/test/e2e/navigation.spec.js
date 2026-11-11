@@ -427,3 +427,51 @@ test('a lost view cube context hides the cube and the main viewer keeps renderin
   expect(errors).toEqual([]);
   expect(messages).toEqual([]);
 });
+
+// Counts the model draws of the picker (one per pick, two without float targets) and the picks the controls ask for.
+const countPicks = (page) =>
+  page.evaluate(() => {
+    const { picker, controls } = window.__ioviewer;
+    window.__picks = { renders: 0, asked: 0 };
+    const render = picker._render.bind(picker);
+    picker._render = (...args) => (window.__picks.renders++, render(...args));
+    const pick = controls.pick;
+    controls.pick = (x, y) => (window.__picks.asked++, pick(x, y));
+  });
+
+test('ten wheel notches within one animation frame pick once and zoom by 0.85 each towards that point', async ({ page }) => {
+  await open(page);
+  await countPicks(page);
+  const d0 = await distance(page);
+  const zoomed = await page.evaluate(() => {
+    const canvas = document.getElementById('ioviewer-canvas');
+    for (let k = 0; k < 10; k++) canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, clientX: 640, clientY: 400, bubbles: true, cancelable: true }));
+    return window.__picks;
+  });
+  expect(zoomed).toEqual({ renders: 1, asked: 1 });
+  expect((await distance(page)) / d0).toBeCloseTo(0.85 ** 10, 3);
+  await frame(page);
+  await page.mouse.move(640, 400);
+  await page.mouse.wheel(0, -100); // a later frame picks again
+  await frame(page);
+  expect(await page.evaluate(() => window.__picks)).toEqual({ renders: 2, asked: 2 });
+});
+
+test('pressing again at the same spot with the camera unchanged draws no new pick; a hide or a section does', async ({ page }) => {
+  await open(page);
+  await countPicks(page);
+  await page.mouse.move(640, 400);
+  for (let k = 0; k < 3; k++) {
+    await page.mouse.down(); // the orbit pivot
+    await page.mouse.up(); // a click: selects through the same pick
+    await frame(page);
+  }
+  expect(await page.evaluate(() => window.__picks.renders)).toBe(1);
+  const hit = await page.evaluate(() => window.__ioviewer.picker.pick(640, 400).element);
+  await page.evaluate((i) => window.__ioviewer.scene.setVisible([i], false), hit);
+  expect(await page.evaluate(() => window.__ioviewer.picker.pick(640, 400)?.element ?? null)).not.toBe(hit);
+  expect(await page.evaluate(() => window.__picks.renders)).toBe(2);
+  await page.evaluate(() => window.__ioviewer.sections.setMode('box'));
+  await page.evaluate(() => window.__ioviewer.picker.pick(640, 400));
+  expect(await page.evaluate(() => window.__picks.renders)).toBe(3);
+});

@@ -43,6 +43,8 @@ void main() {
   #endif
 }`;
 
+const copy = (hit) => hit && { element: hit.element, point: hit.point.clone() };
+
 function pickMaterial(uniforms, define) {
   const material = new THREE.ShaderMaterial({
     vertexShader: VERTEX,
@@ -70,6 +72,11 @@ export class Picker {
     // The model's buffers are not restored with a restored context: after a loss nothing is picked any more.
     this._lost = false;
     renderer.domElement.addEventListener('webglcontextlost', () => (this._lost = true));
+    // The last pick and what it depends on: the pixel, the canvas size, the camera and what is shown and cut away
+    // (picks come on every wheel notch and pointer press, and each draws the model; colours do not matter).
+    this._last = null;
+    this._key = new Float64Array(36);
+    modelScene.root.addEventListener('change', (e) => e.detail.kind !== 'appearance' && (this._last = null));
     const uniforms = modelScene.slotUniforms;
     this._float = options.pickFloat !== false && renderer.extensions.has('EXT_color_buffer_float');
     if (this._float) {
@@ -90,6 +97,20 @@ export class Picker {
     const x = Math.floor(clientX - rect.left);
     const y = Math.floor(clientY - rect.top);
     if (this._lost || !(x >= 0 && y >= 0 && x < rect.width && y < rect.height)) return null;
+    const camera = this.camera;
+    camera.updateMatrixWorld();
+    const key = this._key;
+    key.set([x, y, rect.width, rect.height]);
+    key.set(camera.matrixWorld.elements, 4);
+    key.set(camera.projectionMatrix.elements, 20);
+    const last = this._last;
+    if (last && last.camera === camera && last.key.every((v, k) => v === key[k])) return copy(last.hit);
+    const hit = this._pick(x, y, rect);
+    this._last = { camera, key: key.slice(), hit };
+    return copy(hit);
+  }
+
+  _pick(x, y, rect) {
     const pixel = this._render(this._material, x, y, rect);
     const slot = (this._float ? Math.round(pixel[3]) : new Uint32Array(pixel.buffer)[0]) - 1;
     if (slot < 0) return null;

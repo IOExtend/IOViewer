@@ -59,20 +59,32 @@ function sortAlongLongestAxis(m, centres, split = -1) {
     const level = span > 0 && Number.isFinite(c) ? Math.round(((c - min[axis]) / span) * levels) : 0;
     keys[k] = level * 2 ** 32 + i;
   }
+  let scanned = 0;
   if (split < 0) keys.sort();
-  else select(keys, split);
+  else scanned = select(keys, split);
   for (let k = 0; k < m.length; k++) m[k] = keys[k] % 2 ** 32;
+  return scanned;
 }
 
-// Rearranges distinct keys so that keys[0..k) are the k smallest: quickselect, median-of-three pivot.
-function select(keys, k) {
+// Rearranges distinct keys so that keys[0..k) are the k smallest; returns how many keys its rounds scanned (about 3n).
+// Quickselect with a pseudo-random pivot (a fixed-pivot rule goes quadratic on run-like orders, e.g. two ascending
+// runs); after 2 log2(n) + 8 rounds it sorts the rest, so it never takes more than n log n.
+export function select(keys, k) {
   let lo = 0;
   let hi = keys.length - 1;
+  let seed = 0x9e3779b9;
+  const limit = 2 * Math.ceil(Math.log2(keys.length + 1)) + 8;
+  let rounds = 0;
+  let scanned = 0;
   while (lo < hi) {
-    const a = keys[lo];
-    const b = keys[(lo + hi) >>> 1];
-    const c = keys[hi];
-    const pivot = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+    const n = hi - lo + 1;
+    if (++rounds > limit) {
+      keys.subarray(lo, hi + 1).sort();
+      return scanned + n * Math.ceil(Math.log2(n));
+    }
+    scanned += n;
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const pivot = keys[lo + (seed % (hi - lo + 1))];
     let i = lo;
     let j = hi;
     while (i <= j) {
@@ -86,30 +98,49 @@ function select(keys, k) {
     }
     if (k <= j) hi = j;
     else if (k >= i) lo = i;
-    else return;
+    else return scanned;
   }
+  return scanned;
 }
 
 /**
- * Splits `members` into exactly ceil(n / limit) leaves of at most `limit` instances each, nearby instances together:
- * a recursive split along the longest axis of the member centres, the lower part taking its exact share of the leaves.
- * Leaves come out depth-first. The leaves are views of one copy.
+ * Splits `members` into leaves of at most `limit` instances whose centres lie within `maxRadius` of their middle (half
+ * the diagonal of the centres' box), or of one instance, nearby instances together: a recursive split along the
+ * longest axis of the member centres. Above `limit` the lower part takes its exact share of ceil(n / limit) leaves (so
+ * without a radius bound there are exactly that many); a leaf that is only too wide is halved. Leaves come out
+ * depth-first. The leaves are views of one copy; `leaves.scanned` counts the keys the partitions scanned (see select).
  */
-export function splitByCount(centres, members, limit) {
+export function splitByCount(centres, members, limit, maxRadius = Infinity) {
   const leaves = [];
+  leaves.scanned = 0;
   const stack = [Uint32Array.from(members)];
   while (stack.length) {
     const m = stack.pop();
     const cells = Math.ceil(m.length / limit);
-    if (cells <= 1) {
+    if (m.length <= 1 || (cells <= 1 && spread(m, centres) <= maxRadius)) {
       if (m.length) leaves.push(m);
       continue;
     }
-    const k = Math.ceil((m.length * Math.floor(cells / 2)) / cells);
-    sortAlongLongestAxis(m, centres, k);
+    const k = cells > 1 ? Math.ceil((m.length * Math.floor(cells / 2)) / cells) : Math.ceil(m.length / 2);
+    leaves.scanned += sortAlongLongestAxis(m, centres, k);
     stack.push(m.subarray(k), m.subarray(0, k)); // the lower part is emitted first
   }
   return leaves;
+}
+
+// Half the diagonal of the box around the centres of instances m.
+function spread(m, centres) {
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  for (const i of m) {
+    const x = centres[i * 3], y = centres[i * 3 + 1], z = centres[i * 3 + 2];
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+    if (z < z0) z0 = z;
+    if (z > z1) z1 = z;
+  }
+  return Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2;
 }
 
 export const MERGED_CAP = 384 * 2 ** 20; // merged GPU bytes above which the repeated shapes are drawn instanced
@@ -118,7 +149,8 @@ export const MERGED_CAP = 384 * 2 ** 20; // merged GPU bytes above which the rep
  * Which shapes (one geometry, mirrored or not, with one material; `k` instances of `bytes` merged GPU bytes each) are
  * drawn as instanced cells instead of being merged. None while the merged total fits `cap`. Otherwise every shape of
  * at least `minRepeats` instances, those that save most first ((k - 1) * bytes; ties by more instances, then by their
- * order in `shapes`), skipping a shape whose cells (ceil(k / perCell)) would take the cells past `maxDraws`.
+ * order in `shapes`), skipping a shape whose cells (its `cells` when given, else ceil(k / perCell)) would take the
+ * cells past `maxDraws`.
  * Returns 1 per instanced shape.
  * Not just enough shapes to fit the cap: measured at 1M elements on an integrated GPU, keeping the cap's worth merged
  * drew the frame 6 % faster (199 vs 212 ms) but took 5x the GPU memory, a 0.7 GB higher GPU-process and 0.45 GB higher
@@ -134,7 +166,7 @@ export function planShapes(shapes, { cap = MERGED_CAP, minRepeats = 16, perCell 
   order.sort((a, b) => saving(b) - saving(a) || shapes[b].k - shapes[a].k || a - b);
   let draws = 0;
   for (const s of order) {
-    const cells = Math.ceil(shapes[s].k / perCell);
+    const cells = shapes[s].cells ?? Math.ceil(shapes[s].k / perCell);
     if (draws + cells > maxDraws) continue;
     instanced[s] = 1;
     draws += cells;
