@@ -266,14 +266,22 @@ const viewDirection = (page) =>
     const { camera, controls } = window.__ioviewer;
     return camera.position.clone().sub(controls.target).normalize().toArray();
   });
-// Waits for the camera animation to end at `expected` (target to camera; top/bottom stay 0.01 rad off the pole).
-const expectView = (page, expected) =>
-  expect
-    .poll(async () => Math.hypot(...(await viewDirection(page)).map((c, i) => c - expected[i])), { timeout: 3000 })
-    .toBeLessThan(0.02);
+// Waits until the camera animation has ended and the next frame (main view and cube) is drawn.
+async function settle(page) {
+  await expect.poll(() => page.evaluate(() => window.__ioviewer.controls.animating), { timeout: 3000 }).toBe(false);
+  await frame(page);
+}
+// After the animation: the view (target to camera) is `expected`.
+async function expectView(page, expected) {
+  await settle(page);
+  const d = await viewDirection(page);
+  expect(Math.hypot(...d.map((c, i) => c - expected[i]))).toBeLessThan(1e-6);
+}
 const arrow = (page, name) => page.locator(`.ioviewer-viewcube-arrow[data-arrow="${name}"]`);
 const s2 = Math.SQRT1_2;
 const s3 = 1 / Math.sqrt(3);
+// Top views stay 0.01 rad off the pole, towards their heading side.
+const [tilt, lift] = [Math.sin(0.01), Math.cos(0.01)];
 
 test('view cube: a click on «Спереди» looks from the front (-Y) without touching the main controls', async ({ page }) => {
   const errors = await open(page);
@@ -287,24 +295,28 @@ test('view cube: a click on «Спереди» looks from the front (-Y) without
   expect(errors).toEqual([]);
 });
 
-test('view cube turns with the camera: same rotation after an orbit, also in orthographic', async ({ page }) => {
+test('view cube shows the face the camera looks from after orbits, also in orthographic', async ({ page }) => {
   await open(page);
-  const rotations = () =>
+  // The face the camera looks from, worked out from the main camera alone, and the cube region at the canvas centre.
+  const facing = () =>
     page.evaluate(() => {
-      const { viewCube, camera } = window.__ioviewer;
-      return [viewCube.camera.quaternion.toArray(), camera.quaternion.toArray()];
+      const { viewCube, camera, controls } = window.__ioviewer;
+      const d = camera.position.clone().sub(controls.target).normalize();
+      const normals = { right: [1, 0, 0], left: [-1, 0, 0], back: [0, 1, 0], front: [0, -1, 0], top: [0, 0, 1], bottom: [0, 0, -1] };
+      const dot = (name) => d.x * normals[name][0] + d.y * normals[name][1] + d.z * normals[name][2];
+      const expected = Object.keys(normals).reduce((a, b) => (dot(b) > dot(a) ? b : a));
+      const r = viewCube.canvas.getBoundingClientRect();
+      return { expected, shown: viewCube.regionAtClient(r.left + r.width / 2, r.top + r.height / 2) };
     });
-  const [initial] = await rotations();
-  await drag(page, 'left', [500, 400], [650, 330]);
-  const [cube, main] = await rotations();
-  expect(cube).toEqual(main);
-  expect(cube).not.toEqual(initial);
+  await drag(page, 'left', [500, 400], [700, 400]); // heading about -102 degrees, 29 degrees up
+  expect(await facing()).toEqual({ expected: 'front', shown: 'front' });
+  await drag(page, 'left', [500, 400], [500, 600]); // about 86 degrees up
+  expect(await facing()).toEqual({ expected: 'top', shown: 'top' });
   await page.locator('[data-tool="projection"]').click();
-  await drag(page, 'left', [500, 400], [420, 470]);
-  const [cube2, main2] = await rotations();
+  await drag(page, 'left', [500, 400], [500, 200]); // back to about 29 degrees up
+  await drag(page, 'left', [300, 400], [900, 400]); // heading about +86 degrees
   expect(await page.evaluate(() => window.__ioviewer.camera.isOrthographicCamera)).toBe(true);
-  expect(cube2).toEqual(main2);
-  expect(cube2).not.toEqual(cube);
+  expect(await facing()).toEqual({ expected: 'back', shown: 'back' });
 });
 
 test('view cube: edges and corners are clickable and highlighted on hover', async ({ page }) => {
@@ -321,6 +333,14 @@ test('view cube: edges and corners are clickable and highlighted on hover', asyn
   expect(await page.evaluate(() => window.__ioviewer.viewCube.highlight.visible)).toBe(false);
 });
 
+test('view cube: from the load view «Сверху» faces the front, and the up arrow then lands on the back', async ({ page }) => {
+  await open(page);
+  await page.mouse.click(...(await cubePoint(page, [0, 0, 1]))); // the load heading is 45 degrees: a tie, front wins
+  await expectView(page, [0, -tilt, lift]);
+  await arrow(page, 'up').click();
+  await expectView(page, [0, 1, 0]);
+});
+
 test('view cube arrows show only when aligned with a face and step between views', async ({ page }) => {
   await open(page);
   for (const name of ['up', 'down', 'left', 'right']) await expect(arrow(page, name)).toBeHidden();
@@ -331,11 +351,10 @@ test('view cube arrows show only when aligned with a face and step between views
   await arrow(page, 'right').click();
   await expectView(page, [1, 0, 0]);
   await arrow(page, 'up').click();
-  await expectView(page, [0, 0, 1]);
-  await expect(arrow(page, 'up')).toBeVisible(); // still aligned 0.01 rad off the pole
-  await arrow(page, 'right').click(); // turns the top view: the camera's heading goes from +X to +Y
-  await expect.poll(async () => (await viewDirection(page))[1], { timeout: 3000 }).toBeGreaterThan(0.009);
-  expect(Math.abs((await viewDirection(page))[0])).toBeLessThan(1e-3);
+  await expectView(page, [tilt, 0, lift]); // top, still facing right
+  await expect(arrow(page, 'up')).toBeVisible();
+  await arrow(page, 'right').click(); // turns the top view: the heading goes from +X to +Y
+  await expectView(page, [0, tilt, lift]);
   await arrow(page, 'down').click(); // the side at the bottom of the screen
   await expectView(page, [0, 1, 0]);
   await drag(page, 'left', [500, 400], [560, 380]);
@@ -351,10 +370,11 @@ test('view cube home button restores the load view', async ({ page }) => {
     });
   const load = await pose();
   await page.mouse.click(...(await cubePoint(page, [0, 0, 1])));
-  await expectView(page, [0, 0, 1]);
+  await expectView(page, [0, -tilt, lift]);
   await drag(page, 'right', [500, 400], [560, 380]); // pan moves the target too
   await page.getByRole('button', { name: 'Исходный вид' }).click();
-  await expect.poll(async () => Math.max(...(await pose()).map((c, i) => Math.abs(c - load[i]))), { timeout: 3000 }).toBeLessThan(1e-6);
+  await settle(page);
+  expect(Math.max(...(await pose()).map((c, i) => Math.abs(c - load[i])))).toBeLessThan(1e-6);
 });
 
 test('the view cube takes no pointer events outside its box', async ({ page }) => {
@@ -366,4 +386,44 @@ test('the view cube takes no pointer events outside its box', async ({ page }) =
   expect((await events(page)).map((e) => e.type)).toEqual(['click', 'click']);
   const properties = await page.locator('#ioviewer-properties').evaluate((p) => getComputedStyle(p).top);
   expect(parseFloat(properties)).toBeGreaterThan(box.y + box.height);
+});
+
+// The main view still picks (a click selects) and orbits (the picture changes) after the cube has failed.
+async function expectMainViewerWorks(page) {
+  await page.mouse.click(640, 420); // the fitted building
+  expect(await page.evaluate(() => window.__ioviewer.selection.size)).toBe(1);
+  const before = await shot(page);
+  await drag(page, 'left', [500, 400], [650, 400]);
+  expect((await shot(page)).equals(before)).toBe(false);
+}
+
+test('without a WebGL context for the view cube it hides and the main viewer works', async ({ page }) => {
+  const messages = [];
+  page.on('console', (message) => messages.push(message.text()));
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (...args) {
+      return this.classList.contains('ioviewer-viewcube-canvas') ? null : getContext.apply(this, args);
+    };
+  });
+  const errors = await open(page);
+  await expect(page.locator('.ioviewer-viewcube')).toBeHidden();
+  expect(await page.evaluate(() => window.__ioviewer.viewCube.error.message)).toContain('WebGL 2');
+  await expectMainViewerWorks(page);
+  expect(errors).toEqual([]);
+  expect(messages).toEqual([]);
+});
+
+test('a lost view cube context hides the cube and the main viewer keeps rendering and picking', async ({ page }) => {
+  const messages = [];
+  page.on('console', (message) => messages.push(message.text()));
+  const errors = await open(page);
+  await page.evaluate(() =>
+    window.__ioviewer.viewCube.renderer.getContext().getExtension('WEBGL_lose_context').loseContext(),
+  );
+  await expect(page.locator('.ioviewer-viewcube')).toBeHidden();
+  expect(await page.evaluate(() => window.__ioviewer.viewCube.error.message)).toContain('lost');
+  await expectMainViewerWorks(page);
+  expect(errors).toEqual([]);
+  expect(messages).toEqual([]);
 });

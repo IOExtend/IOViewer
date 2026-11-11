@@ -17,6 +17,7 @@ const FACES = {
 const LABEL_UP = { right: Z, left: Z, back: Z, front: Z, top: FACES.back, bottom: FACES.front };
 const INNER = 0.7; // a hit farther than this from the centre along an axis also takes that axis' face (edge/corner)
 const ALIGNED = THREE.MathUtils.degToRad(1);
+const POLE_TILT = 0.01; // radians off a pole, as NavigationControls.animateTo keeps it
 const SIZE = 96; // CSS px of the cube canvas
 const HALF = 1.75; // half size of the cube camera's view; the cube's half diagonal is sqrt(3)
 
@@ -51,24 +52,43 @@ export function alignedFace(offset, tolerance = ALIGNED) {
   return Object.keys(FACES).find((name) => direction.dot(FACES[name]) >= limit) ?? null;
 }
 
-// Next view direction for an arrow, from a view aligned with a face (null otherwise). `screenUp` is the camera's
-// up axis in the world. Left/right turn the view 90 degrees about +Z (from a side face: the face on that side of
-// the screen); up/down go from a side face to the top/bottom, and from the top/bottom to the side face in that
-// screen direction. A top/bottom view keeps its small tilt so its heading survives (animateTo never sits on a pole).
-export function arrowView(offset, screenUp, arrow) {
+// Side face a view is turned towards: the one nearest to the horizontal part of `offset` (target to camera).
+// Ties (a 45 degree heading, or none at all) go to the first of front, right, back, left, so float noise
+// cannot flip the choice.
+export function headingSide(offset) {
+  const flat = new THREE.Vector3(offset.x, offset.y, 0);
+  if (flat.lengthSq() < 1e-24) return 'front';
+  flat.normalize();
+  const sides = ['front', 'right', 'back', 'left'];
+  const best = Math.max(...sides.map((name) => flat.dot(FACES[name])));
+  return sides.find((name) => flat.dot(FACES[name]) >= best - 1e-9);
+}
+
+// View direction for 'top' or 'bottom' from the current `offset`: tilted POLE_TILT towards the heading side,
+// so the heading is a face centre (arrows then lead to whole faces) and the camera up (+Z) never degenerates.
+export function poleView(pole, offset) {
+  const side = FACES[headingSide(offset)];
+  return side.clone().multiplyScalar(Math.sin(POLE_TILT)).addScaledVector(FACES[pole], Math.cos(POLE_TILT));
+}
+
+// Next view direction for an arrow, from a view aligned with a face (null otherwise).
+// - left/right turn the view 90 degrees about +Z; from a side face that is the face on that side of the screen.
+// - up/down from a side face go to the top/bottom, keeping that face as the heading.
+// - From the top, the heading side is at the bottom of the screen: down goes to it, up goes over the far edge to
+//   the opposite side face (the camera keeps +Z up, so it swings round rather than rolling upside down). From the
+//   bottom it is the other way round.
+export function arrowView(offset, arrow) {
   const face = alignedFace(offset);
   if (!face) return null;
   const pole = face === 'top' || face === 'bottom';
   if (arrow === 'left' || arrow === 'right') {
-    const base = pole ? offset.clone().normalize() : viewDirection(face);
+    const base = pole ? poleView(face, offset) : viewDirection(face);
     return base.applyAxisAngle(Z, arrow === 'right' ? Math.PI / 2 : -Math.PI / 2);
   }
   if (arrow !== 'up' && arrow !== 'down') throw new RangeError(`Unknown arrow: ${arrow}`);
-  if (!pole) return viewDirection(arrow === 'up' ? 'top' : 'bottom');
-  const towards = screenUp.clone().setZ(0).multiplyScalar(arrow === 'up' ? 1 : -1);
-  const sides = ['right', 'left', 'back', 'front'];
-  const side = sides.reduce((best, name) => (towards.dot(FACES[name]) > towards.dot(FACES[best]) ? name : best));
-  return viewDirection(side);
+  if (!pole) return poleView(arrow === 'up' ? 'top' : 'bottom', offset);
+  const side = FACES[headingSide(offset)];
+  return (arrow === 'up') === (face === 'top') ? side.clone().negate() : side.clone();
 }
 
 function labelTexture(text, fontFamily) {
@@ -93,7 +113,8 @@ function labelTexture(text, fontFamily) {
  * View cube in the top-right corner: its own small renderer, scene and camera, turned like the main camera.
  * Faces, edges and corners are clickable (hover highlights them); arrows show only while the view is aligned with
  * a face; "home" returns to the view at construction. `controls.camera` is followed, so projection swaps work.
- * Call `update()` after every main frame.
+ * Call `update()` after every main frame. The cube is an aid: when its WebGL context cannot be created or is lost,
+ * it hides itself, keeps the reason in `error` and never throws into the main render loop.
  */
 export class ViewCube {
   constructor(container, camera, controls) {
@@ -104,10 +125,8 @@ export class ViewCube {
     this.canvas.title = t('cube.title');
     this.canvas.setAttribute('aria-label', t('cube.title'));
     this.element.append(this.canvas);
-
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setSize(SIZE, SIZE);
+    this.error = null;
+    this.renderer = this._createRenderer();
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-HALF, HALF, HALF, -HALF, 0.1, 10);
     this.faces = new THREE.Group();
@@ -139,7 +158,9 @@ export class ViewCube {
     this.canvas.addEventListener('pointerleave', () => this._hover(null));
     this.canvas.addEventListener('click', (e) => {
       const region = this.regionAtClient(e.clientX, e.clientY);
-      if (region) this._look(viewDirection(region));
+      if (!region) return;
+      const pole = region === 'top' || region === 'bottom';
+      this._look(pole ? poleView(region, controls.camera.position.clone().sub(controls.target)) : viewDirection(region));
     });
 
     this.arrows = ['up', 'down', 'left', 'right'].map((arrow) => {
@@ -157,14 +178,50 @@ export class ViewCube {
     this.update();
   }
 
+  _createRenderer() {
+    // Runs before three's own listener, which would log; a lost cube is not restored, it stays hidden.
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+      e.stopImmediatePropagation();
+      this._fail(new Error('The view cube lost its WebGL context.'));
+    });
+    // Asked for here, not by three, so a missing context hides the cube instead of logging an error.
+    const context = this.canvas.getContext('webgl2', { alpha: true, antialias: true });
+    if (!context) return this._fail(new Error('WebGL 2 is not available for the view cube.'));
+    try {
+      const renderer = new THREE.WebGLRenderer({ canvas: this.canvas, context, alpha: true, antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(SIZE, SIZE);
+      return renderer;
+    } catch (error) {
+      return this._fail(error);
+    }
+  }
+
+  _fail(error) {
+    this.error = error;
+    this.renderer = null;
+    this.element.hidden = true;
+    return null;
+  }
+
+  _render() {
+    if (!this.renderer) return;
+    try {
+      this.renderer.render(this.scene, this.camera);
+    } catch (error) {
+      this._fail(error);
+    }
+  }
+
   update() {
+    if (!this.renderer) return;
     const main = this.controls.camera;
     this.camera.quaternion.copy(main.quaternion);
     this.camera.position.set(0, 0, 5).applyQuaternion(main.quaternion);
     this.camera.updateMatrixWorld();
     const aligned = alignedFace(main.position.clone().sub(this.controls.target)) !== null;
     for (const button of this.arrows) button.hidden = !aligned;
-    this.renderer.render(this.scene, this.camera);
+    this._render();
   }
 
   // Region of the cube under a client point, or null.
@@ -188,13 +245,13 @@ export class ViewCube {
       this.highlight.scale.set(x[1] - x[0], y[1] - y[0], z[1] - z[0]);
       this.highlight.position.set((x[0] + x[1]) / 2, (y[0] + y[1]) / 2, (z[0] + z[1]) / 2);
     }
-    this.renderer.render(this.scene, this.camera);
+    this._render();
   }
 
   _arrow(arrow) {
     const main = this.controls.camera;
     const offset = main.position.clone().sub(this.controls.target);
-    const direction = arrowView(offset, new THREE.Vector3(0, 1, 0).applyQuaternion(main.quaternion), arrow);
+    const direction = arrowView(offset, arrow);
     if (direction) this._look(direction);
   }
 

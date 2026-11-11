@@ -125,6 +125,11 @@ export class NavigationControls extends EventTarget {
     this._animation = requestAnimationFrame(step);
   }
 
+  // True while an animateTo is running.
+  get animating() {
+    return this._animation !== 0;
+  }
+
   _stopAnimation() {
     cancelAnimationFrame(this._animation);
     this._animation = 0;
