@@ -1,0 +1,19 @@
+bin/
+obj/
+out/
+publish/
+*.user
+.vs/
+.idea/
+.idea_modules/
+*.sln.DotSettings.user
+TestResults/
+artifacts/
+*.binlog
+*.tmp
+__pycache__/
+*.pyc
+
+# Documentation site (DocFX output and generated API pages)
+_site/
+docs/api/

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>IOViewer.Cli</PackageId>
+    <Description>Command line tool for generating standalone, zero-dependency interactive 3D WebGL/HTML BIM &amp; CAD model viewers.</Description>
+    <OutputType>Exe</OutputType>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>ioviewer</ToolCommandName>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IOViewer\IOViewer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="IOViewer.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>IOViewer</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="IOViewer.Tests" />
+    <InternalsVisibleTo Include="IOViewer.Cli" />
+  </ItemGroup>
+
+</Project>
