@@ -85,10 +85,12 @@ public class ModelAndCliIntegrationTests
             Assert.Equal(0, code);
 
             Assert.True(File.Exists(tempHtml));
-            string html = File.ReadAllText(tempHtml);
-            Assert.Contains("Pyramid Test", html);
-            Assert.Contains("TriangularPyramid", html);
-            Assert.Contains("initialWireframe\":true", html);
+            var view = ViewerHtml.Parse(File.ReadAllText(tempHtml));
+            Assert.Equal("Pyramid Test", view.Meta.GetProperty("title").GetString());
+            Assert.True(view.Meta.GetProperty("options").GetProperty("initialWireframe").GetBoolean());
+            Assert.Equal(1, view.InstanceCount);
+            Assert.Equal(12, view.Read(view.Geometries[0].GetProperty("positions")).Length);
+            Assert.Equal(12, view.Read(view.Geometries[0].GetProperty("indices")).Length);
         }
         finally
         {

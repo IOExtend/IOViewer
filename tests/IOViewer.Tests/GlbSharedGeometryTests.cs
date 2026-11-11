@@ -9,7 +9,7 @@ namespace IOViewer.Tests;
 public class GlbSharedGeometryTests
 {
     // One triangle mesh (first vertex configurable, others (1,0,0), (0,1,0)) plus the given nodes and scene roots.
-    private static ViewerDocument Import(string nodesJson, string rootNodes, float[]? vertex0 = null)
+    internal static ViewerDocument Import(string nodesJson, string rootNodes, float[]? vertex0 = null)
     {
         var bin = new byte[44];
         float[] pos = [vertex0?[0] ?? 0, vertex0?[1] ?? 0, vertex0?[2] ?? 0, 1, 0, 0, 0, 1, 0];
