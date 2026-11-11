@@ -124,6 +124,18 @@ AddMesh(null, new ViewerMesh
     Color = new RgbaColor(220, 60, 40)
 });
 
+// Twin columns in front of the building; the second is mirrored (scale -1 along X) and must shade like the first.
+var twin = Element("Column Twin", "Structural Columns", "Concrete 400x400", "Level 1", "Structure.rvt");
+AddMesh(twin, new ViewerMesh { Name = twin.Name, GeometryId = 1, Transform = Transform3d.Translate(new(22, -3, 0)), Color = concrete });
+var mirroredTwin = Element("Column Twin Mirrored", "Structural Columns", "Concrete 400x400", "Level 1", "Structure.rvt");
+AddMesh(mirroredTwin, new ViewerMesh
+{
+    Name = mirroredTwin.Name,
+    GeometryId = 1,
+    Transform = new Transform3d(-Vector3d.UnitX, Vector3d.UnitY, Vector3d.UnitZ, new(24, -3, 0)),
+    Color = concrete
+});
+
 var grids = new ViewerGridSystem { Name = "Structural Grids" };
 for (int i = 0; i < xs.Length; i++) grids.Lines.Add(new ViewerGridLine(xNames[i], new(xs[i], -2, 0), new(xs[i], 14, 0)));
 for (int j = 0; j < ys.Length; j++) grids.Lines.Add(new ViewerGridLine(yNames[j], new(-2, ys[j], 0), new(20, ys[j], 0)));

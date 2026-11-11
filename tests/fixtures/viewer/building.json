@@ -3264,6 +3264,106 @@
           "Length": "Infinity"
         }
       }
+    },
+    {
+      "Id": 300064,
+      "Name": "Column Twin",
+      "Category": "Structural Columns",
+      "TypeName": "Concrete 400x400",
+      "Level": "Level 1",
+      "LinkName": "Structure.rvt",
+      "Properties": {
+        "Identity Data": {
+          "Mark": "Column Twin"
+        },
+        "Constraints": {
+          "Level": "Level 1"
+        }
+      },
+      "MeshIndices": [
+        65
+      ],
+      "BoundingBox": {
+        "Min": {
+          "X": "Infinity",
+          "Y": "Infinity",
+          "Z": "Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "Max": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "IsEmpty": true,
+        "Center": {
+          "X": "NaN",
+          "Y": "NaN",
+          "Z": "NaN",
+          "LengthSquared": "NaN",
+          "Length": "NaN"
+        },
+        "Size": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        }
+      }
+    },
+    {
+      "Id": 300065,
+      "Name": "Column Twin Mirrored",
+      "Category": "Structural Columns",
+      "TypeName": "Concrete 400x400",
+      "Level": "Level 1",
+      "LinkName": "Structure.rvt",
+      "Properties": {
+        "Identity Data": {
+          "Mark": "Column Twin Mirrored"
+        },
+        "Constraints": {
+          "Level": "Level 1"
+        }
+      },
+      "MeshIndices": [
+        66
+      ],
+      "BoundingBox": {
+        "Min": {
+          "X": "Infinity",
+          "Y": "Infinity",
+          "Z": "Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "Max": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "IsEmpty": true,
+        "Center": {
+          "X": "NaN",
+          "Y": "NaN",
+          "Z": "NaN",
+          "LengthSquared": "NaN",
+          "Length": "NaN"
+        },
+        "Size": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        }
+      }
     }
   ],
   "Meshes": [
@@ -10793,6 +10893,174 @@
         "Rf": 0.8627450980392157,
         "Gf": 0.23529411764705882,
         "Bf": 0.1568627450980392,
+        "Af": 1
+      },
+      "Opacity": 1,
+      "TextureIndex": null,
+      "BoundingBox": {
+        "Min": {
+          "X": "Infinity",
+          "Y": "Infinity",
+          "Z": "Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "Max": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "IsEmpty": true,
+        "Center": {
+          "X": "NaN",
+          "Y": "NaN",
+          "Z": "NaN",
+          "LengthSquared": "NaN",
+          "Length": "NaN"
+        },
+        "Size": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        }
+      }
+    },
+    {
+      "Id": 65,
+      "Name": "Column Twin",
+      "ElementId": 300064,
+      "Vertices": [],
+      "Indices": [],
+      "Normals": null,
+      "UVs": null,
+      "GeometryId": 1,
+      "Transform": {
+        "XAxis": {
+          "X": 1,
+          "Y": 0,
+          "Z": 0,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        "YAxis": {
+          "X": 0,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        "ZAxis": {
+          "X": 0,
+          "Y": 0,
+          "Z": 1,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        "Translation": {
+          "X": 22,
+          "Y": -3,
+          "Z": 0,
+          "LengthSquared": 493,
+          "Length": 22.20360331117452
+        }
+      },
+      "MaterialId": null,
+      "Color": {
+        "R": 185,
+        "G": 183,
+        "B": 178,
+        "A": 255,
+        "Rf": 0.7254901960784313,
+        "Gf": 0.7176470588235294,
+        "Bf": 0.6980392156862745,
+        "Af": 1
+      },
+      "Opacity": 1,
+      "TextureIndex": null,
+      "BoundingBox": {
+        "Min": {
+          "X": "Infinity",
+          "Y": "Infinity",
+          "Z": "Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "Max": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        },
+        "IsEmpty": true,
+        "Center": {
+          "X": "NaN",
+          "Y": "NaN",
+          "Z": "NaN",
+          "LengthSquared": "NaN",
+          "Length": "NaN"
+        },
+        "Size": {
+          "X": "-Infinity",
+          "Y": "-Infinity",
+          "Z": "-Infinity",
+          "LengthSquared": "Infinity",
+          "Length": "Infinity"
+        }
+      }
+    },
+    {
+      "Id": 66,
+      "Name": "Column Twin Mirrored",
+      "ElementId": 300065,
+      "Vertices": [],
+      "Indices": [],
+      "Normals": null,
+      "UVs": null,
+      "GeometryId": 1,
+      "Transform": {
+        "XAxis": {
+          "X": -1,
+          "Y": -0,
+          "Z": -0,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        "YAxis": {
+          "X": 0,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        "ZAxis": {
+          "X": 0,
+          "Y": 0,
+          "Z": 1,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        "Translation": {
+          "X": 24,
+          "Y": -3,
+          "Z": 0,
+          "LengthSquared": 585,
+          "Length": 24.186773244895647
+        }
+      },
+      "MaterialId": null,
+      "Color": {
+        "R": 185,
+        "G": 183,
+        "B": 178,
+        "A": 255,
+        "Rf": 0.7254901960784313,
+        "Gf": 0.7176470588235294,
+        "Bf": 0.6980392156862745,
         "Af": 1
       },
       "Opacity": 1,

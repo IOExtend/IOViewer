@@ -4,6 +4,27 @@ const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
 const HIGHLIGHT_COLOR = new THREE.Color('#f59e0b');
 const WHITE_COLOR = new THREE.Color().setRGB(0.92, 0.92, 0.93, THREE.SRGBColorSpace);
 
+// True when the linear part of instance i (12 floats per instance, columns first) has a negative determinant.
+export function isMirrored(matrices, i) {
+  const [a, b, c, d, e, f, g, h, k] = matrices.subarray(i * 12, i * 12 + 9);
+  return a * (e * k - f * h) - d * (b * k - c * h) + g * (b * f - c * e) < 0;
+}
+
+// Copy of the geometry with every triangle's winding reversed; positions and normals are shared, not copied.
+export function reversedWinding(geometry) {
+  const source = geometry.index.array;
+  const index = source.slice();
+  for (let t = 0; t < index.length; t += 3) {
+    index[t + 1] = source[t + 2];
+    index[t + 2] = source[t + 1];
+  }
+  const reversed = new THREE.BufferGeometry();
+  reversed.setIndex(new THREE.BufferAttribute(index, 1));
+  reversed.setAttribute('position', geometry.getAttribute('position'));
+  reversed.setAttribute('normal', geometry.getAttribute('normal'));
+  return reversed;
+}
+
 /**
  * The model as one BatchedMesh per material (a material is either opaque or transparent).
  * Elements are addressed by their index in META `elements` (0..n-1); per-instance visibility and colour
@@ -32,19 +53,23 @@ export class ModelScene {
     this._highlight = new Uint8Array(count);
     this._highlighted = [];
     this._boxes = new Float32Array(count * 6);
-    this._buckets = this._createBuckets(meta, geometryOf, materialOf);
+    // Mirrored instances (det < 0) use a copy of their geometry with reversed winding, keyed as -1 - g:
+    // DoubleSide would otherwise treat their outer faces as back faces and turn the normals inward.
+    const geometryKey = new Int32Array(count);
+    for (let i = 0; i < count; i++) geometryKey[i] = isMirrored(matrices, i) ? -1 - geometryOf[i] : geometryOf[i];
+    this._buckets = this._createBuckets(meta, geometryKey, materialOf);
     this._indexElements();
 
     const geometries = new Map();
     const matrix = new THREE.Matrix4();
     const box = new THREE.Box3();
     for (let i = 0; i < count; i++) {
-      const g = geometryOf[i];
+      const key = geometryKey[i];
       const bucket = this._buckets[this._bucketOf[i]];
-      let geometryId = bucket.geometryIds.get(g);
+      let geometryId = bucket.geometryIds.get(key);
       if (geometryId === undefined) {
-        geometryId = bucket.mesh.addGeometry(this._geometry(data, geometries, g, bucket.texture !== null));
-        bucket.geometryIds.set(g, geometryId);
+        geometryId = bucket.mesh.addGeometry(this._geometry(data, geometries, key, bucket.texture !== null));
+        bucket.geometryIds.set(key, geometryId);
       }
       const m = matrices.subarray(i * 12, i * 12 + 12);
       matrix.set(m[0], m[3], m[6], m[9], m[1], m[4], m[7], m[10], m[2], m[5], m[8], m[11], 0, 0, 0, 1);
@@ -52,7 +77,7 @@ export class ModelScene {
       bucket.mesh.setMatrixAt(id, matrix);
       bucket.mesh.setColorAt(id, bucket.color);
       this._batchId[i] = id;
-      const local = meta.geometries[g].bbox;
+      const local = meta.geometries[geometryOf[i]].bbox;
       box.min.fromArray(local.min);
       box.max.fromArray(local.max);
       box.applyMatrix4(matrix);
@@ -148,10 +173,10 @@ export class ModelScene {
     this._changed();
   }
 
-  _createBuckets(meta, geometryOf, materialOf) {
+  _createBuckets(meta, geometryKey, materialOf) {
     const byMaterial = new Map();
     const buckets = [];
-    for (let i = 0; i < geometryOf.length; i++) {
+    for (let i = 0; i < geometryKey.length; i++) {
       const m = materialOf[i];
       let bucket = byMaterial.get(m);
       if (!bucket) {
@@ -161,11 +186,12 @@ export class ModelScene {
       }
       this._bucketOf[i] = bucket.index;
       bucket.instances++;
-      const g = geometryOf[i];
-      if (!bucket.geometryIds.has(g)) {
-        bucket.geometryIds.set(g, -1);
-        bucket.vertices += meta.geometries[g].positions.n / 3;
-        bucket.indices += meta.geometries[g].indices.n;
+      const key = geometryKey[i];
+      if (!bucket.geometryIds.has(key)) {
+        bucket.geometryIds.set(key, -1);
+        const source = meta.geometries[key < 0 ? -1 - key : key];
+        bucket.vertices += source.positions.n / 3;
+        bucket.indices += source.indices.n;
       }
     }
     for (const [m, bucket] of byMaterial) {
@@ -196,20 +222,24 @@ export class ModelScene {
     this._elementInstances = list;
   }
 
-  _geometry(data, cache, g, withUv) {
-    let base = cache.get(g);
-    if (!base) {
-      const source = this._meta.geometries[g];
+  // Geometry for a key: g for geometry g, -1 - g for its reversed-winding copy (mirrored instances).
+  _geometry(data, cache, key, withUv) {
+    const g = key < 0 ? -1 - key : key;
+    const source = this._meta.geometries[g];
+    let base = cache.get(key);
+    if (!base && key < 0) {
+      base = reversedWinding(this._geometry(data, cache, g, false));
+      cache.set(key, base);
+    } else if (!base) {
       base = new THREE.BufferGeometry();
       base.setAttribute('position', new THREE.BufferAttribute(data.view(source.positions), 3));
       base.setIndex(new THREE.BufferAttribute(data.view(source.indices), 1));
       // Normals are in geometry-local space; the batching shader rotates them with the instance matrix.
       if (source.normals) base.setAttribute('normal', new THREE.BufferAttribute(data.view(source.normals), 3));
       else base.computeVertexNormals();
-      cache.set(g, base);
+      cache.set(key, base);
     }
     if (!withUv) return base;
-    const source = this._meta.geometries[g];
     const textured = new THREE.BufferGeometry();
     textured.setIndex(base.index);
     textured.setAttribute('position', base.getAttribute('position'));

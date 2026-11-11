@@ -75,6 +75,46 @@ test('ModelScene addresses elements by index across meshes and materials', async
   expect(errors).toEqual([]);
 });
 
+// Mean grey level (0..255) of the 4x4 screen pixels around (x, y); the PNG is decoded by the page itself.
+async function brightness(page, x, y) {
+  const png = await page.screenshot({ clip: { x: x - 2, y: y - 2, width: 4, height: 4 } });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const context = document.createElement('canvas').getContext('2d');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, image.width, image.height);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
+    return sum / (data.length / 4);
+  }, png.toString('base64'));
+}
+
+test('a mirrored instance is shaded like its unmirrored twin', async ({ page }) => {
+  const { errors } = await open(page, 'building');
+  const twins = ['Column Twin', 'Column Twin Mirrored'].map((n) => building.Elements.findIndex((e) => e.Name === n));
+
+  // Centre of each twin's -Y face, which faces the camera, in CSS pixels.
+  const points = await page.evaluate((indices) => {
+    const { scene, camera } = window.__ioviewer;
+    return indices.map((index) => {
+      const box = scene.elementBox(index);
+      const point = box.getCenter(box.min.clone());
+      point.y = box.min.y;
+      point.project(camera);
+      return [((point.x + 1) / 2) * innerWidth, ((1 - point.y) / 2) * innerHeight];
+    });
+  }, twins);
+  const plain = await brightness(page, ...points[0]);
+  const mirrored = await brightness(page, ...points[1]);
+  const background = await brightness(page, 20, 20);
+
+  expect(Math.abs(plain - background)).toBeGreaterThan(10); // the sample hits the column, not the background
+  expect(Math.abs(mirrored - plain)).toBeLessThanOrEqual(3);
+  expect(errors).toEqual([]);
+});
+
 test('highlight, visibility and display modes change the picture without errors', async ({ page }) => {
   const { errors } = await open(page, 'building');
   const { width, height } = page.viewportSize();
