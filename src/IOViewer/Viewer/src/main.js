@@ -3,6 +3,7 @@ import { loadModelData } from './data.js';
 import { ModelScene } from './engine/modelScene.js';
 import { lang, t } from './i18n.js';
 import { NavigationControls } from './nav/controls.js';
+import { ViewCube } from './nav/viewCube.js';
 import { Picker } from './engine/picking.js';
 import { Selection } from './select/selection.js';
 import { selectInRect, screenBoxes } from './select/boxSelect.js';
@@ -52,6 +53,7 @@ function requestRender() {
   requestAnimationFrame(() => {
     frameRequested = false;
     renderer.render(world, controls.camera);
+    viewCube.update();
     resolveReady();
   });
 }
@@ -103,5 +105,6 @@ window.addEventListener('resize', () => {
 renderer.setSize(window.innerWidth, window.innerHeight, false);
 controls.resize(); // also schedules the first frame for an empty model
 controls.fitBox(scene.visibleBox(), false);
+const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
-window.__ioviewer = { scene, controls, picker, selection, ui, ready, get camera() { return controls.camera; } };
+window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, ready, get camera() { return controls.camera; } };

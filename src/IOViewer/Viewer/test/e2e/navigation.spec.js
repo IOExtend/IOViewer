@@ -252,3 +252,118 @@ test('animateTo between opposite views keeps the distance and a top view can be 
   await drag(page, 'left', [500, 400], [600, 400]);
   expect(await page.evaluate(() => window.__ioviewer.camera.position.toArray())).not.toEqual(before);
 });
+
+// View cube: client point of a point given in cube coordinates (the cube spans -1..1).
+const cubePoint = (page, p) =>
+  page.evaluate((p) => {
+    const { viewCube } = window.__ioviewer;
+    const v = viewCube.camera.position.clone().set(...p).project(viewCube.camera);
+    const r = viewCube.canvas.getBoundingClientRect();
+    return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height];
+  }, p);
+const viewDirection = (page) =>
+  page.evaluate(() => {
+    const { camera, controls } = window.__ioviewer;
+    return camera.position.clone().sub(controls.target).normalize().toArray();
+  });
+// Waits for the camera animation to end at `expected` (target to camera; top/bottom stay 0.01 rad off the pole).
+const expectView = (page, expected) =>
+  expect
+    .poll(async () => Math.hypot(...(await viewDirection(page)).map((c, i) => c - expected[i])), { timeout: 3000 })
+    .toBeLessThan(0.02);
+const arrow = (page, name) => page.locator(`.ioviewer-viewcube-arrow[data-arrow="${name}"]`);
+const s2 = Math.SQRT1_2;
+const s3 = 1 / Math.sqrt(3);
+
+test('view cube: a click on «Спереди» looks from the front (-Y) without touching the main controls', async ({ page }) => {
+  const errors = await open(page);
+  const faces = await page.evaluate(() =>
+    Object.fromEntries(window.__ioviewer.viewCube.faces.children.map((f) => [f.userData.label, f.position.toArray()])),
+  );
+  expect(Object.keys(faces).sort()).toEqual(['Сверху', 'Снизу', 'Сзади', 'Слева', 'Спереди', 'Справа'].sort());
+  await page.mouse.click(...(await cubePoint(page, faces['Спереди'])));
+  await expectView(page, [0, -1, 0]);
+  expect(await events(page)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('view cube turns with the camera: same rotation after an orbit, also in orthographic', async ({ page }) => {
+  await open(page);
+  const rotations = () =>
+    page.evaluate(() => {
+      const { viewCube, camera } = window.__ioviewer;
+      return [viewCube.camera.quaternion.toArray(), camera.quaternion.toArray()];
+    });
+  const [initial] = await rotations();
+  await drag(page, 'left', [500, 400], [650, 330]);
+  const [cube, main] = await rotations();
+  expect(cube).toEqual(main);
+  expect(cube).not.toEqual(initial);
+  await page.locator('[data-tool="projection"]').click();
+  await drag(page, 'left', [500, 400], [420, 470]);
+  const [cube2, main2] = await rotations();
+  expect(await page.evaluate(() => window.__ioviewer.camera.isOrthographicCamera)).toBe(true);
+  expect(cube2).toEqual(main2);
+  expect(cube2).not.toEqual(cube);
+});
+
+test('view cube: edges and corners are clickable and highlighted on hover', async ({ page }) => {
+  await open(page);
+  const edge = await cubePoint(page, [0.9, -1, 0]);
+  await page.mouse.move(...edge);
+  expect(await page.evaluate(() => window.__ioviewer.viewCube.hovered)).toBe('front-right');
+  expect(await page.evaluate(() => window.__ioviewer.viewCube.highlight.visible)).toBe(true);
+  await page.mouse.click(...edge);
+  await expectView(page, [s2, -s2, 0]);
+  await page.mouse.click(...(await cubePoint(page, [0.9, -1, 0.9])));
+  await expectView(page, [s3, -s3, s3]);
+  await page.mouse.move(640, 600); // off the cube
+  expect(await page.evaluate(() => window.__ioviewer.viewCube.highlight.visible)).toBe(false);
+});
+
+test('view cube arrows show only when aligned with a face and step between views', async ({ page }) => {
+  await open(page);
+  for (const name of ['up', 'down', 'left', 'right']) await expect(arrow(page, name)).toBeHidden();
+  await page.mouse.click(...(await cubePoint(page, [0, -1, 0])));
+  await expectView(page, [0, -1, 0]);
+  await expect(arrow(page, 'right')).toBeVisible();
+  await expect(arrow(page, 'right')).toHaveAttribute('aria-label', 'Повернуть вправо');
+  await arrow(page, 'right').click();
+  await expectView(page, [1, 0, 0]);
+  await arrow(page, 'up').click();
+  await expectView(page, [0, 0, 1]);
+  await expect(arrow(page, 'up')).toBeVisible(); // still aligned 0.01 rad off the pole
+  await arrow(page, 'right').click(); // turns the top view: the camera's heading goes from +X to +Y
+  await expect.poll(async () => (await viewDirection(page))[1], { timeout: 3000 }).toBeGreaterThan(0.009);
+  expect(Math.abs((await viewDirection(page))[0])).toBeLessThan(1e-3);
+  await arrow(page, 'down').click(); // the side at the bottom of the screen
+  await expectView(page, [0, 1, 0]);
+  await drag(page, 'left', [500, 400], [560, 380]);
+  await expect(arrow(page, 'left')).toBeHidden();
+});
+
+test('view cube home button restores the load view', async ({ page }) => {
+  await open(page);
+  const pose = () =>
+    page.evaluate(() => {
+      const { camera, controls } = window.__ioviewer;
+      return [...camera.position.toArray(), ...controls.target.toArray()];
+    });
+  const load = await pose();
+  await page.mouse.click(...(await cubePoint(page, [0, 0, 1])));
+  await expectView(page, [0, 0, 1]);
+  await drag(page, 'right', [500, 400], [560, 380]); // pan moves the target too
+  await page.getByRole('button', { name: 'Исходный вид' }).click();
+  await expect.poll(async () => Math.max(...(await pose()).map((c, i) => Math.abs(c - load[i]))), { timeout: 3000 }).toBeLessThan(1e-6);
+});
+
+test('the view cube takes no pointer events outside its box', async ({ page }) => {
+  await open(page);
+  const box = await page.locator('.ioviewer-viewcube').boundingBox();
+  const canvas = await page.locator('.ioviewer-viewcube-canvas').boundingBox();
+  await page.mouse.click(box.x - 4, canvas.y + canvas.height / 2);
+  await page.mouse.click(canvas.x + canvas.width / 2, box.y + box.height + 4);
+  expect((await events(page)).map((e) => e.type)).toEqual(['click', 'click']);
+  const properties = await page.locator('#ioviewer-properties').evaluate((p) => getComputedStyle(p).top);
+  expect(parseFloat(properties)).toBeGreaterThan(box.y + box.height);
+});

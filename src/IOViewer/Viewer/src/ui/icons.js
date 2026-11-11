@@ -31,4 +31,5 @@ export const icons = {
   // Controls
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   chevron: svg('<path d="M9 6l6 6-6 6"/>'),
+  home: svg('<path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/>'),
 };

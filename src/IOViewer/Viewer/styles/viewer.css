@@ -284,13 +284,98 @@ input:focus-visible {
   opacity: 0.45;
 }
 
-/* Properties of the selection, right; the view cube keeps the top-right corner. */
+/* View cube, top right: a 96 px cube with an arrow on each side and "home" in the corner. Only the cube canvas
+   and the buttons take pointer events. */
+.ioviewer-viewcube {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 132px;
+  height: 132px;
+  pointer-events: none;
+}
+
+.ioviewer-viewcube-canvas {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ioviewer-viewcube-arrow,
+.ioviewer-viewcube-home {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text-dim);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ioviewer-viewcube-arrow:hover,
+.ioviewer-viewcube-home:hover {
+  background: var(--button-hover);
+  color: #fff;
+}
+
+.ioviewer-viewcube-arrow svg,
+.ioviewer-viewcube-home svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="up"] {
+  left: 57px;
+  top: 0;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="up"] svg {
+  transform: rotate(-90deg);
+}
+
+.ioviewer-viewcube-arrow[data-arrow="down"] {
+  left: 57px;
+  bottom: 0;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="down"] svg {
+  transform: rotate(90deg);
+}
+
+.ioviewer-viewcube-arrow[data-arrow="left"] {
+  left: 0;
+  top: 57px;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="left"] svg {
+  transform: rotate(180deg);
+}
+
+.ioviewer-viewcube-arrow[data-arrow="right"] {
+  right: 0;
+  top: 57px;
+}
+
+.ioviewer-viewcube-home {
+  left: 0;
+  top: 0;
+}
+
+/* Properties of the selection, right, below the view cube. */
 #ioviewer-properties {
   right: 12px;
-  top: 120px;
+  top: 152px;
   width: 300px;
   max-width: calc(100% - 24px);
-  max-height: calc(100% - 120px - var(--toolbar-space));
+  max-height: calc(100% - 152px - var(--toolbar-space));
   overflow: auto;
   padding: 8px 12px 12px;
 }

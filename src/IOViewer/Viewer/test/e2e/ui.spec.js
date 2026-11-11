@@ -94,14 +94,14 @@ test('right click on nothing opens the short menu; Esc, an outside click and the
   await rail(page, 'model').click();
   await sidePanel(page, 'model').locator('.ioviewer-tree').evaluate((t) => (t.scrollTop = 0)); // it scrolled to D3
   const ducts = await rows(page).filter({ hasText: 'Ducts' }).boundingBox();
-  await page.mouse.click(1200, 40, { button: 'right' }); // background clear of the open panel
+  await page.mouse.click(1000, 40, { button: 'right' }); // background clear of the open panel and the view cube
   await expect(menu(page)).toBeVisible();
   await page.mouse.click(ducts.x + 20, ducts.y + ducts.height / 2); // press on the Ducts category header
   await expect(menu(page)).toBeHidden();
   await expect(rows(page).filter({ hasText: 'Supply Duct SA-1' })).toHaveCount(0); // the category did not expand
   expect(await selected(page)).toEqual([d3]);
 
-  await page.mouse.click(1200, 40, { button: 'right' });
+  await page.mouse.click(1000, 40, { button: 'right' });
   await page.mouse.wheel(0, 100);
   await expect(menu(page)).toBeHidden();
 });
