@@ -38,10 +38,11 @@ export function swallowPress(e) {
 }
 
 // Puts a screen-space label (position: absolute in the full-window #ioviewer-ui) over the scene point `point`;
-// hides it when the point is behind the camera, beyond its far plane or off the canvas.
+// hides it when the point is behind the camera or off the canvas (not for depth: near/far do not matter here).
 export function placeLabel(label, point, camera, rect) {
+  const inFront = point.clone().applyMatrix4(camera.matrixWorldInverse).z < 0;
   const p = point.clone().project(camera);
-  label.hidden = !(Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1 && Math.abs(p.z) <= 1);
+  label.hidden = !(inFront && Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1);
   if (label.hidden) return;
   label.style.left = `${rect.left + ((p.x + 1) / 2) * rect.width}px`;
   label.style.top = `${rect.top + ((1 - p.y) / 2) * rect.height}px`;

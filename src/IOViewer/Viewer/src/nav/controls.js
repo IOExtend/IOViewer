@@ -10,6 +10,7 @@ const detail = (type, d) => new CustomEvent(type, { detail: d });
 // Navisworks-style camera: left drag orbits (or pans), middle/right drag pans, wheel zooms to the cursor.
 // Pointer coordinates in events and in `pick(x, y)` are client pixels; `pick` returns a Vector3 or null.
 // `visibleBox()` gives the box of what is shown; it drives the orbit pivot fallback and near/far.
+// setExtraBounds(key, box) adds overlay boxes (grids, a measurement) that near/far must also cover.
 export class NavigationControls extends EventTarget {
   constructor(camera, dom, { pick = () => null, visibleBox = () => new THREE.Box3() } = {}) {
     super();
@@ -25,6 +26,7 @@ export class NavigationControls extends EventTarget {
     this._animation = 0;
     this._overlay = null;
     this._bounds = null;
+    this._extraBounds = new Map(); // key -> Box3
     dom.style.touchAction = 'none';
     dom.addEventListener('pointerdown', (e) => this._down(e));
     dom.addEventListener('pointermove', (e) => this._move(e));
@@ -68,15 +70,30 @@ export class NavigationControls extends EventTarget {
       const half = distance * Math.tan(THREE.MathUtils.degToRad(this._perspective.fov / 2));
       Object.assign(cam, { top: half, bottom: -half, left: -half * aspect, right: half * aspect });
     }
-    const bounds = this._visibleBounds();
-    if (bounds) {
-      const sphere = bounds.sphere;
+    const sphere = this._rangeSphere();
+    if (sphere) {
       const toCentre = cam.position.distanceTo(sphere.center);
       cam.far = (toCentre + sphere.radius) * 1.05;
       cam.near = Math.max((toCentre - sphere.radius) * 0.95, cam.far / 5000);
     }
     cam.updateProjectionMatrix();
     this.dispatchEvent(new Event('change'));
+  }
+
+  // Box (or null to remove it) that near/far keep in range besides the model; it never moves the orbit pivot or a fit.
+  setExtraBounds(key, box) {
+    if (box && !box.isEmpty()) this._extraBounds.set(key, box.clone());
+    else this._extraBounds.delete(key);
+    this.resize();
+  }
+
+  // Sphere around what is shown plus the extra bounds, or null when all are empty.
+  _rangeSphere() {
+    const sphere = this._visibleBounds()?.sphere ?? null;
+    if (this._extraBounds.size === 0) return sphere;
+    const box = sphere ? this._bounds.box.clone() : new THREE.Box3();
+    for (const extra of this._extraBounds.values()) box.union(extra);
+    return box.getBoundingSphere(new THREE.Sphere());
   }
 
   // Call when the visible set changes: the box is cached because computing it walks every instance.

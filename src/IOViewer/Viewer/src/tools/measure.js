@@ -45,6 +45,11 @@ export class Measure extends EventTarget {
     return this.points.length === 2 ? this.points[0].distanceTo(this.points[1]) : null;
   }
 
+  // Box of the points (empty without any), for the camera's near/far.
+  get box() {
+    return new THREE.Box3().setFromPoints(this.points);
+  }
+
   // Turning the tool off clears the measurement.
   setActive(active) {
     this.active = !!active;

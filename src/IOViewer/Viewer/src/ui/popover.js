@@ -23,10 +23,12 @@ export function createPopover(root, anchor, label, role = 'dialog') {
     swallowPress(e);
   }
 
-  // Esc on a focused field inside (the slider) never reaches the hotkeys, which ignore fields.
+  // Esc with focus inside (the slider, a menu item) closes only the popover: it never reaches the global hotkeys,
+  // which would also clear the measurement or the selection.
   element.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     e.preventDefault();
+    e.stopPropagation();
     close();
     anchor.focus();
   });

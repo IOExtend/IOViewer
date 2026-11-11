@@ -212,6 +212,111 @@ test('opacity slider 10-100 % changes the picture; the popover closes on Esc and
   expect(errors).toEqual([]);
 });
 
+// Largest per-pixel difference from the background in a 5x5 patch around a point (catches a 1 px line).
+async function maxFromBackground(page, [x, y]) {
+  const png = await page.screenshot({ clip: { x: Math.round(x) - 2, y: Math.round(y) - 2, width: 5, height: 5 } });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const context = document.createElement('canvas').getContext('2d');
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, image.width, image.height);
+    let max = 0;
+    for (let i = 0; i < data.length; i += 4) max = Math.max(max, Math.abs(data[i] - 31) + Math.abs(data[i + 1] - 34) + Math.abs(data[i + 2] - 40));
+    return max;
+  }, png.toString('base64'));
+}
+
+test('grid axes and a measurement stay drawn after Isolate and Hide shrink what is shown', async ({ page }) => {
+  const errors = await open(page);
+  const labels = page.locator('.ioviewer-grid-labels .ioviewer-grid-label');
+  await tool(page, 'distance').click();
+  await page.mouse.click(...(await screenOfWorld(page, A)));
+  await page.mouse.click(...(await screenOfWorld(page, B)));
+  const onAxisA = [0, 13, 0]; // axis A, far behind and left of the column, away from its labels
+  expect(await maxFromBackground(page, await screenOfWorld(page, onAxisA))).toBeGreaterThan(60);
+  await expect(labels.filter({ visible: true })).toHaveCount(14);
+
+  const column = await indexOf(page, 'Column D2 Level 1');
+  await page.evaluate((i) => window.__ioviewer.selection.set([i]), column);
+  await page.keyboard.press('i');
+  await frame(page);
+  expect(await page.evaluate(() => window.__ioviewer.scene.visibleBox().max.x - window.__ioviewer.scene.visibleBox().min.x)).toBeLessThan(1);
+  await expect(labels.filter({ visible: true })).toHaveCount(14);
+  expect(await maxFromBackground(page, await screenOfWorld(page, onAxisA))).toBeGreaterThan(60);
+  await expect(page.locator('.ioviewer-measure-label')).toBeVisible();
+  const onLine = await screenOfWorld(page, [2.8, -0.9, 0]); // the measure line, clear of its label, over nothing now
+  expect(await maxFromBackground(page, onLine)).toBeGreaterThan(60);
+
+  // Show all, then hide everything but the two twin columns in front of the building.
+  await page.keyboard.press('Shift+H');
+  const twins = await Promise.all(['Column Twin', 'Column Twin Mirrored'].map((n) => indexOf(page, n)));
+  await page.evaluate((keep) => {
+    const { selection, scene } = window.__ioviewer;
+    selection.set([...Array(scene.elementCount).keys()].filter((i) => !keep.includes(i)));
+  }, twins);
+  await page.keyboard.press('h');
+  await page.evaluate(() => window.__ioviewer.selection.clear());
+  await frame(page);
+  // Shown now: the twins and the survey marker (no element, so H cannot hide it), all in front of the building.
+  const shown = await page.evaluate(() => {
+    const { scene } = window.__ioviewer;
+    return [...Array(scene.elementCount).keys()].filter((i) => scene.isVisible(i));
+  });
+  expect(shown).toEqual(twins);
+  await expect(labels.filter({ visible: true })).toHaveCount(14);
+  expect(await maxFromBackground(page, await screenOfWorld(page, onAxisA))).toBeGreaterThan(60);
+  expect(errors).toEqual([]);
+});
+
+test('Esc on a focused display-mode item closes only the menu: selection and measurement stay', async ({ page }) => {
+  const errors = await open(page);
+  const column = await indexOf(page, 'Column D2 Level 1');
+  await page.evaluate((i) => window.__ioviewer.selection.set([i]), column);
+  await tool(page, 'distance').click();
+  await page.mouse.click(...(await screenOfWorld(page, A)));
+  await page.mouse.click(...(await screenOfWorld(page, B)));
+  await tool(page, 'displayMode').click();
+  await modeItem(page, 'white').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.ioviewer-display-modes')).toBeHidden();
+  expect(await selected(page)).toEqual([column]);
+  expect(await page.evaluate(() => window.__ioviewer.measure.points.length)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('with the distance tool on, box select and right click keep the selection', async ({ page }) => {
+  const errors = await open(page);
+  const column = await indexOf(page, 'Column D2 Level 1');
+  await page.evaluate((i) => window.__ioviewer.selection.set([i]), column);
+  await tool(page, 'distance').click();
+  const drag = async (from, to, modifiers) => {
+    for (const key of modifiers) await page.keyboard.down(key);
+    await page.mouse.move(...from);
+    await page.mouse.down();
+    await page.mouse.move(...to, { steps: 5 });
+    await page.mouse.up();
+    for (const key of modifiers) await page.keyboard.up(key);
+  };
+  await drag([300, 200], [1000, 650], ['Shift']); // window over the whole building
+  expect(await selected(page)).toEqual([column]);
+  await drag([1000, 650], [300, 200], ['Control', 'Shift']); // crossing, adding
+  expect(await selected(page)).toEqual([column]);
+  expect(await page.evaluate(() => window.__ioviewer.measure.points.length)).toBe(0);
+
+  const slab = await screenOfWorld(page, A);
+  await page.mouse.click(...slab, { button: 'right' });
+  await expect(page.locator('.ioviewer-context-menu')).toBeVisible();
+  await expect(page.locator('.ioviewer-context-menu [data-item="isolate"]')).toBeVisible(); // the element menu
+  expect(await selected(page)).toEqual([column]);
+  await page.locator('.ioviewer-context-menu [data-item="isolate"]').click(); // acts on the selection
+  expect(await page.evaluate((i) => window.__ioviewer.scene.isVisible(i), column)).toBe(true);
+  const ground = await indexOf(page, 'Ground Slab');
+  expect(await page.evaluate((i) => window.__ioviewer.scene.isVisible(i), ground)).toBe(false);
+  expect(errors).toEqual([]);
+});
+
 test('screenshot: a measurement and the grid labels', async ({ page }) => {
   await open(page);
   await tool(page, 'distance').click();

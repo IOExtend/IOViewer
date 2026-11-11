@@ -97,7 +97,7 @@ scene.root.addEventListener('change', (e) => {
 
 const selection = new Selection();
 selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
-const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection });
+const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection, measure });
 mountSections({ root: uiRoot, ...ui, sections, selection });
 for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta: data.meta, grids })) ui.onEscape(popover.close);
 ui.toolbar.setHandler('distance', () => {
@@ -106,6 +106,14 @@ ui.toolbar.setHandler('distance', () => {
 });
 ui.toolbar.setActive('distance', false);
 ui.onEscape(() => measure.clear());
+// The overlays stay within the camera's near/far even when what is shown shrinks (isolate, hide).
+const overlayBounds = () => {
+  controls.setExtraBounds('grids', grids.visible ? grids.box : null);
+  controls.setExtraBounds('measure', measure.box);
+};
+grids.addEventListener('change', overlayBounds);
+measure.addEventListener('change', overlayBounds);
+overlayBounds();
 
 // Click selects, Ctrl+click toggles; a click on nothing clears unless a modifier is held.
 // With the distance tool on, a click on the model places a measure point instead and the selection stays.
@@ -120,8 +128,9 @@ controls.addEventListener('click', (e) => {
   else if (!shift) selection.clear();
 });
 // Box select replaces the selection, Ctrl+box adds to it; a sliver (< 4 px either way) counts as a click on nothing.
-// Elements the section cuts away entirely are not selected.
+// Elements the section cuts away entirely are not selected. With the distance tool on, the selection stays.
 controls.addEventListener('boxselect', (e) => {
+  if (measure.active) return;
   const { rect, mode, ctrl, shift } = e.detail;
   if (rect.width < 4 || rect.height < 4) {
     if (!ctrl && !shift) selection.clear();

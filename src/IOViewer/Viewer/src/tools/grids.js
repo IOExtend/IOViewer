@@ -16,6 +16,8 @@ export class GridAxes extends EventTarget {
       new THREE.LineBasicMaterial({ color: '#93c5fd', transparent: true, opacity: 0.55, depthTest: false, depthWrite: false }),
     );
     this.group.name = 'grids';
+    this.group.geometry.computeBoundingBox();
+    this.box = this.group.geometry.boundingBox; // all the lines; empty without grids
     this.group.renderOrder = 999;
     this._labels = grids.flatMap((g) =>
       [g.start, g.end].map((p) => ({ element: el('div', 'ioviewer-grid-label', g.name), point: new THREE.Vector3(...p) })),

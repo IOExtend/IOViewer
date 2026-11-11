@@ -30,7 +30,7 @@ async function copyText(text) {
  * onEscape(handler) adds a handler that Esc tries, in order, after closing the context menu and before clearing the
  * selection: it returns true when it used the key.
  */
-export function mountUI({ root, data, scene, controls, picker, selection }) {
+export function mountUI({ root, data, scene, controls, picker, selection, measure }) {
   const { meta } = data;
   const fitAll = () => controls.fitBox(scene.visibleBox());
   const actions = {
@@ -119,9 +119,14 @@ export function mountUI({ root, data, scene, controls, picker, selection }) {
         () => showToast(root, t('copyFailed')),
       ),
   });
-  // Right click on an element that is not selected selects it first, as in Navisworks.
+  // Right click on an element that is not selected selects it first, as in Navisworks. With the distance tool on the
+  // selection stays: the menu is for the current selection, wherever the click was.
   controls.addEventListener('contextmenu', (e) => {
     const { x, y } = e.detail;
+    if (measure.active) {
+      const [first] = selection.values();
+      return first === undefined ? contextMenu.open('empty', x, y, null) : contextMenu.open('element', x, y, first);
+    }
     const hit = picker.pick(x, y);
     if (!hit) return contextMenu.open('empty', x, y, null);
     if (!selection.has(hit.element)) selection.set([hit.element]);
