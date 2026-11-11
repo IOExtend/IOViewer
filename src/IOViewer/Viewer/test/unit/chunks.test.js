@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { F32, GENERAL, VERBATIM, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, prefixByRadius, sortByRadius, splitCells } from '../../src/engine/chunks.js';
+import {
+  F32, GENERAL, MERGED_CAP, VERBATIM, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, planShapes, prefixByRadius, sortByRadius,
+  splitByCount, splitCells,
+} from '../../src/engine/chunks.js';
 import { GRID, octDecodeInto } from '../../src/engine/quantize.js';
 
 // Seeded generator, so a failure repeats.
@@ -229,4 +232,56 @@ test('unit normals are decoded only for transformed slots: a translation-only ba
   bakeChunk(Uint32Array.from([0]), context(matrices([0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0]), [exported]));
   assert.ok(exported.normals instanceof Float32Array);
   assert.deepEqual([...exported.normals.subarray(0, 3)], [0, 0, 1]);
+});
+
+test('plan: under cap all merged', () => {
+  const shapes = [{ k: 100, bytes: 1000 }, { k: 1, bytes: 5000 }, { k: 20, bytes: 10 }];
+  assert.deepEqual([...planShapes(shapes, { cap: 100 * 1000 + 5000 + 200 })], [0, 0, 0]); // exactly at the cap
+  assert.deepEqual([...planShapes(shapes)], [0, 0, 0]); // MERGED_CAP
+  assert.equal(MERGED_CAP, 384 * 2 ** 20);
+  assert.deepEqual([...planShapes([], { cap: 0 })], []);
+});
+
+test('over cap moves by (k-1)*bytes desc with deterministic ties', () => {
+  // Savings: A 190, B 190 with more instances, C = A, D 9900. One cell each; maxDraws admits the first ones in order.
+  const shapes = [{ k: 20, bytes: 10 }, { k: 39, bytes: 5 }, { k: 20, bytes: 10 }, { k: 100, bytes: 100 }];
+  const plan = (maxDraws) => [...planShapes(shapes, { cap: 0, minRepeats: 16, maxDraws })];
+  assert.deepEqual(plan(1), [0, 0, 0, 1]); // D
+  assert.deepEqual(plan(2), [0, 1, 0, 1]); // then B (same saving as A, more instances)
+  assert.deepEqual(plan(3), [1, 1, 0, 1]); // then A (same as C, earlier)
+  // Over the cap every repeated shape is instanced, not only enough to fit it.
+  assert.deepEqual([...planShapes(shapes, { cap: 10594 })], [1, 1, 1, 1]); // total 10595
+});
+
+test('k < 16 and unique stay merged', () => {
+  const shapes = [{ k: 15, bytes: 1e9 }, { k: 1, bytes: 1e9 }, { k: 16, bytes: 10 }];
+  assert.deepEqual([...planShapes(shapes)], [0, 0, 1]);
+  // A lower minRepeats (tests) moves them too.
+  assert.deepEqual([...planShapes(shapes, { minRepeats: 1 })], [1, 1, 1]);
+});
+
+test('stops at 1024 draws', () => {
+  // ceil(k / 1024) cells each: 1000, then 30 would pass 1024 and is skipped, 24 fills it exactly.
+  const shapes = [{ k: 1024 * 1000, bytes: 1000 }, { k: 1024 * 30, bytes: 1000 }, { k: 1024 * 24 - 5, bytes: 1000 }];
+  assert.deepEqual([...planShapes(shapes, { cap: 0 })], [1, 0, 1]);
+  assert.deepEqual([...planShapes(shapes, { cap: 0, maxDraws: 999 })], [0, 1, 1]);
+});
+
+test('cells: exactly ceil(n / limit) leaves of at most limit instances, each instance once, neighbours together', () => {
+  const next = random(11);
+  for (const n of [0, 1, 1024, 1025, 3000, 5121]) {
+    // On a line x = instance number, given in shuffled order: every leaf must be a run of consecutive numbers.
+    const members = Uint32Array.from({ length: n }, (_, i) => i).sort(() => next() - 0.5);
+    const centres = Float32Array.from({ length: n * 3 }, (_, k) => (k % 3 === 0 ? k / 3 : 0));
+    const leaves = splitByCount(centres, members, 1024);
+    assert.equal(leaves.length, Math.ceil(n / 1024), `n = ${n}`);
+    const seen = new Uint8Array(n);
+    for (const leaf of leaves) {
+      assert.ok(leaf.length <= 1024 && leaf.length > 0);
+      const sorted = [...leaf].sort((a, b) => a - b);
+      assert.equal(sorted[sorted.length - 1] - sorted[0], leaf.length - 1);
+      for (const i of leaf) seen[i]++;
+    }
+    assert.ok(seen.every((c) => c === 1));
+  }
 });

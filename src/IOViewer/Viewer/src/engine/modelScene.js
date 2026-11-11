@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { detailThreshold, frustumPlanes, outsideFrustum, viewMetrics } from './culling.js';
-import { normalsView, positionsView } from './quantize.js';
-import { CHUNK_VERTICES, F32, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, prefixByRadius, sortByRadius, splitCells } from './chunks.js';
+import { GRID, normalsView, octEncodeInto, positionsView } from './quantize.js';
+import {
+  CHUNK_VERTICES, F32, MERGED_CAP, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, planShapes, prefixByRadius, sortByRadius,
+  splitByCount, splitCells, unitNormals,
+} from './chunks.js';
 import { patchLambert } from './slotShader.js';
 
 export const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
@@ -10,26 +13,14 @@ const WHITE = [235, 235, 237]; // sRGB (0.92, 0.92, 0.93)
 const NO_SLOT = 0xffffffff; // an instance without vertices has no slot
 const ROW = 2048; // slots per slot-texture row (the shaders use slot & 2047, slot >> 11)
 const RANGE_LIMIT = 256; // up to this many changed slots are uploaded one by one, more as the whole texture
+const MIN_REPEATS = 16; // fewer instances of a shape stay merged even above the cap
+const PER_CELL = 1024; // instances per remainder cell
+const INSTANCED_COST = 1.4; // an instanced triangle against a merged one (measured 1.58 / 1.16 ns per triangle)
 
 // True when the linear part of instance i (12 floats per instance, columns first) has a negative determinant.
 export function isMirrored(matrices, i) {
   const [a, b, c, d, e, f, g, h, k] = matrices.subarray(i * 12, i * 12 + 9);
   return a * (e * k - f * h) - d * (b * k - c * h) + g * (b * f - c * e) < 0;
-}
-
-// Copy of the geometry with every triangle's winding reversed; positions and normals are shared, not copied.
-export function reversedWinding(geometry) {
-  const source = geometry.index.array;
-  const index = source.slice();
-  for (let t = 0; t < index.length; t += 3) {
-    index[t + 1] = source[t + 2];
-    index[t + 2] = source[t + 1];
-  }
-  const reversed = new THREE.BufferGeometry();
-  reversed.setIndex(new THREE.BufferAttribute(index, 1));
-  reversed.setAttribute('position', geometry.getAttribute('position'));
-  reversed.setAttribute('normal', geometry.getAttribute('normal'));
-  return reversed;
 }
 
 // The CPU copy of a GPU array is dropped once three has uploaded it (three's documented onUpload pattern).
@@ -71,9 +62,12 @@ const colorBytes = (color) => {
  * the last shown slot (hidden slots inside it are dropped by the shader); setDetail can also cut that range where the
  * slots get smaller on screen than a given radius, which the viewer uses while the camera moves (detailThreshold
  * picks it for a cost budget in triangles).
- * options (tests and the performance harness, from window.IOVIEWER_TEST): chunkVertices, noHideBranch, slotLimit; and
- * maxTextureSize (the renderer's). A model over the slot limit throws ModelTooLargeError. Instances with a non-finite
- * box (NaN or infinite matrix or geometry box) get no slot and take no part in the bounds.
+ * A model whose merged data would exceed MERGED_CAP bytes draws its repeated shapes (a geometry with one material,
+ * mirrored or not, used at least 16 times) as instanced cells instead: three's InstancedMesh over the shape's own
+ * vertex data with the same slots, slot textures and material, up to 1024 nearby instances (one draw) per cell.
+ * options (tests and the performance harness, from window.IOVIEWER_TEST): chunkVertices, noHideBranch, slotLimit,
+ * mergedCap, minRepeats; and maxTextureSize (the renderer's). A model over the slot limit throws ModelTooLargeError.
+ * Instances with a non-finite box (NaN or infinite matrix or geometry box) get no slot and take no part in the bounds.
  */
 export class ModelScene {
   constructor(data, options = {}) {
@@ -122,7 +116,7 @@ export class ModelScene {
       box.max.toArray(this._boxes, i * 6 + 3);
     }
     const limit = Math.min(2 ** 24 - 1, ROW * (options.maxTextureSize ?? Infinity), options.slotLimit ?? Infinity);
-    this._build(data, geometryOf, matrices, options.chunkVertices ?? CHUNK_VERTICES, limit);
+    this._build(data, geometryOf, matrices, options, limit);
     for (let i = 0; i < count; i++) {
       this._applyColor(i);
       this._draw(i);
@@ -286,9 +280,10 @@ export class ModelScene {
     this._mode = mode;
     for (const bucket of this._buckets) {
       const map = mode === 'textures' && bucket.texture !== null ? this._texture(bucket.texture) : null;
-      if (bucket.material.map !== map) {
-        bucket.material.map = map;
-        bucket.material.needsUpdate = true;
+      for (const material of [bucket.material, bucket.wire]) {
+        if (material.map === map) continue;
+        material.map = map;
+        material.needsUpdate = true;
       }
     }
     if (mode === 'wireframe') this._buildLines();
@@ -342,7 +337,7 @@ export class ModelScene {
     return detailThreshold(pixels, this._slotCost, budget);
   }
 
-  // What the latest render drew, in triangles: { drawn, inView, draws } over the chunks it drew (inView: their shown
+  // What the latest render drew, in triangles: { drawn, inView, draws } over the units it drew (inView: their shown
   // span; drawn: after the detail cut).
   drawStats() {
     let latest = -Infinity;
@@ -350,11 +345,12 @@ export class ModelScene {
     let drawn = 0;
     let inView = 0;
     let draws = 0;
+    // Triangles of the unit's slots a..b-1.
+    const triangles = (unit, a, b) => (unit.cell ? (b - a) * unit.triangles : (unit.starts[b] - unit.starts[a]) / 3);
     for (const unit of this._units) {
       if (unit.lastFrame !== latest) continue;
-      const s = unit.starts;
-      inView += (s[unit.last + 1] - s[unit.first]) / 3;
-      drawn += (s[Math.max(unit.end, unit.first)] - s[unit.first]) / 3;
+      inView += triangles(unit, unit.first, Math.max(unit.last + 1, unit.first));
+      drawn += triangles(unit, unit.first, Math.max(unit.end, unit.first));
       draws++;
     }
     return { drawn, inView, draws };
@@ -382,31 +378,35 @@ export class ModelScene {
 
   // GPU and CPU-mirror sizes in bytes, and counts.
   memory() {
+    const merged = this._units[this._chunkCount]?.slotBase ?? this._slotInstance.length; // the cells' slots come last
     return {
-      gpuBytes: this._mergedBytes + this._lineBytes + this._stateBytes,
+      gpuBytes: this._mergedBytes + this._instancedBytes + this._lineBytes + this._stateBytes,
       mergedBytes: this._mergedBytes,
-      instancedBytes: 0,
+      instancedBytes: this._instancedBytes,
       stateBytes: this._stateBytes,
       lineBytes: this._lineBytes,
-      chunks: this._units.length,
-      cells: 0,
-      mergedInstances: this._slotInstance.length,
-      instancedInstances: 0,
-      triangles: this._totalCost,
+      chunks: this._chunkCount,
+      cells: this._units.length - this._chunkCount,
+      mergedInstances: merged,
+      instancedInstances: this._slotInstance.length - merged,
+      triangles: this._triangles,
     };
   }
 
   setClipping(planes, intersection) {
-    for (const { material } of this._buckets) {
-      material.clippingPlanes = planes.length > 0 ? planes : null;
-      material.clipIntersection = intersection;
-      material.needsUpdate = true;
+    for (const bucket of this._buckets) {
+      for (const material of [bucket.material, bucket.wire]) {
+        material.clippingPlanes = planes.length > 0 ? planes : null;
+        material.clipIntersection = intersection;
+        material.needsUpdate = true;
+      }
     }
     this._changed('appearance');
   }
 
-  // Slots (numbered chunk by chunk), the chunks with their baked GPU data, and the slot textures.
-  _build(data, geometryOf, matrices, chunkVertices, limit) {
+  // Slots (numbered unit by unit: chunks, then cells), the chunks with their baked GPU data, the instanced cells, and
+  // the slot textures.
+  _build(data, geometryOf, matrices, options, limit) {
     const count = geometryOf.length;
     const meta = this._meta;
     const sources = new Map();
@@ -427,28 +427,53 @@ export class ModelScene {
     const weight = new Uint32Array(count);
     const radius = new Float32Array(count);
     const mirrored = new Uint8Array(count);
-    const groups = new Map(); // bucket * 2 + (f32 ? 1 : 0) -> instances
-    const uses = new Uint32Array(meta.geometries.length); // slots per geometry still to bake
+    const byShape = new Map(); // (geometry * 2 + mirrored) * buckets + bucket -> instances
     const b = this._boxes;
     for (let i = 0; i < count; i++) {
       const s = source(geometryOf[i]);
       if (s.vertices === 0 || !finiteBox(b, i)) continue;
-      uses[geometryOf[i]]++;
       kind[i] = placeSlot(matrices, i, s, origins.subarray(i * 3, i * 3 + 3));
       mirrored[i] = isMirrored(matrices, i) ? 1 : 0;
       weight[i] = s.vertices;
       for (let a = 0; a < 3; a++) centres[i * 3 + a] = (b[i * 6 + a] + b[i * 6 + 3 + a]) / 2;
       radius[i] = Math.hypot(b[i * 6 + 3] - b[i * 6], b[i * 6 + 4] - b[i * 6 + 1], b[i * 6 + 5] - b[i * 6 + 2]) / 2;
-      const key = this._bucketOf[i] * 2 + (kind[i] === F32 ? 1 : 0);
-      let list = groups.get(key);
-      if (!list) groups.set(key, (list = []));
+      const key = (geometryOf[i] * 2 + mirrored[i]) * this._buckets.length + this._bucketOf[i];
+      let list = byShape.get(key);
+      if (!list) byShape.set(key, (list = []));
       list.push(i);
     }
+    // Shapes in (geometry, mirrored, bucket) order; above the merged-memory cap the most repeated ones are instanced.
+    const keys = [...byShape.keys()].sort((x, y) => x - y);
+    const shapes = keys.map((key) => {
+      const members = byShape.get(key);
+      const s = source(geometryOf[members[0]]);
+      const textured = this._buckets[this._bucketOf[members[0]]].texture !== null;
+      const quantizable = [0, 1, 2].every((a) => (s.max[a] - s.min[a]) / GRID <= 65535);
+      const bytes = s.vertices * ((quantizable ? 12 : 20) + (textured ? 8 : 0)) + s.indices.length * (s.vertices > 65535 ? 4 : 2);
+      return { k: members.length, bytes, members, textured };
+    });
+    const instanced = planShapes(shapes, { cap: options.mergedCap ?? MERGED_CAP, minRepeats: options.minRepeats ?? MIN_REPEATS, perCell: PER_CELL });
+    const groups = new Map(); // bucket * 2 + (f32 ? 1 : 0) -> merged instances
+    const uses = new Uint32Array(meta.geometries.length); // merged slots per geometry still to bake
+    const cells = [];
+    shapes.forEach((shape, k) => {
+      if (instanced[k]) {
+        for (const cell of splitByCount(centres, shape.members, PER_CELL)) cells.push({ shape, members: sortByRadius(cell, radius) });
+        return;
+      }
+      for (const i of shape.members) {
+        uses[geometryOf[i]]++;
+        const key = this._bucketOf[i] * 2 + (kind[i] === F32 ? 1 : 0);
+        let list = groups.get(key);
+        if (!list) groups.set(key, (list = []));
+        list.push(i);
+      }
+    });
     const leaves = [];
     for (const key of [...groups.keys()].sort((x, y) => x - y)) {
-      for (const leaf of splitCells(centres, weight, groups.get(key), chunkVertices)) leaves.push(sortByRadius(leaf, radius));
+      for (const leaf of splitCells(centres, weight, groups.get(key), options.chunkVertices ?? CHUNK_VERTICES)) leaves.push(sortByRadius(leaf, radius));
     }
-    const slots = leaves.reduce((sum, leaf) => sum + leaf.length, 0);
+    const slots = [...leaves, ...cells.map((c) => c.members)].reduce((sum, members) => sum + members.length, 0);
     // Slot numbers must stay exact in a float attribute (< 2^24) and the slot textures within the GPU's size.
     if (slots > limit) throw new ModelTooLargeError(slots, limit);
     const height = Math.max(1, Math.ceil(slots / ROW));
@@ -481,6 +506,7 @@ export class ModelScene {
     this._frameViewAt = NaN;
     this._units = [];
     this._mergedBytes = 0;
+    this._instancedBytes = 0;
     this._lineBytes = 0;
     const ctx = { matrices, geometryOf, mirrored, kind, origins, source, textured: false };
     // Source indices for the wireframe lines, built on first use (after the BIN block has been released).
@@ -508,7 +534,98 @@ export class ModelScene {
       slotBase += leaf.length;
     }
     this._lineMembers = { mirrored, geometryOf: geometryOf.slice() };
+    this._chunkCount = this._units.length;
+    this._triangles = this._slotCost.reduce((sum, c) => sum + c, 0); // the chunks' so far
+
+    // Cells: per instanced shape, its vertex data and index once, shared by its cells of up to PER_CELL instances.
+    const shared = new Map();
+    for (const { shape, members } of cells) {
+      const i0 = members[0];
+      const s = source(geometryOf[i0]);
+      let data = shared.get(shape);
+      if (!data) shared.set(shape, (data = this._shape(s, mirrored[i0] === 1, shape.textured)));
+      for (let j = 0; j < members.length; j++) {
+        const i = members[j];
+        const slot = slotBase + j;
+        this._slotOf[i] = slot;
+        this._slotInstance[slot] = i;
+        this._slotUnit[slot] = this._units.length;
+        this._slotRadius[slot] = radius[i];
+        this._slotCost[slot] = data.triangles * INSTANCED_COST;
+        // Cell positions are the geometry's own: decoded by its origin and step, then placed by instanceMatrix.
+        info.set(s.q ? s.q.o : [0, 0, 0], slot * 4);
+        info[slot * 4 + 3] = s.q ? s.q.s : 1;
+      }
+      this._triangles += data.triangles * members.length;
+      this._units.push(this._cell(this._buckets[this._bucketOf[i0]], members, slotBase, data, matrices));
+      slotBase += members.length;
+    }
     this._totalCost = this._slotCost.reduce((sum, c) => sum + c, 0);
+  }
+
+  // Vertex data of an instanced shape in the chunks' format, in the geometry's own space: q (steps or f32, w = 0: the
+  // slot is slotBase alone), octahedral normals, uv (textured buckets) and the index, reversed for a mirrored shape.
+  // The index keeps its CPU copy: three builds the wireframe index from it.
+  _shape(s, mirror, textured) {
+    const V = s.vertices;
+    const q = s.q ? new Uint16Array(V * 4) : new Float32Array(V * 4);
+    for (let v = 0; v < V; v++) for (let a = 0; a < 3; a++) q[v * 4 + a] = s.positions[v * 3 + a];
+    let o = s.oct ? s.oct.slice() : null; // a copy: the view would keep the whole BIN block alive
+    if (!o) {
+      const normals = unitNormals(s);
+      o = new Int16Array(V * 2);
+      for (let v = 0; v < V; v++) octEncodeInto(o, v * 2, normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]);
+    }
+    const uv = textured ? new Float32Array(V * 2) : null;
+    if (uv && s.uvs) uv.set(s.uvs);
+    const src = s.indices;
+    const index = indexArray(V, src.length);
+    for (let t = 0; t < src.length; t += 3) {
+      index[t] = src[t];
+      index[t + 1] = src[t + (mirror ? 2 : 1)];
+      index[t + 2] = src[t + (mirror ? 1 : 2)];
+    }
+    this._instancedBytes += q.byteLength + o.byteLength + (uv?.byteLength ?? 0) + index.byteLength;
+    return {
+      q: attr(q, 4),
+      normal: attr(o, 2, true),
+      uv: uv && attr(uv, 2),
+      index: new THREE.BufferAttribute(index, 1),
+      triangles: src.length / 3,
+    };
+  }
+
+  // A remainder cell: three's InstancedMesh over the shape's shared data, one slotBase (its slot) and one RTC matrix per
+  // instance, slots ordered by size, largest first; its sphere drives three's culling and transparent sort.
+  _cell(bucket, members, slotBase, data, matrices) {
+    const n = members.length;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('q', data.q);
+    geometry.setAttribute('position', data.q); // unread by the shaders; three builds a wireframe index only with it
+    geometry.setAttribute('normal', data.normal);
+    if (data.uv) geometry.setAttribute('uv', data.uv);
+    geometry.setAttribute('slotBase', attr(Float32Array.from({ length: n }, (_, j) => slotBase + j), 1, false, THREE.InstancedBufferAttribute));
+    geometry.setIndex(data.index);
+    const s = chunkSphere(this._boxes, members);
+    const sphere = new THREE.Sphere(new THREE.Vector3(s[0], s[1], s[2]), s[3]);
+    geometry.boundingSphere = sphere; // set, so three never computes one from the positions
+    const mesh = new THREE.InstancedMesh(geometry, bucket.material, n);
+    const m = mesh.instanceMatrix.array;
+    for (let j = 0; j < n; j++) {
+      const e = matrices.subarray(members[j] * 12, members[j] * 12 + 12);
+      m.set([e[0], e[1], e[2], 0, e[3], e[4], e[5], 0, e[6], e[7], e[8], 0, e[9], e[10], e[11], 1], j * 16);
+    }
+    mesh.instanceMatrix.onUpload(release);
+    mesh.boundingSphere = sphere;
+    this._instancedBytes += n * (64 + 4);
+    const unit = {
+      bucket, mesh, lines: null, slotBase, n, sphere: s, shown: 0, first: 0, last: -1, end: 0, dirty: false,
+      cell: true, triangles: data.triangles, lastFrame: -Infinity,
+    };
+    mesh.onBeforeRender = (renderer, scene, camera) => this._range(unit, renderer, camera, mesh);
+    mesh.visible = false;
+    this.root.add(mesh);
+    return unit;
   }
 
   _chunk(bucket, members, slotBase, baked, mirrored, geometryOf) {
@@ -526,21 +643,32 @@ export class ModelScene {
     const mesh = new THREE.Mesh(geometry, bucket.material);
     const unit = {
       bucket, mesh, lines: null, slotBase, n: members.length, sphere, shown: 0, first: 0, last: -1, end: 0, dirty: false,
-      starts: baked.indexStart, vertices: baked.q.length / 4, f32: baked.q instanceof Float32Array, members: members.slice(),
+      cell: false, starts: baked.indexStart, vertices: baked.q.length / 4, f32: baked.q instanceof Float32Array, members: members.slice(),
       lastFrame: -Infinity,
     };
-    mesh.onBeforeRender = (renderer, scene, camera, g) => this._range(unit, renderer, camera, g, 1);
+    mesh.onBeforeRender = (renderer, scene, camera) => this._range(unit, renderer, camera, mesh);
     mesh.visible = false;
     this.root.add(mesh);
     return unit;
   }
 
   // Wireframe: per chunk, LineSegments over the same attributes and a line index of 6 entries per triangle (a,b,
-  // b,c, c,a), as three's own wireframe draws; a slot's line range is twice its triangle range.
+  // b,c, c,a), as three's own wireframe draws; a slot's line range is twice its triangle range. Per cell, an
+  // InstancedMesh over the cell's geometry and matrices with the bucket's wireframe material: three's own wireframe.
   _buildLines() {
     if (!this._lineSources) return;
     const { mirrored, geometryOf } = this._lineMembers;
     for (const unit of this._units) {
+      if (unit.cell) {
+        const index = unit.mesh.geometry.index;
+        unit.lines = new THREE.InstancedMesh(unit.mesh.geometry, unit.bucket.wire, 0);
+        unit.lines.instanceMatrix = unit.mesh.instanceMatrix; // the same GPU buffer
+        unit.lines.boundingSphere = unit.mesh.boundingSphere;
+        unit.lines.onBeforeRender = (renderer, scene, camera) => this._range(unit, renderer, camera, unit.lines);
+        this._lineBytes += index.count * 2 * index.array.BYTES_PER_ELEMENT; // three's 6 entries per triangle
+        this.root.add(unit.lines);
+        continue;
+      }
       const triangles = unit.starts[unit.n];
       const index = indexArray(unit.vertices, triangles * 2);
       let at = 0;
@@ -569,7 +697,7 @@ export class ModelScene {
       geometry.boundingSphere = source.boundingSphere;
       this._lineBytes += index.byteLength;
       unit.lines = new THREE.LineSegments(geometry, unit.bucket.material);
-      unit.lines.onBeforeRender = (renderer, scene, camera, g) => this._range(unit, renderer, camera, g, 2);
+      unit.lines.onBeforeRender = (renderer, scene, camera) => this._range(unit, renderer, camera, unit.lines);
       this.root.add(unit.lines);
       unit.members = null;
     }
@@ -577,8 +705,10 @@ export class ModelScene {
     this._lineMembers = null;
   }
 
-  // onBeforeRender of a chunk (also in the picking pass): its draw range = the shown span, cut by the detail radius.
-  _range(unit, renderer, camera, geometry, wire) {
+  // onBeforeRender of a unit's mesh or lines (also in the picking pass): the shown span, cut by the detail radius, as
+  // the chunk's index range or the cell's instance count (a cell always starts at its first instance: WebGL2 has no
+  // base instance; hidden instances inside the count leave the clip volume in the shader).
+  _range(unit, renderer, camera, object) {
     if (unit.dirty) this._span(unit);
     let end = unit.last + 1;
     if (this._minPixels > 0 && end > unit.first) {
@@ -592,8 +722,12 @@ export class ModelScene {
       const rMin = view[7] ? (near > 0 ? (this._minPixels * near) / view[6] : 0) : this._minPixels / view[6];
       end = Math.min(end, prefixByRadius(this._slotRadius, unit.slotBase + unit.first, unit.slotBase + end, rMin) - unit.slotBase);
     }
-    const [start, count] = drawSpan(unit.starts, unit.first, end);
-    geometry.setDrawRange(start * wire, count * wire);
+    if (unit.cell) object.count = Math.max(end, 0);
+    else {
+      const wire = object.isLineSegments ? 2 : 1;
+      const [start, count] = drawSpan(unit.starts, unit.first, end);
+      object.geometry.setDrawRange(start * wire, count * wire);
+    }
     unit.end = end;
     unit.lastFrame = renderer.info.render.frame;
   }
@@ -605,7 +739,7 @@ export class ModelScene {
     while (first < unit.n && alpha[(unit.slotBase + first) * 4 + 3] === 0) first++;
     let last = unit.n - 1;
     while (last >= first && alpha[(unit.slotBase + last) * 4 + 3] === 0) last--;
-    unit.first = first < unit.n ? first : 0;
+    unit.first = first < unit.n && !unit.cell ? first : 0;
     unit.last = first < unit.n ? last : -1;
     unit.dirty = false;
   }
@@ -633,6 +767,8 @@ export class ModelScene {
           texture: source.texture,
           // The material colour stays white: the slot colour multiplies it in the shader.
           material: patchLambert(new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }), this.slotUniforms, noHideBranch),
+          // The same for the instanced cells in wireframe mode (three's own wireframe of their triangles).
+          wire: patchLambert(new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, wireframe: true }), this.slotUniforms, noHideBranch),
         };
         this._applyOpacity(bucket);
         byMaterial.set(m, bucket);
@@ -677,13 +813,14 @@ export class ModelScene {
   }
 
   _applyOpacity(bucket) {
-    const material = bucket.material;
     const opacity = bucket.opacity * this._opacity;
     const transparent = opacity < 1;
-    if (material.transparent !== transparent) material.needsUpdate = true;
-    material.opacity = opacity;
-    material.transparent = transparent;
-    material.depthWrite = !transparent; // three sorts transparent chunks back to front
+    for (const material of [bucket.material, bucket.wire]) {
+      if (material.transparent !== transparent) material.needsUpdate = true;
+      material.opacity = opacity;
+      material.transparent = transparent;
+      material.depthWrite = !transparent; // three sorts transparent units back to front
+    }
   }
 
   // sRGB bytes instance i is drawn with: highlight, else tint, else white in white mode, else the material's.

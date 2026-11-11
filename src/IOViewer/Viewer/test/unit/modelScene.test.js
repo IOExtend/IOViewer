@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ModelScene, ModelTooLargeError, isMirrored, reversedWinding } from '../../src/engine/modelScene.js';
+import { ModelScene, ModelTooLargeError, isMirrored } from '../../src/engine/modelScene.js';
 import { GRID, octDecodeInto } from '../../src/engine/quantize.js';
+import { viewMetrics } from '../../src/engine/culling.js';
 
 // 12 floats per instance: three columns of the linear part, then the translation.
 const instances = new Float32Array([
@@ -14,21 +15,6 @@ const instances = new Float32Array([
 
 test('isMirrored detects a negative determinant', () => {
   assert.deepEqual([0, 1, 2, 3].map((i) => isMirrored(instances, i)), [false, true, false, true]);
-});
-
-test('reversedWinding reverses each triangle and shares vertex data', () => {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(12), 3));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint16Array([0, 1, 2, 0, 2, 3]), 1));
-
-  const reversed = reversedWinding(geometry);
-
-  assert.deepEqual([...reversed.index.array], [0, 2, 1, 0, 3, 2]);
-  assert.ok(reversed.index.array instanceof Uint16Array);
-  assert.deepEqual([...geometry.index.array], [0, 1, 2, 0, 2, 3]);
-  assert.equal(reversed.getAttribute('position'), geometry.getAttribute('position'));
-  assert.equal(reversed.getAttribute('normal'), geometry.getAttribute('normal'));
 });
 
 const view = (array, t) => ({ array, n: array.length, t });
@@ -244,4 +230,130 @@ test('an instance with a non-finite box gets no slot and leaves the bounds alone
   assert.deepEqual(scene.visibleBox().max.toArray(), [4.5, 0.5, 0.5]);
   assert.ok(scene.elementBox(1).isEmpty());
   assert.deepEqual(scene.drawnInstances(camera()), [0, 2]);
+});
+
+// Every shape instanced (test options): no merged chunks at all.
+const INSTANCED = { mergedCap: 0, minRepeats: 1 };
+// Instance count the cell mesh of instance i gets for the next render.
+function count(scene, i) {
+  const { mesh } = scene.instance(i);
+  mesh.onBeforeRender(renderer, null, camera(), mesh.geometry, mesh.material, null);
+  return mesh.count;
+}
+
+test('cell: count = min(lastShown+1, prefix); all hidden -> visible false', () => {
+  // One shape (a cube, one material, not mirrored) -> one cell; slots ordered by size, largest first: 0, 1, 2.
+  const scene = model([{ x: 0, scale: 3 }, { x: 5, scale: 2 }, { x: 9, scale: 1 }], { options: INSTANCED });
+  const mesh = scene.instance(0).mesh;
+  assert.ok(mesh.isInstancedMesh);
+  const { chunks, cells, mergedInstances, instancedInstances } = scene.memory();
+  assert.deepEqual({ chunks, cells, mergedInstances, instancedInstances }, { chunks: 0, cells: 1, mergedInstances: 0, instancedInstances: 3 });
+  assert.deepEqual([0, 1, 2].map((i) => scene.instance(i).slot), [0, 1, 2]);
+  assert.equal(scene.instance(2).mesh, mesh);
+  assert.equal(count(scene, 0), 3);
+  scene.setVisible([1], false);
+  assert.equal(count(scene, 0), 3); // hidden inside the count: the shader drops it
+  scene.setVisible([0], false);
+  assert.equal(count(scene, 0), 3); // no base instance in WebGL2: a cell always draws from its first instance
+  scene.showAll();
+  scene.setVisible([2], false);
+  assert.equal(count(scene, 0), 2);
+  scene.showAll();
+  // The detail cut keeps the slots of at least rMin radius, here between slot 0 and slot 1.
+  const view = viewMetrics(camera(), 1);
+  const s = scene._units[0].sphere;
+  const near = (s[0] - view[0]) * view[3] + (s[1] - view[1]) * view[4] + (s[2] - view[2]) * view[5] - s[3];
+  const rMin = (scene._slotRadius[0] + scene._slotRadius[1]) / 2;
+  scene.setDetail((rMin * view[6]) / near, 1);
+  assert.equal(count(scene, 0), 1);
+  assert.deepEqual(scene.drawStats(), { drawn: 12, inView: 36, draws: 1 });
+  scene.setVisible([1, 2], false);
+  assert.equal(count(scene, 0), 1); // min(lastShown + 1, prefix) = min(1, 1)
+  scene.setDetail(0);
+  assert.equal(count(scene, 0), 1);
+  scene.setVisible([0], false);
+  assert.equal(mesh.visible, false);
+  assert.deepEqual(scene.drawnInstances(camera()), []);
+  scene.showAll();
+  assert.equal(mesh.visible, true);
+  assert.deepEqual(scene.drawnInstances(camera()), [0, 1, 2]);
+});
+
+test('cell mirrored shape uses reversed index', () => {
+  const mirror = [-1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0];
+  const scene = model([{ x: 0 }, { m: mirror }], { options: INSTANCED });
+  const [plain, mirrored] = [0, 1].map((i) => scene.instance(i).mesh);
+  assert.notEqual(plain, mirrored); // (geometry, mirrored, material) are different shapes
+  const a = plain.geometry.index.array;
+  const b = mirrored.geometry.index.array;
+  assert.equal(b.length, a.length);
+  for (let t = 0; t < a.length; t += 3) assert.deepEqual([b[t], b[t + 1], b[t + 2]], [a[t], a[t + 2], a[t + 1]]);
+  // The instance's own RTC matrix in three's instanceMatrix, and the geometry's own normals (three's instancing
+  // shader applies the matrix to both).
+  assert.deepEqual([...mirrored.instanceMatrix.array], [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 4, 0, 0, 1]);
+  assert.deepEqual([...mirrored.geometry.getAttribute('normal').array], [...quantizedCube().normals.array]);
+});
+
+test('remainder slot info holds geometry origin/step', () => {
+  const box = new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+  const f32 = {
+    positions: view(box.getAttribute('position').array, 'f32'), indices: view(Uint32Array.from({ length: 36 }, (_, i) => i), 'u32'),
+    normals: view(box.getAttribute('normal').array, 'f32'), uvs: null, bbox: { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
+  };
+  const scene = model([{ x: 0 }, { x: 3, geometry: 1 }], { geometries: [quantizedCube(), f32], options: INSTANCED });
+  const info = scene.slotUniforms.slotInfo.value.image.data;
+  const at = (i) => [...info.subarray(scene.instance(i).slot * 4, scene.instance(i).slot * 4 + 4)];
+  assert.deepEqual(at(0), [-0.5, -0.5, -0.5, GRID]); // q.o and q.s: positions stay in the geometry's own space
+  assert.deepEqual(at(1), [0, 0, 0, 1]); // f32 positions as they are
+  const q0 = scene.instance(0).mesh.geometry.getAttribute('q').array;
+  assert.ok(q0 instanceof Uint16Array);
+  assert.deepEqual([...q0.subarray(0, 4)], [...quantizedCube().positions.array.subarray(0, 3), 0]); // w = 0: slot = slotBase
+  const q1 = scene.instance(1).mesh.geometry.getAttribute('q').array;
+  assert.ok(q1 instanceof Float32Array);
+  assert.deepEqual([...q1.subarray(0, 4)], [...box.getAttribute('position').array.subarray(0, 3), 0]);
+  assert.deepEqual([...scene.instance(1).mesh.geometry.getAttribute('slotBase').array], [scene.instance(1).slot]);
+  // Per shape q + oct normals + u16 index (u16 cube 288 + 144 + 72, f32 cube 576 + 144 + 72), per instance 64 + 4.
+  const memory = scene.memory();
+  assert.equal(memory.instancedBytes, 504 + 792 + 2 * 68);
+  assert.equal(memory.gpuBytes, memory.instancedBytes + memory.stateBytes);
+  assert.equal(memory.triangles, 24);
+  assert.ok(Math.abs(scene.totalCost - 24 * 1.4) < 1e-4); // an instanced triangle costs more than a merged one
+});
+
+test('over the cap a shape used 16 times becomes a cell; one used 15 times and a unique one stay merged', () => {
+  const items = [
+    ...Array.from({ length: 16 }, (_, i) => ({ x: i * 2 })),
+    ...Array.from({ length: 15 }, (_, i) => ({ x: i * 2, material: 1 })), // the same geometry, another material
+    { x: 0, geometry: 1 },
+  ];
+  const materials = [{ color: [0.2, 0.4, 0.6], opacity: 1, texture: null }, { color: [0.6, 0.4, 0.2], opacity: 1, texture: null }];
+  const scene = model(items, { geometries: [quantizedCube(), quantizedCube()], materials, options: { mergedCap: 0 } });
+  const { cells, mergedInstances, instancedInstances } = scene.memory();
+  assert.deepEqual({ cells, mergedInstances, instancedInstances }, { cells: 1, mergedInstances: 16, instancedInstances: 16 });
+  assert.ok(scene.instance(0).mesh.isInstancedMesh);
+  assert.ok(!scene.instance(16).mesh.isInstancedMesh);
+  assert.ok(!scene.instance(31).mesh.isInstancedMesh);
+  assert.ok(scene.instance(0).slot >= 16); // the cells' slots follow the chunks'
+});
+
+test('cell wireframe: three\'s wireframe over the cell\'s geometry and matrices; picking draws its faces', () => {
+  const scene = model([{ x: 0 }, { x: 3 }], { options: INSTANCED });
+  const { mesh } = scene.instance(0);
+  scene.setDisplayMode('wireframe');
+  const lines = scene.root.children.filter((o) => o !== mesh);
+  assert.equal(lines.length, 1);
+  const [wire] = lines;
+  assert.ok(wire.isInstancedMesh && wire.material.wireframe);
+  assert.equal(wire.geometry, mesh.geometry);
+  assert.equal(wire.instanceMatrix, mesh.instanceMatrix);
+  assert.ok(wire.geometry.getAttribute('position')); // three builds a wireframe index only for geometries with one
+  assert.deepEqual([wire.visible, mesh.visible], [true, false]);
+  const pick = new THREE.MeshBasicMaterial();
+  scene.withMaterial(pick, () => assert.deepEqual([wire.visible, mesh.visible, mesh.material], [false, true, pick]));
+  assert.deepEqual([wire.visible, mesh.visible], [true, false]);
+  // Opacity and clipping reach the wireframe material too.
+  scene.setOpacity(0.5);
+  scene.setClipping([new THREE.Plane(new THREE.Vector3(1, 0, 0), 0)], true);
+  const m = wire.material;
+  assert.deepEqual([m.opacity, m.transparent, m.depthWrite, m.clipIntersection, m.clippingPlanes.length], [0.5, true, false, true, 1]);
 });

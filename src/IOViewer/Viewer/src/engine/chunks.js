@@ -62,6 +62,58 @@ function sortAlongLongestAxis(m, centres) {
   for (let k = 0; k < m.length; k++) m[k] = keys[k] % 2 ** 32;
 }
 
+/**
+ * Splits `members` into exactly ceil(n / limit) leaves of at most `limit` instances each, nearby instances together:
+ * a recursive split along the longest axis of the member centres, the lower part taking its exact share of the leaves.
+ * Leaves come out depth-first. The leaves are views of one copy.
+ */
+export function splitByCount(centres, members, limit) {
+  const leaves = [];
+  const stack = [Uint32Array.from(members)];
+  while (stack.length) {
+    const m = stack.pop();
+    const cells = Math.ceil(m.length / limit);
+    if (cells <= 1) {
+      if (m.length) leaves.push(m);
+      continue;
+    }
+    sortAlongLongestAxis(m, centres);
+    const k = Math.ceil((m.length * Math.floor(cells / 2)) / cells);
+    stack.push(m.subarray(k), m.subarray(0, k)); // the lower part is emitted first
+  }
+  return leaves;
+}
+
+export const MERGED_CAP = 384 * 2 ** 20; // merged GPU bytes above which the repeated shapes are drawn instanced
+
+/**
+ * Which shapes (one geometry, mirrored or not, with one material; `k` instances of `bytes` merged GPU bytes each) are
+ * drawn as instanced cells instead of being merged. None while the merged total fits `cap`. Otherwise every shape of
+ * at least `minRepeats` instances, those that save most first ((k - 1) * bytes; ties by more instances, then by their
+ * order in `shapes`), skipping a shape whose cells (ceil(k / perCell)) would take the cells past `maxDraws`.
+ * Returns 1 per instanced shape.
+ * Not just enough shapes to fit the cap: measured at 1M elements on an integrated GPU, keeping the cap's worth merged
+ * drew the frame 6 % faster (199 vs 212 ms) but took 5x the GPU memory, a 0.7 GB higher GPU-process and 0.45 GB higher
+ * page peak, and 0.9 s longer to open.
+ */
+export function planShapes(shapes, { cap = MERGED_CAP, minRepeats = 16, perCell = 1024, maxDraws = 1024 } = {}) {
+  const instanced = new Uint8Array(shapes.length);
+  let merged = 0;
+  for (const s of shapes) merged += s.k * s.bytes;
+  if (merged <= cap) return instanced;
+  const saving = (s) => (shapes[s].k - 1) * shapes[s].bytes;
+  const order = [...shapes.keys()].filter((s) => shapes[s].k >= minRepeats);
+  order.sort((a, b) => saving(b) - saving(a) || shapes[b].k - shapes[a].k || a - b);
+  let draws = 0;
+  for (const s of order) {
+    const cells = Math.ceil(shapes[s].k / perCell);
+    if (draws + cells > maxDraws) continue;
+    instanced[s] = 1;
+    draws += cells;
+  }
+  return instanced;
+}
+
 // Index array of `length` entries for a chunk of `vertices` vertices: u16 only while every index is below 65535, since
 // WebGL2 always restarts primitives at 0xFFFF in u16 indices (a 65536-vertex chunk needs u32).
 export function indexArray(vertices, length) {

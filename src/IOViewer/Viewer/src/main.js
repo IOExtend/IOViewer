@@ -45,7 +45,8 @@ camera.add(headlight, headlight.target);
 headlight.target.position.set(0, 0, -1);
 world.add(camera);
 
-// Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat, slotLimit.
+// Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat, slotLimit,
+// mergedCap, minRepeats.
 const testOptions = window.IOVIEWER_TEST ?? {};
 const scene = createScene();
 data.releaseBinary(); // the scene has copied what it needs
