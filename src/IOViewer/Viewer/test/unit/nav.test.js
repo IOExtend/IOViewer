@@ -47,3 +47,27 @@ test('zoomTowards halves the distance to the cursor point and shifts the target 
   near(r.target.distanceTo(cursor), 2);
   near(r.position.distanceTo(r.target), 5);
 });
+
+import { interpolateView } from '../../src/nav/math.js';
+
+test('interpolateView between opposite views keeps the distance and never crosses the target', () => {
+  const a = { position: v(0, -10, 2), target: v(0, 0, 0) };
+  const b = { position: v(0, 10, 2), target: v(0, 0, 0) };
+  for (const k of [0, 0.25, 0.5, 0.75, 1]) {
+    const r = interpolateView(a, b, k);
+    near(r.position.distanceTo(r.target), a.position.length(), 1e-9);
+  }
+  near(interpolateView(a, b, 1).position.y, 10, 1e-9);
+});
+
+test('a top view keeps its azimuth from the other end and can still be orbited', () => {
+  const from = { position: v(10, 0, 0), target: v(0, 0, 0) };
+  const top = interpolateView(from, { position: v(0, 0, 10), target: v(0, 0, 0) }, 1);
+  near(top.position.length(), 10, 1e-9);
+  assert.ok(top.position.z > 9.99 && top.position.z < 10);
+  assert.ok(top.position.x > 0, 'heading carried from the start view');
+  const r = orbit(top.position, top.target, top.target, 100, 0, 0.005);
+  assert.ok(r.position.distanceTo(top.position) > 0.01, 'yaw moves the camera off the top view');
+  const down = orbit(top.position, top.target, top.target, 0, -100, 0.005);
+  assert.ok(down.position.z < top.position.z);
+});

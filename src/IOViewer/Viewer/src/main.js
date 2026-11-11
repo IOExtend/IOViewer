@@ -56,6 +56,10 @@ scene.root.addEventListener('change', requestRender);
 
 const controls = new NavigationControls(camera, canvas, { visibleBox: () => scene.visibleBox() });
 controls.addEventListener('change', requestRender);
+scene.root.addEventListener('change', () => {
+  controls.invalidateBounds();
+  controls.resize();
+});
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight, false);

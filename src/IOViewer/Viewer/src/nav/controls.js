@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { isClick, orbit, zoomTowards, boxSelectMode } from './math.js';
+import { isClick, orbit, zoomTowards, boxSelectMode, interpolateView } from './math.js';
 
 const ORBIT_SPEED = 0.005; // radians per pixel
 const WHEEL_STEP = 0.85;
@@ -24,11 +24,14 @@ export class NavigationControls extends EventTarget {
     this._drag = null;
     this._animation = 0;
     this._overlay = null;
+    this._bounds = null;
     dom.style.touchAction = 'none';
     dom.addEventListener('pointerdown', (e) => this._down(e));
     dom.addEventListener('pointermove', (e) => this._move(e));
     dom.addEventListener('pointerup', (e) => this._up(e));
     dom.addEventListener('pointercancel', () => this._end());
+    dom.addEventListener('lostpointercapture', (e) => this._lostCapture(e));
+    window.addEventListener('blur', () => this._end());
     dom.addEventListener('wheel', (e) => this._wheel(e), { passive: false });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -65,15 +68,28 @@ export class NavigationControls extends EventTarget {
       const half = distance * Math.tan(THREE.MathUtils.degToRad(this._perspective.fov / 2));
       Object.assign(cam, { top: half, bottom: -half, left: -half * aspect, right: half * aspect });
     }
-    const box = this.visibleBox();
-    if (!box.isEmpty()) {
-      const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const bounds = this._visibleBounds();
+    if (bounds) {
+      const sphere = bounds.sphere;
       const toCentre = cam.position.distanceTo(sphere.center);
       cam.far = (toCentre + sphere.radius) * 1.05;
       cam.near = Math.max((toCentre - sphere.radius) * 0.95, cam.far / 5000);
     }
     cam.updateProjectionMatrix();
     this.dispatchEvent(new Event('change'));
+  }
+
+  // Call when the visible set changes: the box is cached because computing it walks every instance.
+  invalidateBounds() {
+    this._bounds = null;
+  }
+
+  _visibleBounds() {
+    if (!this._bounds) {
+      const box = this.visibleBox();
+      this._bounds = { box, sphere: box.isEmpty() ? null : box.getBoundingSphere(new THREE.Sphere()) };
+    }
+    return this._bounds.sphere && this._bounds;
   }
 
   fitBox(box, animate = true) {
@@ -94,16 +110,16 @@ export class NavigationControls extends EventTarget {
     this.fitBox(box, true);
   }
 
-  animateTo({ position, target, up }, ms = 400) {
+  // Swings the camera round the target (see interpolateView); `up` stays +Z, so it is accepted and ignored.
+  animateTo({ position, target }, ms = 400) {
     this._stopAnimation();
-    const from = { position: this.camera.position.clone(), target: this.target.clone(), up: this.camera.up.clone() };
-    const to = { position: position ?? from.position, target: target ?? from.target, up: up ?? from.up };
+    const from = { position: this.camera.position.clone(), target: this.target.clone() };
+    const to = { position: position ?? from.position, target: target ?? from.target };
     const start = performance.now();
     const step = (now) => {
       const k = Math.min((now - start) / ms, 1);
-      const e = k * k * (3 - 2 * k);
-      this.camera.up.copy(from.up).lerp(to.up, e).normalize();
-      this._set(from.position.clone().lerp(to.position, e), from.target.clone().lerp(to.target, e));
+      const r = interpolateView(from, to, k * k * (3 - 2 * k));
+      this._set(r.position, r.target);
       this._animation = k < 1 ? requestAnimationFrame(step) : 0;
     };
     this._animation = requestAnimationFrame(step);
@@ -122,7 +138,7 @@ export class NavigationControls extends EventTarget {
   }
 
   _down(e) {
-    if (this._drag) return;
+    this._end(); // a release can be lost (focus change, capture stolen); never stay stuck
     this._stopAnimation();
     this.dom.setPointerCapture(e.pointerId);
     e.preventDefault(); // middle button autoscroll
@@ -132,8 +148,7 @@ export class NavigationControls extends EventTarget {
     if (mode === 'orbit') {
       pivot = this.pick(point.x, point.y);
       if (!pivot) {
-        const box = this.visibleBox();
-        pivot = box.isEmpty() ? this.target.clone() : box.getCenter(new THREE.Vector3());
+        pivot = this._visibleBounds()?.sphere.center.clone() ?? this.target.clone();
       }
     }
     this._drag = { id: e.pointerId, button: e.button, mode, pivot, down: point, last: point, moved: false };
@@ -142,6 +157,7 @@ export class NavigationControls extends EventTarget {
   _move(e) {
     const d = this._drag;
     if (!d || e.pointerId !== d.id) return;
+    if (e.buttons === 0) return this._end();
     const point = { x: e.clientX, y: e.clientY };
     if (!d.moved && isClick(d.down, point)) return;
     d.moved = true;
@@ -170,7 +186,7 @@ export class NavigationControls extends EventTarget {
 
   _up(e) {
     const d = this._drag;
-    if (!d || e.pointerId !== d.id) return;
+    if (!d || e.pointerId !== d.id || e.button !== d.button) return;
     const point = { x: e.clientX, y: e.clientY };
     this._end();
     if (d.mode === 'box' && d.moved) {
@@ -184,6 +200,12 @@ export class NavigationControls extends EventTarget {
     } else if (!d.moved && d.button === 2) {
       this.dispatchEvent(detail('contextmenu', { x: point.x, y: point.y }));
     }
+  }
+
+  // Chromium drops the capture when a second button is released mid-drag while the first is still held: keep going.
+  _lostCapture(e) {
+    if (this._drag && e.buttons) this.dom.setPointerCapture(this._drag.id);
+    else this._end();
   }
 
   _end() {

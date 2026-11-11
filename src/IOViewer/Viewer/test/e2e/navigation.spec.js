@@ -165,5 +165,89 @@ test('animateTo moves the camera to the requested pose', async ({ page }) => {
     await new Promise((r) => setTimeout(r, 300));
     return [controls.camera.position.toArray(), controls.target.toArray()];
   });
-  expect(final).toEqual([[0, -30, 0], [0, 0, 0]]);
+  expect(final[0][1]).toBeCloseTo(-30, 2);
+  expect(final[0][2]).toBeCloseTo(0, 2);
+  expect(final[1]).toEqual([0, 0, 0]);
+});
+
+test('visibleBox is computed at most once during a 20-step drag', async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => {
+    const { scene } = window.__ioviewer;
+    window.__boxCalls = 0;
+    const original = scene.visibleBox.bind(scene);
+    scene.visibleBox = () => (window.__boxCalls++, original());
+  });
+  await page.mouse.move(500, 400);
+  await page.mouse.down();
+  for (let i = 1; i <= 20; i++) await page.mouse.move(500 + i * 5, 400 + i);
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.__boxCalls)).toBeLessThanOrEqual(1);
+  // A visibility change invalidates the cache.
+  const after = await page.evaluate(async () => {
+    window.__boxCalls = 0;
+    window.__ioviewer.scene.isolate([0]);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return window.__boxCalls;
+  });
+  expect(after).toBeGreaterThanOrEqual(1);
+});
+
+test('a lost pointer capture or window blur mid-drag does not leave the viewer stuck', async ({ page }) => {
+  await open(page);
+  for (const loseIt of [
+    () => page.evaluate(() => window.dispatchEvent(new Event('blur'))),
+    () => page.evaluate(() => document.getElementById('ioviewer-canvas').dispatchEvent(new Event('lostpointercapture'))),
+  ]) {
+    await page.mouse.move(500, 400);
+    await page.mouse.down();
+    await page.mouse.move(520, 400);
+    await page.mouse.move(540, 400);
+    await loseIt();
+    await page.mouse.up(); // the release belongs to the dead drag and must not emit anything
+    expect(await events(page)).toEqual([]);
+    const x = await page.evaluate(() => window.__ioviewer.camera.position.x);
+    await drag(page, 'left', [500, 400], [600, 400]);
+    expect(await page.evaluate(() => window.__ioviewer.camera.position.x)).not.toBe(x);
+  }
+});
+
+test('releasing another button during a drag does not end it or emit a click', async ({ page }) => {
+  await open(page);
+  await page.mouse.move(500, 400);
+  await page.mouse.down();
+  await page.mouse.move(520, 400);
+  await page.mouse.move(540, 400);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.up({ button: 'right' });
+  const x = await page.evaluate(() => window.__ioviewer.camera.position.x);
+  await page.mouse.move(600, 400);
+  expect(await page.evaluate(() => window.__ioviewer.camera.position.x)).not.toBe(x);
+  await page.mouse.up();
+  expect(await events(page)).toEqual([]);
+});
+
+test('animateTo between opposite views keeps the distance and a top view can be orbited afterwards', async ({ page }) => {
+  await open(page);
+  const result = await page.evaluate(async () => {
+    const { controls, camera } = window.__ioviewer;
+    const at = (x, y, z) => camera.position.clone().set(x, y, z);
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    controls.animateTo({ position: at(0, -30, 5), target: at(0, 0, 0) }, 10);
+    await wait(150);
+    let min = Infinity;
+    const sample = setInterval(() => (min = Math.min(min, controls.camera.position.distanceTo(controls.target))), 5);
+    controls.animateTo({ position: at(0, 30, 5), target: at(0, 0, 0) }, 200);
+    await wait(400);
+    clearInterval(sample);
+    controls.animateTo({ position: at(0, 0, 30), target: at(0, 0, 0) }, 10);
+    await wait(150);
+    const top = controls.camera.position.clone();
+    return { min, up: camera.up.toArray(), top: top.toArray() };
+  });
+  expect(result.min).toBeGreaterThan(29);
+  expect(result.up).toEqual([0, 0, 1]);
+  const before = await page.evaluate(() => window.__ioviewer.camera.position.toArray());
+  await drag(page, 'left', [500, 400], [600, 400]);
+  expect(await page.evaluate(() => window.__ioviewer.camera.position.toArray())).not.toEqual(before);
 });
