@@ -1,1 +1,50 @@
-body { margin: 0; }
+:root {
+  color-scheme: light;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #e6eaef;
+  color: #1f2937;
+}
+
+#ioviewer-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Overlay for UI; children opt back into pointer events. */
+#ioviewer-ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#ioviewer-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #4b5563;
+}
+
+#ioviewer-message[hidden] {
+  display: none;
+}
+
+#ioviewer-status {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.8);
+}

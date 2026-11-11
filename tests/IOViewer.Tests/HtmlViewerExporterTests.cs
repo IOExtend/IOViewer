@@ -410,6 +410,29 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void InlinedCode_DoesNotCloseItsTagEarly()
+    {
+        using var shellStream = typeof(HtmlViewerExporter).Assembly.GetManifestResourceStream("IOViewer.Viewer.index.html")!;
+        string shell = new StreamReader(shellStream).ReadToEnd();
+        var html = ViewerHtml.Export(GeoreferencedModel()).Html;
+
+        Assert.Equal(CountIgnoreCase(shell, "<script"), CountIgnoreCase(html, "</script"));
+        Assert.Equal(CountIgnoreCase(shell, "<style"), CountIgnoreCase(html, "</style"));
+    }
+
+    [Theory]
+    [InlineData("a</script>b", "script", @"a<\/script>b")]
+    [InlineData("x</SCRIPT y</Script", "script", @"x<\/SCRIPT y<\/Script")]
+    [InlineData("p::after{content:'</style>'}", "style", @"p::after{content:'<\/style>'}")]
+    [InlineData("</styles are fine</scrip", "script", "</styles are fine</scrip")]
+    public void EscapeEndTag_EscapesClosingTagIgnoringCase(string text, string tag, string expected) =>
+        Assert.Equal(expected, HtmlViewerExporter.EscapeEndTag(text, tag));
+
+    private static int CountIgnoreCase(string text, string value) =>
+        System.Text.RegularExpressions.Regex.Count(text, System.Text.RegularExpressions.Regex.Escape(value),
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    [Fact]
     public void ClashIds_AreWritten()
     {
         var doc = GeoreferencedModel();

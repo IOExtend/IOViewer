@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using IOViewer.Model;
 
 namespace IOViewer.Exporters;
@@ -28,8 +29,8 @@ public static class HtmlViewerExporter
 
         (string Token, Action<Stream> Write)[] placeholders =
         [
-            ("/*IOVIEWER:CSS*/", s => CopyResource("IOViewer.Viewer.viewer.css", s)),
-            ("/*IOVIEWER:JS*/", s => CopyResource("IOViewer.Viewer.viewer.js", s)),
+            ("/*IOVIEWER:CSS*/", s => WriteText(s, EscapeEndTag(ReadResourceText("IOViewer.Viewer.viewer.css"), "style"))),
+            ("/*IOVIEWER:JS*/", s => WriteText(s, EscapeEndTag(ReadResourceText("IOViewer.Viewer.viewer.js"), "script"))),
             ("<!--IOVIEWER:META-->", payload.WriteMeta),
             ("<!--IOVIEWER:BIN-->", payload.WriteBin),
             ("<!--IOVIEWER:PROPS-->", payload.WriteProps),
@@ -74,9 +75,7 @@ public static class HtmlViewerExporter
         return reader.ReadToEnd();
     }
 
-    private static void CopyResource(string name, Stream output)
-    {
-        using var resource = OpenResource(name);
-        resource.CopyTo(output);
-    }
+    /// <summary>Escapes <c>&lt;/tag</c> in any letter case so inlined code cannot close its own <c>&lt;script&gt;</c> or <c>&lt;style&gt;</c> element.</summary>
+    internal static string EscapeEndTag(string text, string tag) =>
+        Regex.Replace(text, "</(" + tag + ")", @"<\/$1", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }

@@ -1,0 +1,17 @@
+{
+  "name": "ioviewer-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2020 --outfile=dist/viewer.js",
+    "test": "node --test test/unit/*.test.js",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "esbuild": "0.28.2"
+  }
+}
