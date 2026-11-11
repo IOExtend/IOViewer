@@ -69,12 +69,13 @@ export function extentAlong(box, direction) {
   return Math.abs(direction.x) * half.x + Math.abs(direction.y) * half.y + Math.abs(direction.z) * half.z;
 }
 
-// Parameter s of the point `point + direction * s` (unit direction) nearest to the ray; null when they are parallel.
+// Parameter s of the point `point + direction * s` (unit direction) nearest to the ray; null when they are within
+// about 10 degrees of parallel, where a pixel would move the point by more than ~6 pixels' worth along the line.
 export function closestOnLine(ray, point, direction) {
   const w = point.clone().sub(ray.origin);
   const b = direction.dot(ray.direction);
-  const denominator = 1 - b * b;
-  if (denominator < 1e-6) return null;
+  const denominator = 1 - b * b; // sin² of the angle between them
+  if (denominator < 0.03) return null;
   return (b * ray.direction.dot(w) - direction.dot(w)) / denominator;
 }
 

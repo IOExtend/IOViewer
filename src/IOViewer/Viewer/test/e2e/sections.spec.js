@@ -349,3 +349,99 @@ test('a document without geometry offers no sections', async ({ page }) => {
   for (const id of ['plane', 'box', 'resetSections']) await expect(tool(page, id)).toHaveAttribute('aria-disabled', 'true');
   expect(errors).toEqual([]);
 });
+
+// Client position of a world point, and of a box handle (by name: face+z, face-x, centre, ...).
+const worldAt = (page, p) =>
+  page.evaluate((p) => {
+    const { camera, sections } = window.__ioviewer;
+    camera.updateMatrixWorld();
+    const q = sections.center.clone().set(...p).project(camera);
+    const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
+    return [rect.left + ((q.x + 1) / 2) * rect.width, rect.top + ((1 - q.y) / 2) * rect.height];
+  }, p);
+const handle = (page, name) => page.evaluate((n) => window.__ioviewer.sectionGizmo.group.getObjectByName(n).position.toArray(), name);
+const boxNow = (page) => page.evaluate(() => [...window.__ioviewer.sections.box.min.toArray(), ...window.__ioviewer.sections.box.max.toArray()]);
+// Drags a handle `px` pixels along the screen image of the world direction `dir` from it.
+async function dragAlong(page, name, dir, px = 40) {
+  const at = await handle(page, name);
+  const from = await worldAt(page, at);
+  const ahead = await worldAt(page, at.map((c, k) => c + dir[k]));
+  const len = Math.hypot(ahead[0] - from[0], ahead[1] - from[1]);
+  await drag(page, from, [from[0] + ((ahead[0] - from[0]) / len) * px, from[1] + ((ahead[1] - from[1]) / len) * px]);
+}
+const size = (b) => [b[3] - b[0], b[4] - b[1], b[5] - b[2]];
+const centre = (b) => [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
+const cubePoint = (page, p) =>
+  page.evaluate((p) => {
+    const { viewCube } = window.__ioviewer;
+    const v = viewCube.camera.position.clone().set(...p).project(viewCube.camera);
+    const r = viewCube.canvas.getBoundingClientRect();
+    return [r.left + ((v.x + 1) / 2) * r.width, r.top + ((1 - v.y) / 2) * r.height];
+  }, p);
+async function settle(page) {
+  await expect.poll(() => page.evaluate(() => window.__ioviewer.controls.animating), { timeout: 3000 }).toBe(false);
+  await frame(page);
+}
+
+test('box handles: the +Z and -X faces move only their side, the centre moves the whole box; the camera stays', async ({ page }) => {
+  const errors = await open(page);
+  await tool(page, 'box').click(); // nothing selected: the box of the shown model
+  await frame(page);
+  const start = await pose(page);
+
+  const b0 = await boxNow(page);
+  await dragAlong(page, 'face+z', [0, 0, 1]);
+  const b1 = await boxNow(page);
+  expect(b1[5]).toBeGreaterThan(b0[5] + 0.5);
+  expect(b1.slice(0, 5)).toEqual(b0.slice(0, 5));
+
+  await dragAlong(page, 'face-x', [-1, 0, 0]);
+  await frame(page);
+  const b2 = await boxNow(page);
+  expect(b2[0]).toBeLessThan(b1[0] - 0.5);
+  expect(b2.slice(1)).toEqual(b1.slice(1));
+
+  const from = await worldAt(page, await handle(page, 'centre'));
+  await drag(page, from, [from[0] + 60, from[1] + 30]);
+  const b3 = await boxNow(page);
+  size(b3).forEach((c, k) => expect(c).toBeCloseTo(size(b2)[k], 9));
+  expect(Math.hypot(...centre(b3).map((c, k) => c - centre(b2)[k]))).toBeGreaterThan(0.5);
+  expect(await pose(page)).toEqual(start);
+  expect(await selected(page)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('Top view: the faces along the line of sight hide, so a press on the box centre moves the box', async ({ page }) => {
+  const errors = await open(page);
+  await tool(page, 'box').click();
+  await page.mouse.click(...(await cubePoint(page, [0, 0, 1]))); // «Сверху»
+  await settle(page);
+  const shown = (name) => page.evaluate((n) => window.__ioviewer.sectionGizmo.group.getObjectByName(n).visible, name);
+  expect([await shown('face+z'), await shown('face-z'), await shown('centre'), await shown('face+x')]).toEqual([false, false, true, true]);
+  const start = await pose(page);
+  const b0 = await boxNow(page);
+  const from = await worldAt(page, await handle(page, 'centre'));
+  await drag(page, from, [from[0] + 50, from[1] + 40]);
+  const b1 = await boxNow(page);
+  size(b1).forEach((c, k) => expect(c).toBeCloseTo(size(b0)[k], 9));
+  const moved = centre(b1).map((c, k) => c - centre(b0)[k]);
+  expect(Math.hypot(moved[0], moved[1])).toBeGreaterThan(0.5);
+  expect(Math.abs(moved[2])).toBeLessThan(0.05); // the drag plane faces the camera: almost horizontal
+  expect(await pose(page)).toEqual(start);
+  expect(errors).toEqual([]);
+});
+
+test('orthographic: dragging the gizmo arrow moves the plane and not the camera', async ({ page }) => {
+  const errors = await open(page);
+  await tool(page, 'projection').click();
+  expect(await page.evaluate(() => window.__ioviewer.camera.isOrthographicCamera)).toBe(true);
+  await tool(page, 'plane').click();
+  await frame(page);
+  const start = await pose(page);
+  const shaft = await gizmoAt(page, [0, 0, 0.6]);
+  const tip = await gizmoAt(page, [0, 0, 1]);
+  await drag(page, shaft, [shaft[0] + (tip[0] - shaft[0]) * 2, shaft[1] + (tip[1] - shaft[1]) * 2]);
+  expect(await page.evaluate(() => window.__ioviewer.sections.planes[0].offset)).toBeGreaterThan(0.5);
+  expect(await pose(page)).toEqual(start);
+  expect(errors).toEqual([]);
+});

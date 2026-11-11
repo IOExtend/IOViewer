@@ -22,7 +22,83 @@ function fakeScene(elementBoxes = []) {
   };
 }
 
-test('three semantics: union cuts what any plane has behind it, intersection only what all planes have behind them', () => {
+// three 0.186.1, exactly as a material consumes its planes:
+// - WebGLClipping.projectPlanes copies each material.clippingPlanes[i] into view space
+//   (plane.applyMatrix4(viewMatrix, viewNormalMatrix)) and uploads [normal.xyz, constant];
+// - with clipIntersection all planes go to the intersection loop (numIntersection = numPlanes), otherwise to the union loop;
+// - clipping_planes_vertex: vClipPosition = -mvPosition.xyz;
+// - clipping_planes_fragment: union loop `if ( dot( vClipPosition, plane.xyz ) > plane.w ) discard;`,
+//   intersection loop `clipped = ( dot( vClipPosition, plane.xyz ) > plane.w ) && clipped; if ( clipped ) discard;`.
+// This evaluates that expression literally (not through sectionMath) under a non-trivial camera.
+const camera = new THREE.PerspectiveCamera();
+camera.position.set(30, -25, 18);
+camera.up.set(0, 0, 1);
+camera.lookAt(5, 10, 4);
+camera.updateMatrixWorld();
+const viewMatrix = camera.matrixWorldInverse;
+const viewNormalMatrix = new THREE.Matrix3().getNormalMatrix(viewMatrix);
+function shaderDiscards(material, world) {
+  const planes = material.clippingPlanes ?? [];
+  if (planes.length === 0) return false;
+  const vClipPosition = world.clone().applyMatrix4(viewMatrix).negate();
+  const beyond = planes.map((p) => {
+    const view = p.clone().applyMatrix4(viewMatrix, viewNormalMatrix);
+    return vClipPosition.dot(view.normal) > view.constant;
+  });
+  return material.clipIntersection ? beyond.every(Boolean) : beyond.some(Boolean);
+}
+// A fake ModelScene whose setClipping does what ModelScene.setClipping does to its bucket materials.
+function materialScene() {
+  const material = new THREE.MeshLambertMaterial();
+  return {
+    material,
+    setClipping(planes, intersection) {
+      material.clippingPlanes = planes.length > 0 ? planes : null;
+      material.clipIntersection = intersection;
+    },
+    visibleBox: () => model.clone(),
+  };
+}
+
+test("three's own clipping rule (the shader chunk) on the planes Sections hands to the materials", () => {
+  const chunk = THREE.ShaderChunk.clipping_planes_fragment;
+  assert.ok(chunk.includes('if ( dot( vClipPosition, plane.xyz ) > plane.w ) discard;'));
+  assert.ok(chunk.includes('clipped = ( dot( vClipPosition, plane.xyz ) > plane.w ) && clipped;'));
+  assert.ok(THREE.ShaderChunk.clipping_planes_vertex.includes('vClipPosition = - mvPosition.xyz;'));
+
+  const scene = materialScene();
+  const sections = new Sections(scene, model); // model centre (5, 10, 4)
+  const cuts = (x, y, z) => shaderDiscards(scene.material, v(x, y, z));
+  // Planes mode: a Z plane cuts above the centre; flipped, below; a second plane adds its own cut (union).
+  sections.addPlane('z');
+  assert.deepEqual([cuts(5, 10, 6), cuts(5, 10, 2)], [true, false]);
+  sections.updatePlane(0, { flipped: true });
+  assert.deepEqual([cuts(5, 10, 6), cuts(5, 10, 2)], [false, true]);
+  sections.addPlane('x');
+  assert.deepEqual([cuts(2, 10, 6), cuts(8, 10, 6), cuts(2, 10, 2)], [false, true, true]);
+  // Box keepInside: inside kept, outside (any side) cut.
+  sections.setBox(box([1, 1, 1], [3, 3, 3]));
+  assert.equal(scene.material.clipIntersection, false);
+  assert.equal(cuts(2, 2, 2), false);
+  for (const p of [[0, 2, 2], [4, 2, 2], [2, 0, 2], [2, 4, 2], [2, 2, 0], [2, 2, 4]]) assert.equal(cuts(...p), true, `${p}`);
+  // Box cutInside: inside cut, outside (any side) kept.
+  sections.setBoxMode('cutInside');
+  assert.equal(scene.material.clipIntersection, true);
+  assert.equal(cuts(2, 2, 2), true);
+  assert.equal(cuts(1.1, 2.9, 1.5), true);
+  for (const p of [[0, 2, 2], [4, 2, 2], [2, 0, 2], [2, 4, 2], [2, 2, 0], [2, 2, 4]]) assert.equal(cuts(...p), false, `${p}`);
+  // The brief's literal reading (the inward planes with intersection) would cut nothing at all.
+  scene.setClipping(boxPlanes(box([1, 1, 1], [3, 3, 3]), 'keepInside').planes, true);
+  assert.equal(cuts(2, 2, 2), false);
+  assert.equal(cuts(0, 2, 2), false);
+  // sectionMath.isClipped agrees with the shader on all of these.
+  sections.setBoxMode('cutInside');
+  for (const p of [[2, 2, 2], [0, 2, 2], [2, 2, 4]]) assert.equal(isClipped(v(...p), scene.material.clippingPlanes, true), cuts(...p));
+  sections.reset();
+  assert.equal(cuts(2, 2, 2), false);
+});
+
+test('isClipped: union cuts what any plane has behind it, intersection only what all planes have behind them', () => {
   const below = new THREE.Plane(v(0, 0, -1), 4); // keeps z <= 4
   const left = new THREE.Plane(v(-1, 0, 0), 5); // keeps x <= 5
   assert.equal(isClipped(v(0, 0, 5), [below, left], false), true);
@@ -93,6 +169,11 @@ test('closestOnLine finds where a ray passes nearest to an axis line; parallel g
   assert.ok(Math.abs(closestOnLine(ray, v(5, 0, 0), v(0, 0, 1)) - 3) < 1e-12);
   assert.ok(Math.abs(closestOnLine(ray, v(1, 0, 3), v(-1, 0, 0)) + 4) < 1e-12);
   assert.equal(closestOnLine(ray, v(0, 0, 0), v(0, -1, 0)), null);
+  // Within ~10 degrees of the ray a drag along the line is ill-conditioned: refused. 15 degrees is accepted.
+  const tilted = (deg) => v(0, Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180));
+  assert.equal(closestOnLine(ray, v(5, 0, 0), tilted(5)), null);
+  assert.equal(closestOnLine(ray, v(5, 0, 0), tilted(9)), null);
+  assert.equal(typeof closestOnLine(ray, v(5, 0, 0), tilted(15)), 'number');
 });
 
 test('planeRect covers the model box projected on the plane, plus 10 %', () => {
