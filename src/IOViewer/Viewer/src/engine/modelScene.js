@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { detailThreshold, frustumPlanes, outsideFrustum, viewMetrics } from './culling.js';
 import { normalsView, positionsView } from './quantize.js';
-import { CHUNK_VERTICES, F32, bakeChunk, bakeSource, drawSpan, placeSlot, prefixByRadius, sortByRadius, splitCells } from './chunks.js';
+import { CHUNK_VERTICES, F32, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, prefixByRadius, sortByRadius, splitCells } from './chunks.js';
 import { patchLambert } from './slotShader.js';
 
 export const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
@@ -39,6 +39,20 @@ function release() {
 function attr(array, itemSize, normalized = false, Type = THREE.BufferAttribute) {
   return new Type(array, itemSize, normalized).onUpload(release);
 }
+// A model with more drawable instances (count) than this viewer and GPU can address (limit).
+export class ModelTooLargeError extends RangeError {
+  constructor(count, limit) {
+    super(`${count} drawable instances exceed the limit of ${limit}.`);
+    this.name = 'ModelTooLargeError';
+    this.count = count;
+    this.limit = limit;
+  }
+}
+
+const finiteBox = (boxes, i) => {
+  for (let k = i * 6; k < i * 6 + 6; k++) if (!Number.isFinite(boxes[k])) return false;
+  return true;
+};
 const colorBytes = (color) => {
   const hex = color.getHex(THREE.SRGBColorSpace);
   return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
@@ -57,8 +71,9 @@ const colorBytes = (color) => {
  * the last shown slot (hidden slots inside it are dropped by the shader); setDetail can also cut that range where the
  * slots get smaller on screen than a given radius, which the viewer uses while the camera moves (detailThreshold
  * picks it for a cost budget in triangles).
- * options (tests and the performance harness, from window.IOVIEWER_TEST): chunkVertices, noHideBranch; and
- * maxTextureSize (the renderer's).
+ * options (tests and the performance harness, from window.IOVIEWER_TEST): chunkVertices, noHideBranch, slotLimit; and
+ * maxTextureSize (the renderer's). A model over the slot limit throws ModelTooLargeError. Instances with a non-finite
+ * box (NaN or infinite matrix or geometry box) get no slot and take no part in the bounds.
  */
 export class ModelScene {
   constructor(data, options = {}) {
@@ -106,7 +121,8 @@ export class ModelScene {
       box.min.toArray(this._boxes, i * 6);
       box.max.toArray(this._boxes, i * 6 + 3);
     }
-    this._build(data, geometryOf, matrices, options.chunkVertices ?? CHUNK_VERTICES, options.maxTextureSize ?? Infinity);
+    const limit = Math.min(2 ** 24 - 1, ROW * (options.maxTextureSize ?? Infinity), options.slotLimit ?? Infinity);
+    this._build(data, geometryOf, matrices, options.chunkVertices ?? CHUNK_VERTICES, limit);
     for (let i = 0; i < count; i++) {
       this._applyColor(i);
       this._draw(i);
@@ -390,7 +406,7 @@ export class ModelScene {
   }
 
   // Slots (numbered chunk by chunk), the chunks with their baked GPU data, and the slot textures.
-  _build(data, geometryOf, matrices, chunkVertices, maxTextureSize) {
+  _build(data, geometryOf, matrices, chunkVertices, limit) {
     const count = geometryOf.length;
     const meta = this._meta;
     const sources = new Map();
@@ -412,10 +428,12 @@ export class ModelScene {
     const radius = new Float32Array(count);
     const mirrored = new Uint8Array(count);
     const groups = new Map(); // bucket * 2 + (f32 ? 1 : 0) -> instances
+    const uses = new Uint32Array(meta.geometries.length); // slots per geometry still to bake
     const b = this._boxes;
     for (let i = 0; i < count; i++) {
       const s = source(geometryOf[i]);
-      if (s.vertices === 0) continue;
+      if (s.vertices === 0 || !finiteBox(b, i)) continue;
+      uses[geometryOf[i]]++;
       kind[i] = placeSlot(matrices, i, s, origins.subarray(i * 3, i * 3 + 3));
       mirrored[i] = isMirrored(matrices, i) ? 1 : 0;
       weight[i] = s.vertices;
@@ -431,9 +449,9 @@ export class ModelScene {
       for (const leaf of splitCells(centres, weight, groups.get(key), chunkVertices)) leaves.push(sortByRadius(leaf, radius));
     }
     const slots = leaves.reduce((sum, leaf) => sum + leaf.length, 0);
-    if (slots >= 2 ** 24) throw new RangeError(`${slots} drawable instances exceed the limit of ${2 ** 24}.`);
+    // Slot numbers must stay exact in a float attribute (< 2^24) and the slot textures within the GPU's size.
+    if (slots > limit) throw new ModelTooLargeError(slots, limit);
     const height = Math.max(1, Math.ceil(slots / ROW));
-    if (height > maxTextureSize) throw new RangeError(`${slots} drawable instances need a ${ROW}x${height} texture, over this GPU's limit of ${maxTextureSize}.`);
     const info = new Float32Array(ROW * height * 4);
     this._state = new THREE.DataTexture(new Uint8Array(ROW * height * 4), ROW, height);
     this._state.colorSpace = THREE.SRGBColorSpace; // SRGB8_ALPHA8: the GPU decodes the colour bytes exactly
@@ -484,6 +502,7 @@ export class ModelScene {
         info[slot * 4 + 3] = baked.steps[j];
         const g = geometryOf[i];
         if (!this._lineSources.has(g)) this._lineSources.set(g, source(g).indices.slice());
+        if (--uses[g] === 0) sources.delete(g); // its decoded normals, if any, go with it
       }
       this._units.push(this._chunk(bucket, leaf, slotBase, baked, mirrored, geometryOf));
       slotBase += leaf.length;
@@ -523,7 +542,7 @@ export class ModelScene {
     const { mirrored, geometryOf } = this._lineMembers;
     for (const unit of this._units) {
       const triangles = unit.starts[unit.n];
-      const index = unit.vertices > 65536 ? new Uint32Array(triangles * 2) : new Uint16Array(triangles * 2);
+      const index = indexArray(unit.vertices, triangles * 2);
       let at = 0;
       let base = 0;
       for (const i of unit.members) {
@@ -739,6 +758,7 @@ export class ModelScene {
   }
 
   _expandBox(box, i) {
+    if (!finiteBox(this._boxes, i)) return;
     const b = this._boxes;
     const o = i * 6;
     box.min.set(Math.min(box.min.x, b[o]), Math.min(box.min.y, b[o + 1]), Math.min(box.min.z, b[o + 2]));

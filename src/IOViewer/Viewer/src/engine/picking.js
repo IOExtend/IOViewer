@@ -67,6 +67,9 @@ export class Picker {
     this.renderer = renderer;
     this.scene = modelScene;
     this.camera = camera;
+    // The model's buffers are not restored with a restored context: after a loss nothing is picked any more.
+    this._lost = false;
+    renderer.domElement.addEventListener('webglcontextlost', () => (this._lost = true));
     const uniforms = modelScene.slotUniforms;
     this._float = options.pickFloat !== false && renderer.extensions.has('EXT_color_buffer_float');
     if (this._float) {
@@ -86,7 +89,7 @@ export class Picker {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const x = Math.floor(clientX - rect.left);
     const y = Math.floor(clientY - rect.top);
-    if (!(x >= 0 && y >= 0 && x < rect.width && y < rect.height)) return null;
+    if (this._lost || !(x >= 0 && y >= 0 && x < rect.width && y < rect.height)) return null;
     const pixel = this._render(this._material, x, y, rect);
     const slot = (this._float ? Math.round(pixel[3]) : new Uint32Array(pixel.buffer)[0]) - 1;
     if (slot < 0) return null;

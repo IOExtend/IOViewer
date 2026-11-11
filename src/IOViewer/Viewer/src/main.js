@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { loadModelData } from './data.js';
-import { ModelScene } from './engine/modelScene.js';
+import { ModelScene, ModelTooLargeError } from './engine/modelScene.js';
 import { lang, t } from './i18n.js';
 import { NavigationControls } from './nav/controls.js';
 import { ViewCube } from './nav/viewCube.js';
@@ -45,9 +45,9 @@ camera.add(headlight, headlight.target);
 headlight.target.position.set(0, 0, -1);
 world.add(camera);
 
-// Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat.
+// Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat, slotLimit.
 const testOptions = window.IOVIEWER_TEST ?? {};
-const scene = new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
+const scene = createScene();
 data.releaseBinary(); // the scene has copied what it needs
 // Starting at the whole model's cost, a GPU that draws it in time orbits at full detail; a slower one shrinks it.
 const motionDetail = new MotionDetail(scene, requestRender, scene.totalCost);
@@ -66,19 +66,37 @@ function showMessage(text) {
   message.textContent = text;
   message.hidden = false;
 }
+// A model over what the viewer can draw opens without geometry and says why; the tree and properties still work.
+function createScene() {
+  try {
+    return new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
+  } catch (error) {
+    if (!(error instanceof ModelTooLargeError)) throw error;
+    showMessage(t('tooLarge').replace('{count}', error.count).replace('{limit}', error.limit));
+    const none = (type) => ({ o: 0, n: 0, t: type });
+    const instances = { count: 0, geometry: none('u32'), material: none('u32'), element: none('i32'), matrix: none('f32') };
+    return new ModelScene({ ...data, meta: { ...data.meta, instances } });
+  }
+}
 if (data.meta.instances.count === 0) showMessage(t('noGeometry'));
-// The model's GPU buffers keep no CPU copy, so a lost context cannot be rebuilt: say so instead of a blank page.
-canvas.addEventListener('webglcontextlost', () => showMessage(t('contextLost')));
+// The model's GPU buffers keep no CPU copy, so a lost context cannot be rebuilt, not even when the browser restores
+// it: say so instead of a blank page, and draw nothing more (the picker stops too).
+let contextLost = false;
+canvas.addEventListener('webglcontextlost', () => {
+  contextLost = true;
+  showMessage(t('contextLost'));
+});
 
 let resolveReady;
 const ready = new Promise((resolve) => (resolveReady = resolve));
 let frameRequested = false;
 function requestRender() {
-  if (frameRequested) return;
+  if (frameRequested || contextLost) return;
   frameRequested = true;
   motionDetail.requested(performance.now());
   requestAnimationFrame(() => {
     frameRequested = false;
+    if (contextLost) return;
     const rect = canvas.getBoundingClientRect();
     controls.camera.updateMatrixWorld(); // the screen labels project with it before render() would update it
     sectionGizmo.update(controls.camera);

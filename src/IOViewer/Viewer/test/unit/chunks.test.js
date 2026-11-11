@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { F32, GENERAL, VERBATIM, bakeChunk, bakeSource, drawSpan, placeSlot, prefixByRadius, sortByRadius, splitCells } from '../../src/engine/chunks.js';
+import { F32, GENERAL, VERBATIM, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, prefixByRadius, sortByRadius, splitCells } from '../../src/engine/chunks.js';
 import { GRID, octDecodeInto } from '../../src/engine/quantize.js';
 
 // Seeded generator, so a failure repeats.
@@ -193,4 +193,40 @@ test('drawSpan covers the slots first..end-1, empty when end <= first', () => {
   assert.deepEqual(drawSpan(starts, 1, 3), [36, 72]);
   assert.deepEqual(drawSpan(starts, 2, 2), [72, 0]);
   assert.deepEqual(drawSpan(starts, 0, 3), [0, 108]);
+});
+
+test('index type: u16 up to 65535 vertices, u32 from 65536 (0xFFFF restarts primitives in u16)', () => {
+  assert.ok(indexArray(65535, 3) instanceof Uint16Array);
+  assert.ok(indexArray(65536, 3) instanceof Uint32Array);
+  const bake = (vertices) => {
+    const last = vertices - 1;
+    const source = bakeSource(new Float32Array(vertices * 3), null, new Float32Array(vertices * 3).fill(1), Uint32Array.from([0, last - 1, last]), null);
+    return bakeChunk(Uint32Array.from([0]), context(matrices(identity([0, 0, 0])), [source])).index;
+  };
+  const u16 = bake(65535);
+  assert.ok(u16 instanceof Uint16Array);
+  assert.deepEqual([...u16], [0, 65533, 65534]);
+  assert.ok(!u16.includes(65535));
+  const u32 = bake(65536);
+  assert.ok(u32 instanceof Uint32Array);
+  assert.deepEqual([...u32], [0, 65534, 65535]);
+});
+
+test('split: non-finite centres neither drop nor double an instance', () => {
+  const centres = Float32Array.from([0, 0, 0, NaN, 0, 0, 5, Infinity, 0, -Infinity, 1, NaN, 3, 3, 3, 9, 1, 2]);
+  const leaves = splitCells(centres, new Uint32Array(6).fill(1), Uint32Array.from([0, 1, 2, 3, 4, 5]), 1);
+  assert.deepEqual(leaves.flatMap((l) => [...l]).sort(), [0, 1, 2, 3, 4, 5]);
+  const all = splitCells(Float32Array.from([NaN, NaN, NaN, NaN, NaN, NaN]), Uint32Array.from([1, 1]), Uint32Array.from([0, 1]), 1);
+  assert.deepEqual(all.flatMap((l) => [...l]).sort(), [0, 1]);
+});
+
+test('unit normals are decoded only for transformed slots: a translation-only bake keeps the oct pairs only', () => {
+  const q = { o: [0, 0, 0], s: GRID };
+  const exported = bakeSource(Uint16Array.from([0, 0, 0, 1000, 0, 0, 0, 1000, 0]), q, Int16Array.from([0, 0, 0, 0, 0, 0]), Uint16Array.from([0, 1, 2]), null);
+  assert.equal(exported.normals, null);
+  bakeChunk(Uint32Array.from([0]), context(matrices(identity([1, 2, 3])), [exported]));
+  assert.equal(exported.normals, null);
+  bakeChunk(Uint32Array.from([0]), context(matrices([0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0]), [exported]));
+  assert.ok(exported.normals instanceof Float32Array);
+  assert.deepEqual([...exported.normals.subarray(0, 3)], [0, 0, 1]);
 });

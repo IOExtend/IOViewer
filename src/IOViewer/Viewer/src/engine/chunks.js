@@ -35,28 +35,37 @@ export function splitCells(centres, weight, members, limit) {
 
 // Sorts m by its centre coordinate on the axis where the centres spread most: the coordinate is quantized into the
 // high bits of one float64 and the instance number fills the low 32, so a plain numeric sort does it (ties by number).
+// A non-finite coordinate sorts as level 0, so no key is NaN and no instance is lost or doubled.
 function sortAlongLongestAxis(m, centres) {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   for (const i of m) {
     for (let a = 0; a < 3; a++) {
       const c = centres[i * 3 + a];
+      if (!Number.isFinite(c)) continue;
       if (c < min[a]) min[a] = c;
       if (c > max[a]) max[a] = c;
     }
   }
   let axis = 0;
   for (let a = 1; a < 3; a++) if (max[a] - min[a] > max[axis] - min[axis]) axis = a;
-  const span = max[axis] - min[axis];
+  const span = max[axis] - min[axis]; // NaN when no centre is finite: every level 0
   const levels = 2 ** 20 - 1;
   const keys = new Float64Array(m.length);
   for (let k = 0; k < m.length; k++) {
     const i = m[k];
-    const level = span > 0 ? Math.round(((centres[i * 3 + axis] - min[axis]) / span) * levels) : 0;
+    const c = centres[i * 3 + axis];
+    const level = span > 0 && Number.isFinite(c) ? Math.round(((c - min[axis]) / span) * levels) : 0;
     keys[k] = level * 2 ** 32 + i;
   }
   keys.sort();
   for (let k = 0; k < m.length; k++) m[k] = keys[k] % 2 ** 32;
+}
+
+// Index array of `length` entries for a chunk of `vertices` vertices: u16 only while every index is below 65535, since
+// WebGL2 always restarts primitives at 0xFFFF in u16 indices (a 65536-vertex chunk needs u32).
+export function indexArray(vertices, length) {
+  return vertices > 65535 ? new Uint32Array(length) : new Uint16Array(length);
 }
 
 // Sorts members in place by radius (indexed by instance) descending, ties by instance number ascending.
@@ -116,7 +125,7 @@ export function placeSlot(matrices, i, source, origin) {
  * ctx = { matrices (12 per instance), geometryOf, mirrored (Uint8Array), kind (per instance, from placeSlot),
  * origins (Float64Array, 3 per instance), source(g) (see bakeSource), textured }.
  * Returns q (u16 x4, or f32 x4 when the members are F32: xyz position steps, w the slot within the chunk), o (oct
- * normals, i16 x2), uv (f32 x2, textured only, zeros where the geometry has none), index (u16, u32 above 65536
+ * normals, i16 x2), uv (f32 x2, textured only, zeros where the geometry has none), index (u16, u32 from 65536
  * vertices; mirrored triangles written a, c, b), indexStart (per slot + end) and per slot origins (f32 x3) and steps.
  */
 export function bakeChunk(members, ctx) {
@@ -132,7 +141,7 @@ export function bakeChunk(members, ctx) {
   const q = f32 ? new Float32Array(vertices * 4) : new Uint16Array(vertices * 4);
   const o = new Int16Array(vertices * 2);
   const uv = ctx.textured ? new Float32Array(vertices * 2) : null;
-  const index = vertices > 65536 ? new Uint32Array(indices) : new Uint16Array(indices);
+  const index = indexArray(vertices, indices);
   const indexStart = new Uint32Array(n + 1);
   const origins = new Float32Array(n * 3);
   const steps = new Float32Array(n);
@@ -176,7 +185,10 @@ function copyVertices(s, q, o, base, slot) {
     q[k + 3] = slot;
   }
   if (s.oct) o.set(s.oct, base * 2);
-  else for (let v = 0; v < s.vertices; v++) octEncodeInto(o, (base + v) * 2, s.normals[v * 3], s.normals[v * 3 + 1], s.normals[v * 3 + 2]);
+  else {
+    const normals = unitNormals(s);
+    for (let v = 0; v < s.vertices; v++) octEncodeInto(o, (base + v) * 2, normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]);
+  }
 }
 
 // world = M·p in f64; q = steps of GRID from the slot origin (GENERAL) or the f32 world position (F32). Normals by the
@@ -192,7 +204,7 @@ function transformVertices(s, m, kind, origin, q, o, base, slot, normal) {
   const p = s.positions;
   const qo = s.q ? s.q.o : null;
   const qs = s.q ? s.q.s : 1;
-  const normals = s.normals;
+  const normals = unitNormals(s);
   for (let v = 0; v < s.vertices; v++) {
     let x = p[v * 3], y = p[v * 3 + 1], z = p[v * 3 + 2];
     if (qo) {
@@ -226,8 +238,9 @@ const step = (d) => Math.min(Math.max(Math.round(d / GRID), 0), U16_MAX);
 
 /**
  * A geometry as bakeChunk and placeSlot read it: positions (u16 steps with q = {o, s}, or f32), oct normals `oct`
- * (i16 pairs, or null) and unit `normals` (f32 x3: decoded from oct, as written, or computed from the faces when the
- * geometry has none), indices, uvs (or null), the vertex count and the local box (min, max) of the decoded positions.
+ * (i16 pairs, or null), f32 `normals` as written (or null), indices, uvs (or null), the vertex count and the local box
+ * (min, max) of the decoded positions. Unit f32 normals are made only when a transformed slot needs them (unitNormals):
+ * translation-only slots copy the oct pairs, and a large model of own geometry must not hold a decoded copy of all.
  */
 export function bakeSource(positions, q, normals, indices, uvs) {
   const vertices = positions.length / 3;
@@ -240,14 +253,18 @@ export function bakeSource(positions, q, normals, indices, uvs) {
       if (c > max[a]) max[a] = c;
     }
   }
-  let oct = null;
-  let unit = normals;
-  if (normals instanceof Int16Array) {
-    oct = normals;
-    unit = new Float32Array(vertices * 3);
-    for (let v = 0; v < vertices; v++) octDecodeInto(unit, v * 3, normals[v * 2], normals[v * 2 + 1]);
-  } else if (!normals) unit = vertexNormals(positions, q, indices);
-  return { positions, q, oct, normals: unit, indices, uvs, vertices, min, max };
+  const oct = normals instanceof Int16Array ? normals : null;
+  return { positions, q, oct, normals: oct ? null : normals, indices, uvs, vertices, min, max };
+}
+
+// Unit f32 normals of a bakeSource (3 per vertex), made on first use and kept on it: decoded from the oct pairs, or
+// computed from the faces when the geometry has none.
+export function unitNormals(s) {
+  if (!s.normals && s.oct) {
+    s.normals = new Float32Array(s.vertices * 3);
+    for (let v = 0; v < s.vertices; v++) octDecodeInto(s.normals, v * 3, s.oct[v * 2], s.oct[v * 2 + 1]);
+  } else if (!s.normals) s.normals = vertexNormals(s.positions, s.q, s.indices);
+  return s.normals;
 }
 
 // Area-weighted vertex normals from the faces, as three's computeVertexNormals.

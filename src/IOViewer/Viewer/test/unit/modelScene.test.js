@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ModelScene, isMirrored, reversedWinding } from '../../src/engine/modelScene.js';
+import { ModelScene, ModelTooLargeError, isMirrored, reversedWinding } from '../../src/engine/modelScene.js';
 import { GRID, octDecodeInto } from '../../src/engine/quantize.js';
 
 // 12 floats per instance: three columns of the linear part, then the translation.
@@ -57,7 +57,7 @@ function quantizedCube() {
 // ModelScene over `items` = [{ x, scale = 1, element = index, geometry = 0, material = 0 }] placed along X.
 function model(items, { geometries = [quantizedCube()], materials = [{ color: [0.2, 0.4, 0.6], opacity: 1, texture: null }], options = {} } = {}) {
   const matrix = new Float32Array(items.length * 12);
-  items.forEach(({ x, scale = 1 }, i) => matrix.set([scale, 0, 0, 0, scale, 0, 0, 0, scale, x, 0, 0], i * 12));
+  items.forEach(({ x, scale = 1, m }, i) => matrix.set(m ?? [scale, 0, 0, 0, scale, 0, 0, 0, scale, x, 0, 0], i * 12));
   const elements = Math.max(0, ...items.map((it, i) => (it.element ?? i) + 1));
   const meta = {
     materials,
@@ -204,4 +204,44 @@ test('every chunk geometry carries its octahedral normals in the `normal` attrib
   }
   scene.setDisplayMode('wireframe');
   for (const object of scene.root.children) assert.ok(object.geometry.getAttribute('normal'), object.type);
+});
+
+// f32 geometry of n vertices (all at the origin but the last at (1, 1, 1)) with one triangle through the last vertex.
+function strip(n) {
+  const positions = new Float32Array(n * 3);
+  positions.fill(1, (n - 1) * 3);
+  return {
+    positions: view(positions, 'f32'), indices: view(Uint32Array.from([0, n - 2, n - 1]), 'u32'), normals: view(new Float32Array(n * 3).fill(1), 'f32'),
+    uvs: null, bbox: { min: [0, 0, 0], max: [1, 1, 1] },
+  };
+}
+
+test('wireframe lines of a 65536-vertex chunk use a u32 index; of 65535 vertices a u16 one without 0xFFFF', () => {
+  const scene = model([{ x: 0 }, { x: 10, geometry: 1 }], { geometries: [strip(65535), strip(65536)] });
+  scene.setDisplayMode('wireframe');
+  const lines = scene.root.children.filter((o) => o.isLineSegments).map((o) => o.geometry.index.array);
+  const [small, big] = [0, 1].map((i) => lines.find((a) => a.length === 6 && (a instanceof Uint32Array) === (i === 1)));
+  assert.ok(small instanceof Uint16Array);
+  assert.ok(!small.includes(65535));
+  assert.deepEqual([...big], [0, 65534, 65534, 65535, 65535, 0]);
+  assert.ok(scene.instance(1).mesh.geometry.index.array instanceof Uint32Array);
+});
+
+test('over the slot limit the scene throws ModelTooLargeError with the count and the limit', () => {
+  assert.throws(() => model([{ x: 0 }, { x: 2 }, { x: 4 }], { options: { slotLimit: 2 } }), (e) => e instanceof ModelTooLargeError && e instanceof RangeError && e.count === 3 && e.limit === 2);
+  assert.equal(model([{ x: 0 }, { x: 2 }], { options: { slotLimit: 2 } }).memory().mergedInstances, 2);
+  // The GPU's texture size limits the slots too: 2048 per row.
+  assert.throws(() => model(Array.from({ length: 2049 }, (_, i) => ({ x: i * 2 })), { options: { maxTextureSize: 1 } }), (e) => e.limit === 2048);
+});
+
+test('an instance with a non-finite box gets no slot and leaves the bounds alone', () => {
+  const nan = [NaN, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+  const far = [1, 0, 0, 0, 1, 0, 0, 0, 1, Infinity, 0, 0];
+  const scene = model([{ x: 0 }, { m: nan }, { x: 4 }, { m: far }]);
+  assert.deepEqual([0, 1, 2, 3].map((i) => scene.instance(i).slot >= 0), [true, false, true, false]);
+  assert.equal(scene.memory().mergedInstances, 2);
+  assert.deepEqual(scene.visibleBox().min.toArray(), [-0.5, -0.5, -0.5]);
+  assert.deepEqual(scene.visibleBox().max.toArray(), [4.5, 0.5, 0.5]);
+  assert.ok(scene.elementBox(1).isEmpty());
+  assert.deepEqual(scene.drawnInstances(camera()), [0, 2]);
 });

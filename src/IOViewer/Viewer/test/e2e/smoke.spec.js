@@ -229,3 +229,41 @@ test('pick element with index > 4096 (large fixture)', async ({ page }) => {
   }
   expect(errors).toEqual([]);
 });
+
+test('a restored context keeps the reload message and nothing throws: no render, no pick', async ({ page }) => {
+  const { errors } = await open(page, 'building');
+  await page.evaluate(() => {
+    const lose = document.getElementById('ioviewer-canvas').getContext('webgl2').getExtension('WEBGL_lose_context');
+    window.__lose = lose;
+    lose.loseContext();
+  });
+  await expect(page.locator('#ioviewer-message')).toHaveText('Видеокарта сброшена — перезагрузите страницу');
+  await page.evaluate(() => window.__lose.restoreContext());
+  await page.waitForTimeout(300);
+  // Interaction after the restore: an orbit drag, a click (pick) and a visibility change, each of which used to render.
+  const { width, height } = page.viewportSize();
+  await page.mouse.move(width / 2, height / 2);
+  await page.mouse.down();
+  await page.mouse.move(width / 2 + 60, height / 2 + 20, { steps: 4 });
+  await page.mouse.up();
+  await page.mouse.click(width / 2, height / 2);
+  expect(await page.evaluate(() => window.__ioviewer.picker.pick(innerWidth / 2, innerHeight / 2))).toBeNull();
+  await page.evaluate(() => window.__ioviewer.scene.setHighlighted([0]));
+  await nextFrame(page);
+  await expect(page.locator('#ioviewer-message')).toBeVisible();
+  await expect(page.locator('#ioviewer-message')).toHaveText('Видеокарта сброшена — перезагрузите страницу');
+  expect(errors).toEqual([]);
+});
+
+test.describe('a model over the slot limit', () => {
+  test.beforeEach(({ page }) => page.addInitScript(() => (window.IOVIEWER_TEST = { slotLimit: 10 })));
+
+  test('opens without geometry and says it is too large; the element tree still counts', async ({ page }) => {
+    const { errors } = await open(page, 'building');
+    const drawable = building.Meshes.filter((m) => m.Vertices.length > 0 || m.GeometryId != null).length;
+    await expect(page.locator('#ioviewer-message')).toHaveText(`Модель слишком большая для этого просмотрщика: объектов с геометрией — ${drawable}, предел — 10`);
+    await expect(page.locator('#ioviewer-status')).toHaveText(`Выбрано: 0 · Элементов: ${building.Elements.length}`);
+    expect(await page.evaluate(() => window.__ioviewer.scene.memory().mergedInstances)).toBe(0);
+    expect(errors).toEqual([]);
+  });
+});
