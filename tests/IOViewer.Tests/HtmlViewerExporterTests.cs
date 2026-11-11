@@ -613,6 +613,96 @@ public class HtmlViewerExporterTests
         Assert.Equal(3.0, view.Instances("matrix")[12 + 9] - view.Instances("matrix")[9]);
     }
 
+    // Decoded vertices of instance i in RTC: matrix linear part · (o + q·s or f32) + matrix translation.
+    private static double[] DecodedWorld(ViewerHtml view, int instance)
+    {
+        var m = view.Instances("matrix").AsSpan(instance * 12, 12).ToArray();
+        var p = view.Positions(view.Geometries[(int)view.Instances("geometry")[instance]]);
+        var world = new double[p.Length];
+        for (int v = 0; v < p.Length / 3; v++)
+        {
+            for (int k = 0; k < 3; k++)
+            {
+                world[v * 3 + k] = m[k] * p[v * 3] + m[3 + k] * p[v * 3 + 1] + m[6 + k] * p[v * 3 + 2] + m[9 + k];
+            }
+        }
+        return world;
+    }
+
+    // Asserts that instance i decodes to transform(vertices) - rtcOffset within tolerance per coordinate.
+    private static void AssertPlaced(ViewerHtml view, int instance, IEnumerable<Vector3d> worldVertices, double tolerance)
+    {
+        var rtc = Vec(view.Meta.GetProperty("rtcOffset"));
+        var decoded = DecodedWorld(view, instance);
+        var expected = worldVertices.SelectMany(v => new[] { v.X - rtc[0], v.Y - rtc[1], v.Z - rtc[2] }).ToArray();
+        Assert.Equal(expected.Length, decoded.Length);
+        for (int k = 0; k < expected.Length; k++) Assert.InRange(Math.Abs(decoded[k] - expected[k]), 0, tolerance);
+    }
+
+    [Fact]
+    public void Format3_ScaledSharedInstance_KeepsF32()
+    {
+        // A unit primitive scaled x100: grid steps in local units would be 100 x coarser in the world.
+        Vector3d[] vertices = [new(0.12345, 0.6789, 0.4321), new(1, 0.25, 0.5), new(0.5, 1, 0.98765)];
+        var scaled = new Transform3d(Vector3d.UnitX * 100, Vector3d.UnitY * 100, Vector3d.UnitZ * 100, new Vector3d(OffsetX + 3.3, OffsetY + 4.4, 5.5));
+        var doc = new ViewerDocument();
+        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = [0, 1, 2] });
+        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1, Transform = Transform3d.Translate(new(OffsetX, OffsetY, 0)) });
+        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 1, Transform = scaled });
+
+        var view = ViewerHtml.Export(doc);
+        var geometry = view.Geometries[0];
+
+        Assert.Equal("f32", geometry.GetProperty("positions").GetProperty("t").GetString());
+        Assert.False(geometry.TryGetProperty("q", out _));
+        AssertPlaced(view, 1, vertices.Select(scaled.Apply), 1e-4); // float32 of ~100 m values
+    }
+
+    [Fact]
+    public void Format3_UnscaledSharedInstance_IsQuantized()
+    {
+        Vector3d[] vertices = [new(0.12345, 0.6789, 0.4321), new(1.111, 0.25, 0.5), new(0.5, 1.9, 0.98765)];
+        var half = new Transform3d(Vector3d.UnitX * 0.5, Vector3d.UnitY * 0.5, Vector3d.UnitZ * 0.5, new Vector3d(OffsetX + 1.234567, OffsetY + 2.345678, 0.345678));
+        var moved = Transform3d.Translate(new Vector3d(OffsetX + 3.210987, OffsetY + 0.123456, 1.987654));
+        var doc = new ViewerDocument();
+        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = [0, 1, 2] });
+        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1, Transform = moved });
+        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 1, Transform = half });
+
+        var view = ViewerHtml.Export(doc);
+        var geometry = view.Geometries[0];
+
+        Assert.Equal("u16", geometry.GetProperty("positions").GetProperty("t").GetString());
+        Assert.True(geometry.TryGetProperty("q", out _));
+        AssertPlaced(view, 0, vertices.Select(moved.Apply), Step / 2 + 1e-6);
+        AssertPlaced(view, 1, vertices.Select(half.Apply), Step / 2 + 1e-6);
+    }
+
+    [Fact]
+    public void Format3_F32Placement_RoundTrips()
+    {
+        // Over 64 m, so f32 on both paths: a georeferenced own mesh, an off-grid translated twin of it, and a shared
+        // geometry placed by a georeferenced translation.
+        Vector3d[] own = [new(OffsetX + 0.1234, OffsetY + 0.5678, 1.2345), new(OffsetX + 100.9876, OffsetY + 3.21, 2.5), new(OffsetX + 7.7, OffsetY + 80.08, 0.3)];
+        var shift = new Vector3d(1.2345678, -2.3456789, 0.3456789);
+        Vector3d[] local = [new(0.111, 0.222, 0.333), new(90.5, 1.25, 0.75), new(3.3, 70.7, 4.4)];
+        var place = Transform3d.Translate(new Vector3d(OffsetX - 20.4321, OffsetY + 10.9876, 3.21));
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(new ViewerMesh { Id = 1, Vertices = own, Indices = [0, 1, 2] });
+        doc.Geometries.Add(new ViewerGeometry { Id = 7, Vertices = local, Indices = [0, 1, 2] });
+        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 7, Transform = place });
+        doc.Meshes.Add(new ViewerMesh { Id = 3, Vertices = [.. own.Select(v => v + shift)], Indices = [0, 1, 2] });
+
+        var view = ViewerHtml.Export(doc);
+
+        Assert.Equal([0, 1, 0], view.Instances("geometry"));
+        Assert.All(view.Geometries.EnumerateArray(), g => Assert.Equal("f32", g.GetProperty("positions").GetProperty("t").GetString()));
+        const double tolerance = 2e-5; // float32 of RTC values up to ~100 m
+        AssertPlaced(view, 0, own, tolerance);
+        AssertPlaced(view, 1, local.Select(place.Apply), tolerance);
+        AssertPlaced(view, 2, own.Select(v => v + shift), tolerance);
+    }
+
     [Fact]
     public void Format3_DedupesOffGridTranslatedCopies()
     {

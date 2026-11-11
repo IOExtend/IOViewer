@@ -87,6 +87,15 @@ internal sealed class ViewerPayloadWriter
         _bounds = _doc.ComputeBoundingBox();
         _rtcOffset = _bounds.IsEmpty ? Vector3d.Zero : _bounds.Center;
 
+        // Largest axis length of any instance per shared geometry: grid steps in local units grow by it in the world.
+        var maxScale = new Dictionary<int, double>();
+        foreach (var mesh in _doc.Meshes)
+        {
+            if (mesh.GeometryId is not int id || mesh.Transform is not { } t) continue;
+            double scale = Math.Max(t.XAxis.Length, Math.Max(t.YAxis.Length, t.ZAxis.Length));
+            maxScale[id] = Math.Max(maxScale.GetValueOrDefault(id), scale);
+        }
+
         var sharedOutput = new Dictionary<int, int>();
         long totalVertices = 0;
         foreach (var mesh in _doc.Meshes)
@@ -103,7 +112,7 @@ internal sealed class ViewerPayloadWriter
             {
                 if (!sharedOutput.TryGetValue(geometry.Id, out geometryIndex))
                 {
-                    geometryIndex = AddSharedGeometry(geometry);
+                    geometryIndex = AddSharedGeometry(geometry, maxScale.GetValueOrDefault(geometry.Id) <= 1 + 1e-6);
                     sharedOutput.Add(geometry.Id, geometryIndex);
                 }
                 translation = transform.Translation - _rtcOffset;
@@ -140,14 +149,15 @@ internal sealed class ViewerPayloadWriter
         }
     }
 
-    // Quantized with the origin Snap(local minimum) (META q.o) when it fits, else f32 as written.
-    private int AddSharedGeometry(ViewerGeometry geometry)
+    // Quantized with the origin Snap(local minimum) (META q.o) when it fits and no instance scales it up (which would
+    // scale the Step/2 error with it), else f32 as written.
+    private int AddSharedGeometry(ViewerGeometry geometry, bool quantize)
     {
         var vertices = geometry.Vertices.ToArray();
         var normals = geometry.Normals is { } n && n.Count == vertices.Length ? GeometryQuantizer.OctEncode(n) : null;
         var uvs = Uvs(geometry.UVs, vertices.Length);
         var bounds = geometry.ComputeBoundingBox();
-        return GeometryQuantizer.TryQuantize(vertices, out var origin, out var q)
+        return quantize && GeometryQuantizer.TryQuantize(vertices, out var origin, out var q)
             ? AddGeometry(q, null, origin, geometry.Indices, normals, uvs, bounds)
             : AddGeometry(null, Floats(vertices, Vector3d.Zero), null, geometry.Indices, normals, uvs, bounds);
     }
