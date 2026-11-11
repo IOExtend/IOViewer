@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isClipped } from '../tools/sectionMath.js';
 
 // Id pass: three's batching chunks place each instance (matrix, visibility via the multi-draw list) and the
 // clipping chunks cut it like the visible material; the colour is the instance's element index + 1 (0 = none).
@@ -37,13 +38,8 @@ function idMaterial(maxInstances) {
   });
 }
 
-// A point is cut away when it is behind any plane (union) or behind all of them (intersection), as in three.
-function clipped(point, material) {
-  const planes = material.clippingPlanes;
-  if (!planes) return false;
-  const behind = (plane) => plane.distanceToPoint(point) < 0;
-  return material.clipIntersection ? planes.every(behind) : planes.some(behind);
-}
+// A point is cut away exactly as the material's own shader cuts it.
+const clipped = (point, material) => isClipped(point, material.clippingPlanes ?? [], material.clipIntersection);
 
 /**
  * GPU picking over ModelScene: the shown, unclipped model is drawn once into a 1x1 target through a view offset

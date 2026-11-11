@@ -50,7 +50,7 @@ test('right click on a column selects it and opens the element menu; Hide remove
     'Свойства', 'Скрыть', 'Изолировать', 'Показать всё', 'Приблизить к объекту', 'Бокс сечения по объекту', 'Копировать Id',
   ]);
   await expect(menuItem(page, 'Скрыть').locator('kbd')).toHaveText('H');
-  await expect(menuItem(page, 'Бокс сечения по объекту')).toBeDisabled(); // sections come with their own feature
+  await expect(menuItem(page, 'Бокс сечения по объекту')).toBeEnabled();
 
   await menuItem(page, 'Скрыть').click();
   await expect(menu(page)).toBeHidden();
@@ -287,9 +287,10 @@ test('toolbar: grouped tools, orbit active, pan and projection switch, later too
   await tool('projection').click();
   expect(await page.evaluate(() => window.__ioviewer.camera.isPerspectiveCamera)).toBe(true);
 
-  await expect(tool('plane')).toHaveAttribute('aria-disabled', 'true');
-  await expect(tool('plane')).toHaveAttribute('title', 'Плоскость сечения');
-  await tool('plane').click({ force: true }); // no handler yet: nothing happens, nothing throws
+  await expect(tool('plane')).toHaveAttribute('aria-disabled', 'false');
+  await expect(tool('distance')).toHaveAttribute('aria-disabled', 'true');
+  await expect(tool('distance')).toHaveAttribute('title', 'Расстояние');
+  await tool('distance').click({ force: true }); // no handler yet: nothing happens, nothing throws
   await expect(tool('fit')).toHaveAttribute('aria-disabled', 'false');
   await expect(page.locator('.ioviewer-toolbar-group').last().locator('.ioviewer-tool')).toHaveCount(1); // view: fullscreen only
   await expect(tool('settings')).toHaveCount(0);

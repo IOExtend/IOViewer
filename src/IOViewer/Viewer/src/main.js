@@ -8,6 +8,9 @@ import { Picker } from './engine/picking.js';
 import { Selection } from './select/selection.js';
 import { selectInRect, screenBoxes } from './select/boxSelect.js';
 import { mountUI } from './ui/app.js';
+import { Sections } from './tools/sections.js';
+import { SectionGizmo } from './tools/sectionGizmo.js';
+import { mountSections } from './ui/sectionsPanel.js';
 
 const data = loadModelData();
 document.documentElement.lang = lang;
@@ -35,6 +38,10 @@ world.add(camera);
 
 const scene = new ModelScene(data);
 world.add(scene.root);
+// Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
+const sections = new Sections(scene, scene.visibleBox());
+const sectionGizmo = new SectionGizmo(sections, canvas);
+world.add(sectionGizmo.group); // outside scene.root: the picking id pass renders only the model
 const options = data.meta.options ?? {};
 scene.setDisplayMode(options.initialWireframe ? 'wireframe' : options.initialWhiteMode ? 'white' : 'materials');
 
@@ -52,12 +59,15 @@ function requestRender() {
   frameRequested = true;
   requestAnimationFrame(() => {
     frameRequested = false;
+    sectionGizmo.update(controls.camera);
     renderer.render(world, controls.camera);
     viewCube.update();
     resolveReady();
   });
 }
 scene.root.addEventListener('change', requestRender);
+sections.addEventListener('change', requestRender);
+sectionGizmo.addEventListener('change', requestRender);
 
 const picker = new Picker(renderer, scene, camera);
 const controls = new NavigationControls(camera, canvas, {
@@ -76,7 +86,9 @@ scene.root.addEventListener('change', (e) => {
 
 const selection = new Selection();
 selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
-const ui = mountUI({ root: document.getElementById('ioviewer-ui'), data, scene, controls, picker, selection });
+const uiRoot = document.getElementById('ioviewer-ui');
+const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection });
+mountSections({ root: uiRoot, ...ui, sections, selection });
 
 // Click selects, Ctrl+click toggles; a click on nothing clears unless a modifier is held.
 controls.addEventListener('click', (e) => {
@@ -88,13 +100,15 @@ controls.addEventListener('click', (e) => {
   else if (!shift) selection.clear();
 });
 // Box select replaces the selection, Ctrl+box adds to it; a sliver (< 4 px either way) counts as a click on nothing.
+// Elements the section cuts away entirely are not selected.
 controls.addEventListener('boxselect', (e) => {
   const { rect, mode, ctrl, shift } = e.detail;
   if (rect.width < 4 || rect.height < 4) {
     if (!ctrl && !shift) selection.clear();
     return;
   }
-  const found = selectInRect(rect, mode, screenBoxes(scene, controls.camera, canvas.getBoundingClientRect()));
+  const found = selectInRect(rect, mode, screenBoxes(scene, controls.camera, canvas.getBoundingClientRect()))
+    .filter((i) => !sections.isCut(scene.elementBox(i)));
   selection.set(ctrl ? [...selection.values(), ...found] : found);
 });
 
@@ -107,4 +121,4 @@ controls.resize(); // also schedules the first frame for an empty model
 controls.fitBox(scene.visibleBox(), false);
 const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
-window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, ready, get camera() { return controls.camera; } };
+window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, sections, sectionGizmo, ready, get camera() { return controls.camera; } };
