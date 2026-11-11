@@ -1,0 +1,5 @@
+/* The logo SVG is a wide wordmark; without a size it renders at its full 926x214 px in the navbar. */
+#logo {
+  height: 2rem;
+  width: auto;
+}

@@ -123,7 +123,7 @@ See the [public API](docs/public-api.md) for the supported surface and [getting 
 
 ## Documentation
 
-The documentation site with API references and guides is at <https://ioextend.github.io/IOViewer/>.
+The documentation site with API references and guides is at <https://ioextend.github.io/IOViewer/>. [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/IOExtend/IOViewer) offers an automatically generated overview of the repository.
 
 ## Limitations
 

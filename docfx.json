@@ -24,6 +24,6 @@
       "_appFaviconPath": "images/favicon.ico",
       "_enableSearch": true
     },
-    "template": ["default", "modern"]
+    "template": ["default", "modern", "templates/ioviewer"]
   }
 }
