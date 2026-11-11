@@ -1,13 +1,14 @@
 // Performance harness for large exported pages (`npm run perf`, headed; not part of `npm run e2e`).
 // PERF_MODELS: comma-separated exported .html files (default <PERF_OUT>/synthetic-200k.html);
-// PERF_OUT: where JSON results go (default C:/tmp/ioviewer-perf); PERF_LABEL names the run (e.g. baseline);
+// PERF_OUT: where JSON results go (default <os temp>/ioviewer-perf); PERF_LABEL names the run (e.g. baseline);
 // PERF_PROFILE=1 also writes a CPU profile of each model's whole run; PERF_GPU: see playwright.perf.config.js.
 import { test } from '@playwright/test';
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const OUT = process.env.PERF_OUT ?? 'C:/tmp/ioviewer-perf';
+const OUT = process.env.PERF_OUT ?? path.join(os.tmpdir(), 'ioviewer-perf');
 const MODELS = (process.env.PERF_MODELS ?? path.join(OUT, 'synthetic-200k.html')).split(',').filter(Boolean);
 const LABEL = process.env.PERF_LABEL ?? 'run';
 const ORBIT_MS = 5000;
@@ -18,21 +19,29 @@ function quantile(values, q) {
   return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : NaN;
 }
 
-// Programmatic orbit about the vertical axis through the target (~46°/s) for `ms`; returns frame intervals.
+// Programmatic orbit about the vertical axis through the target (~46°/s) for `ms`; returns per frame the interval, the
+// share of the instances in view that the previous render drew, and its detail threshold (px, 0 = full).
 function orbit(page, ms, zoom) {
   return page.evaluate(async ({ ms, zoom }) => {
-    const { controls } = window.__ioviewer;
+    const { controls, scene, motionDetail } = window.__ioviewer;
     const camera = controls.camera;
     const target = controls.target;
     camera.position.sub(target).multiplyScalar(zoom).add(target);
     controls.resize();
     const deltas = [];
+    const drawn = [];
+    const thresholds = [];
     await new Promise((resolve) => {
       let start = 0;
       let last = 0;
       const step = (now) => {
         if (!start) start = last = now;
-        else deltas.push(now - last);
+        else {
+          deltas.push(now - last);
+          const stats = scene.drawStats(); // of the render that ran earlier in this frame
+          drawn.push(stats.inView ? stats.drawn / stats.inView : 1);
+          thresholds.push(motionDetail?.minPixels ?? 0);
+        }
         const a = (now - last) * 0.0008;
         last = now;
         const x = camera.position.x - target.x;
@@ -48,12 +57,16 @@ function orbit(page, ms, zoom) {
     });
     camera.position.sub(target).divideScalar(zoom).add(target);
     controls.resize();
-    return deltas;
+    return { deltas, drawn, thresholds };
   }, { ms, zoom });
 }
 
-const fps = (deltas) => ({
+const fps = ({ deltas, drawn, thresholds }) => ({
   frames: deltas.length,
+  drawnMedian: median(drawn),
+  drawnMin: Math.min(...drawn),
+  thresholdMedianPx: median(thresholds),
+  thresholdMaxPx: Math.max(...thresholds),
   medianFps: 1000 / median(deltas),
   p95Fps: 1000 / quantile(deltas, 0.95), // fps of the slowest 5 % of frames
   medianMs: median(deltas),
@@ -61,8 +74,9 @@ const fps = (deltas) => ({
   maxMs: Math.max(...deltas),
 });
 
-// Installs window.__perf: time(step) runs a step (a function), returns { syncMs, frameMs } where frameMs lasts until the
-// second animation frame after it has been drawn and the GPU has finished, i.e. the change is on screen.
+// Installs window.__perf: time(step) runs a step (a function), returns { syncMs, frameMs, full } where frameMs lasts
+// until the second animation frame after it has been drawn and the GPU has finished, i.e. the change is on screen, and
+// full tells that this last frame was drawn in full detail.
 async function installTimer(page) {
   await page.evaluate(() => {
     const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -76,7 +90,8 @@ async function installTimer(page) {
         // Wait for the GPU too: reading a pixel back finishes every queued command.
         const gl = document.getElementById('ioviewer-canvas').getContext('webgl2'); // the viewer's own context
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
-        return { syncMs, frameMs: performance.now() - start, result };
+        // Every frame without camera motion is drawn in full; recorded to show the timing is of a full frame.
+        return { syncMs, frameMs: performance.now() - start, full: (window.__ioviewer.motionDetail?.minPixels ?? 0) === 0, result };
       },
       // The user actions measured, each through the same path as the real input.
       steps: {
@@ -248,7 +263,7 @@ for (const file of MODELS) {
         await step('fourDTick', 'fourDAt', k);
         ticks.push(result.fourDTick);
       }
-      result.fourDTick = { syncMs: median(ticks.map((t) => t.syncMs)), frameMs: median(ticks.map((t) => t.frameMs)) };
+      result.fourDTick = { syncMs: median(ticks.map((t) => t.syncMs)), frameMs: median(ticks.map((t) => t.frameMs)), full: ticks.every((t) => t.full) };
       await step('fourDClose', 'fourD', 'close');
     }
     result.heapEndMB = await page.evaluate(() => performance.memory.usedJSHeapSize / 1048576);
@@ -266,16 +281,17 @@ for (const file of MODELS) {
 
 function table(r) {
   const n = (v, d = 1) => (typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : '—');
-  const op = (o) => (o ? `${n(o.syncMs)} ms sync / ${n(o.frameMs)} ms to frame` : '—');
+  const op = (o) => (o ? `${n(o.syncMs)} ms sync / ${n(o.frameMs)} ms to ${o.full === false ? 'PARTIAL' : 'full'} frame` : '—');
+  const run = (o) => `${n(o.medianFps)} / ${n(o.p95Fps)} (max ${n(o.maxMs, 0)} ms; drawn ${n(o.drawnMedian * 100)} % median, ${n(o.drawnMin * 100)} % min; threshold ${n(o.thresholdMedianPx, 2)} px median, ${n(o.thresholdMaxPx, 2)} max)`;
   const rows = [
     ['GPU', r.renderer],
     ['elements / instances / triangles', `${r.elements} / ${r.instances} / ${r.triangles}`],
     ['HTML', `${n(r.htmlMB)} MB`],
     ['ready (DOMContentLoaded)', `${n(r.readyMs, 0)} ms (${n(r.domContentLoadedMs, 0)} ms)`],
     ['JS heap after load / end', `${n(r.heapMB, 0)} / ${n(r.heapEndMB, 0)} MB`],
-    ['orbit fps median / p95 (max frame)', `${n(r.orbit.medianFps)} / ${n(r.orbit.p95Fps)} (${n(r.orbit.maxMs, 0)} ms)`],
-    ['orbit zoomed fps median / p95', `${n(r.orbitZoomed.medianFps)} / ${n(r.orbitZoomed.p95Fps)}`],
-    ['orbit at 50 % opacity fps median / p95', `${n(r.orbitTransparent.medianFps)} / ${n(r.orbitTransparent.p95Fps)}`],
+    ['orbit fps median / p95', run(r.orbit)],
+    ['orbit zoomed fps median / p95', run(r.orbitZoomed)],
+    ['orbit at 50 % opacity fps median / p95', run(r.orbitTransparent)],
     ['pick', `${n(r.pickMs)} ms`],
     ...['clickSelectFirst', 'clickSelect', 'hide', 'showAll', 'isolate', 'showAllAfterIsolate', 'boxSelectAll', 'hideBoxSelected',
       'showAllAfterBoxHide', 'clearSelection', 'treeSearch', 'treeSelect', 'displayWhite', 'displayWireframe',

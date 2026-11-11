@@ -248,21 +248,40 @@ export class ModelScene {
   }
 
   // The radius for setDetail that keeps the cost of drawing what `camera` sees within `budget` (in triangles, a draw
-  // counting as DRAW_COST of them); 0 when everything fits.
+  // counting as DRAW_COST of them); 0 when everything fits. Sets visibleCost to the cost of all that is in view (at
+  // most; the whole model when it fits the budget anyway).
   detailThreshold(camera, viewHeight, budget) {
+    this.visibleCost = this._totalCost;
     if (this._totalCost <= budget) return 0;
     camera.updateMatrixWorld();
     const planes = frustumPlanes(camera, this._planes);
     const view = viewMetrics(camera, viewHeight, this._view);
     const pixels = this._pixels;
     const s = this._spheres;
+    let visible = 0;
     for (let i = 0; i < pixels.length; i++) {
       const o = i * 4;
       const x = s[o], y = s[o + 1], z = s[o + 2], r = s[o + 3];
-      pixels[i] = !this._shown(i) || outsideFrustum(planes, x, y, z, r) ? -1
-        : screenRadius(view, r, (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5]);
+      if (!this._shown(i) || outsideFrustum(planes, x, y, z, r)) {
+        pixels[i] = -1;
+        continue;
+      }
+      pixels[i] = screenRadius(view, r, (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5]);
+      visible += this._cost[i];
     }
+    this.visibleCost = visible;
     return detailThreshold(pixels, this._cost, budget);
+  }
+
+  // What the last render drew: { drawn, inView } instances (inView: shown and inside the frustum).
+  drawStats() {
+    let drawn = 0;
+    let inView = 0;
+    for (const bucket of this._buckets) {
+      drawn += bucket.mesh._multiDrawCount;
+      inView += bucket.inView ?? 0;
+    }
+    return { drawn, inView };
   }
 
   setClipping(planes, intersection) {
@@ -286,6 +305,7 @@ export class ModelScene {
     this._view = new Float64Array(8);
     this._minPixels = 0;
     this._viewHeight = 1;
+    this.visibleCost = 0;
     const range = {};
     for (const bucket of this._buckets) {
       const n = bucket.mesh.maxInstanceCount;
@@ -326,6 +346,7 @@ export class ModelScene {
     const order = sorted ? (bucket.order ??= new Float64Array(members.length)) : null;
     const draws = sorted ? (bucket.draws ??= new Uint32Array(members.length)) : mesh._indirectTexture.image.data;
     let n = 0;
+    let inView = 0;
     let near = Infinity, far = -Infinity;
     for (let id = 0; id < members.length; id++) {
       const i = members[id];
@@ -333,6 +354,7 @@ export class ModelScene {
       const o = i * 4;
       const x = s[o], y = s[o + 1], z = s[o + 2], r = s[o + 3];
       if (outsideFrustum(planes, x, y, z, r)) continue;
+      inView++;
       if (view) {
         const depth = (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5];
         if (minPixels > 0 && screenRadius(view, r, depth) < minPixels) continue;
@@ -345,6 +367,7 @@ export class ModelScene {
       draws[n++] = id;
     }
     if (sorted) this._sortBackToFront(bucket, n, near, far);
+    bucket.inView = inView;
     const ids = mesh._indirectTexture.image.data;
     for (let k = 0; k < n; k++) {
       const id = ids[k];

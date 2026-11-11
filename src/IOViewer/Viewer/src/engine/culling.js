@@ -40,7 +40,8 @@ export function screenRadius(m, r, depth) {
 /**
  * The smallest on-screen radius (px) to draw so that the summed cost of what is drawn, largest first, stays within
  * `budget`; 0 when everything fits. pixels[i] < 0 means i is not drawn anyway; cost[i] is what drawing i costs.
- * Radii are binned by half octaves, so the result is a bin edge and the drawn cost may fall below the budget.
+ * Radii are binned by half octaves, so the result is a bin edge and the drawn cost may fall below the budget; the
+ * largest bin is always drawn, so whatever is in view never disappears entirely.
  */
 export function detailThreshold(pixels, cost, budget) {
   const bins = new Float64Array(BINS);
@@ -53,9 +54,13 @@ export function detailThreshold(pixels, cost, budget) {
   }
   if (total <= budget) return 0;
   let sum = 0;
+  let top = true;
   for (let b = BINS - 1; b >= 0; b--) {
+    if (bins[b] === 0) continue;
     sum += bins[b];
-    if (sum > budget) return 2 ** ((b + 1) / 2 - 4);
+    // The largest bin is drawn even when it alone is over the budget: never an empty view.
+    if (sum > budget) return top ? (b === 0 ? 0 : 2 ** (b / 2 - 4)) : 2 ** ((b + 1) / 2 - 4);
+    top = false;
   }
   return 0;
 }

@@ -3,7 +3,8 @@
 #:property PublishAot=false
 
 // Writes a deterministic synthetic pipe network as an exported HTML viewer, for performance measurements:
-//   dotnet run tools/SyntheticModel/SyntheticModel.cs -- --elements 200000 --out C:/tmp/ioviewer-perf/synthetic-200k.html
+//   dotnet run tools/SyntheticModel/SyntheticModel.cs -- --elements 200000 --out synthetic-200k.html
+// Without --out it writes <temp>/ioviewer-perf/synthetic-<N>.html.
 // Pipes and joints share 20 geometries (about 100 triangles each) placed by rotated transforms; one element per mesh,
 // five systems (one of them transparent wells), a few properties per element and a 4D schedule over the network.
 // --unique gives every mesh its own copy of its geometry, already placed, as exporters without instancing write it.
@@ -34,10 +35,16 @@ for (int a = 0; a < args.Length; a++)
             return 2;
     }
 }
-if (elements <= 0 || output is null)
+if (elements <= 0)
 {
-    Console.Error.WriteLine("Usage: SyntheticModel --elements N --out file.html [--unique]");
+    Console.Error.WriteLine("Usage: SyntheticModel --elements N [--out file.html] [--unique]");
     return 2;
+}
+if (output is null)
+{
+    string folder = Path.Combine(Path.GetTempPath(), "ioviewer-perf");
+    Directory.CreateDirectory(folder);
+    output = Path.Combine(folder, string.Create(CultureInfo.InvariantCulture, $"synthetic-{elements}{(unique ? "-unique" : "")}.html"));
 }
 
 var watch = Stopwatch.StartNew();

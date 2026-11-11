@@ -47,6 +47,7 @@ world.add(camera);
 
 const scene = new ModelScene(data);
 data.releaseBinary(); // the scene has copied what it needs
+const motionDetail = new MotionDetail(scene, requestRender);
 world.add(scene.root);
 // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
 const sections = new Sections(scene, scene.visibleBox());
@@ -69,6 +70,7 @@ let frameRequested = false;
 function requestRender() {
   if (frameRequested) return;
   frameRequested = true;
+  motionDetail.requested(performance.now());
   requestAnimationFrame(() => {
     frameRequested = false;
     const rect = canvas.getBoundingClientRect();
@@ -78,12 +80,11 @@ function requestRender() {
     grids.update(controls.camera, rect);
     motionDetail.begin(controls.camera, rect.height, performance.now());
     renderer.render(world, controls.camera);
-    motionDetail.end();
+    motionDetail.end(performance.now());
     viewCube.update();
     resolveReady();
   });
 }
-const motionDetail = new MotionDetail(scene, requestRender);
 scene.root.addEventListener('change', requestRender);
 sections.addEventListener('change', requestRender);
 sectionGizmo.addEventListener('change', requestRender);
@@ -168,4 +169,4 @@ controls.resize(); // also schedules the first frame for an empty model
 controls.fitBox(scene.visibleBox(), false);
 const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
-window.__ioviewer = { scene, controls, picker, selection, ui, viewCube, sections, sectionGizmo, measure, grids, clashes, timeliner, ready, get camera() { return controls.camera; } };
+window.__ioviewer = { scene, motionDetail, controls, picker, selection, ui, viewCube, sections, sectionGizmo, measure, grids, clashes, timeliner, ready, get camera() { return controls.camera; } };
