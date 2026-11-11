@@ -490,6 +490,7 @@ export class ModelScene {
     this._dirtyCount = 0;
     const infoTexture = new THREE.DataTexture(info, ROW, height, THREE.RGBAFormat, THREE.FloatType);
     infoTexture.needsUpdate = true;
+    infoTexture.onUpdate = () => (infoTexture.image.data = null); // static: no CPU copy once uploaded
     this.slotUniforms.slotInfo.value = infoTexture;
     this.slotUniforms.slotState.value = this._state;
     this._stateBytes = ROW * height * 20;
@@ -609,13 +610,19 @@ export class ModelScene {
     const s = chunkSphere(this._boxes, members);
     const sphere = new THREE.Sphere(new THREE.Vector3(s[0], s[1], s[2]), s[3]);
     geometry.boundingSphere = sphere; // set, so three never computes one from the positions
-    const mesh = new THREE.InstancedMesh(geometry, bucket.material, n);
-    const m = mesh.instanceMatrix.array;
+    const mesh = new THREE.InstancedMesh(geometry, bucket.material, 0);
+    const m = new Float32Array(n * 16); // three's column-major 4 x 4 from the 3 x 4 columns
     for (let j = 0; j < n; j++) {
-      const e = matrices.subarray(members[j] * 12, members[j] * 12 + 12);
-      m.set([e[0], e[1], e[2], 0, e[3], e[4], e[5], 0, e[6], e[7], e[8], 0, e[9], e[10], e[11], 1], j * 16);
+      const e = members[j] * 12;
+      for (let c = 0; c < 4; c++) {
+        m[j * 16 + c * 4] = matrices[e + c * 3];
+        m[j * 16 + c * 4 + 1] = matrices[e + c * 3 + 1];
+        m[j * 16 + c * 4 + 2] = matrices[e + c * 3 + 2];
+      }
+      m[j * 16 + 15] = 1;
     }
-    mesh.instanceMatrix.onUpload(release);
+    mesh.instanceMatrix = attr(m, 16, false, THREE.InstancedBufferAttribute);
+    mesh.count = n;
     mesh.boundingSphere = sphere;
     this._instancedBytes += n * (64 + 4);
     const unit = {

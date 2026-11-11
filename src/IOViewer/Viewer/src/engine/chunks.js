@@ -35,8 +35,9 @@ export function splitCells(centres, weight, members, limit) {
 
 // Sorts m by its centre coordinate on the axis where the centres spread most: the coordinate is quantized into the
 // high bits of one float64 and the instance number fills the low 32, so a plain numeric sort does it (ties by number).
-// A non-finite coordinate sorts as level 0, so no key is NaN and no instance is lost or doubled.
-function sortAlongLongestAxis(m, centres) {
+// A non-finite coordinate sorts as level 0, so no key is NaN and no instance is lost or doubled. With `split`, only
+// puts the `split` first in that order before the others (in linear time), each part in no particular order.
+function sortAlongLongestAxis(m, centres, split = -1) {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   for (const i of m) {
@@ -58,8 +59,35 @@ function sortAlongLongestAxis(m, centres) {
     const level = span > 0 && Number.isFinite(c) ? Math.round(((c - min[axis]) / span) * levels) : 0;
     keys[k] = level * 2 ** 32 + i;
   }
-  keys.sort();
+  if (split < 0) keys.sort();
+  else select(keys, split);
   for (let k = 0; k < m.length; k++) m[k] = keys[k] % 2 ** 32;
+}
+
+// Rearranges distinct keys so that keys[0..k) are the k smallest: quickselect, median-of-three pivot.
+function select(keys, k) {
+  let lo = 0;
+  let hi = keys.length - 1;
+  while (lo < hi) {
+    const a = keys[lo];
+    const b = keys[(lo + hi) >>> 1];
+    const c = keys[hi];
+    const pivot = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c));
+    let i = lo;
+    let j = hi;
+    while (i <= j) {
+      while (keys[i] < pivot) i++;
+      while (keys[j] > pivot) j--;
+      if (i <= j) {
+        const t = keys[i];
+        keys[i++] = keys[j];
+        keys[j--] = t;
+      }
+    }
+    if (k <= j) hi = j;
+    else if (k >= i) lo = i;
+    else return;
+  }
 }
 
 /**
@@ -77,8 +105,8 @@ export function splitByCount(centres, members, limit) {
       if (m.length) leaves.push(m);
       continue;
     }
-    sortAlongLongestAxis(m, centres);
     const k = Math.ceil((m.length * Math.floor(cells / 2)) / cells);
+    sortAlongLongestAxis(m, centres, k);
     stack.push(m.subarray(k), m.subarray(0, k)); // the lower part is emitted first
   }
   return leaves;
