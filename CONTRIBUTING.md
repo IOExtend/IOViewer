@@ -61,7 +61,9 @@ window (for example `PERF_LADDER=25000,200000` measures synthetic models made
 by `tools/SyntheticModel`); its settings are described at the top of
 `test/perf/orbit.perf.js`. It is not part of CI; include its numbers in the
 pull request when a change can affect rendering speed. npm dependencies are
-pinned to exact versions.
+pinned to exact versions. When updating three.js (for example a Dependabot pull
+request), also rebuild and commit `dist/viewer.js` and update the version in
+`THIRD-PARTY-NOTICES.md`.
 
 ## Clean-room policy
 

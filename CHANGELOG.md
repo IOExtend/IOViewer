@@ -51,8 +51,9 @@ API between minor releases.
   lower limit leaves meshes out, the viewer shows a banner with the number of meshes written.
 - The HTML payload uses format 3: one base64 binary block, positions quantized to 16-bit steps of 2⁻¹⁰ m (error at most
   0.49 mm, 0.85 mm for rotated shared geometry) and octahedral 16-bit normals. Geometry larger than about 64 m, and
-  shared geometry that any instance scales up, stays 32-bit float. The page of a real 746 MB IFC water-supply model
-  shrank from 57.5 MB to 44.4 MB. The HTML is written to the output stream as it is produced.
+  shared geometry that any instance scales up, stays 32-bit float. For a real 746 MB IFC water-supply model (via GLB)
+  the page is 44.4 MB, about the size 0.1.0 wrote (44.1 MB) although it now also carries normals; with
+  32-bit float positions and normals it would be 57.5 MB. The HTML is written to the output stream as it is produced.
 - The viewer merges geometry into spatial chunks per material and keeps per-object state (hidden, selected, tint) in a
   texture, so hide, isolate, selection and 4D colouring never rebuild geometry. When merged data would exceed
   384 MiB, repeated shapes are drawn as instanced copies in spatially bounded cells instead.
