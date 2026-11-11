@@ -112,27 +112,41 @@ public static class GlbViewerImporter
             }
         }
 
-        // Parse Meshes
-        if (root.TryGetProperty("meshes", out var meshesEl))
+        // Parse meshes lazily: one ViewerGeometry per (mesh, primitive), one ViewerMesh per node occurrence.
+        var meshElements = root.TryGetProperty("meshes", out var meshesEl) ? meshesEl.EnumerateArray().ToArray() : [];
+        var geometryIds = new Dictionary<(int Mesh, int Primitive), int?>();
+        int meshCounter = 0;
+
+        void Instantiate(int meshIndex, Transform3d world)
         {
-            int meshCounter = 0;
-            foreach (var meshEl in meshesEl.EnumerateArray())
+            if (meshIndex < 0 || meshIndex >= meshElements.Length)
             {
-                string meshName = meshEl.TryGetProperty("name", out var mn) ? mn.GetString() ?? $"Mesh {meshCounter + 1}" : $"Mesh {meshCounter + 1}";
+                throw new InvalidDataException($"glTF node references missing mesh {meshIndex}.");
+            }
 
-                if (meshEl.TryGetProperty("primitives", out var primsEl))
+            var meshEl = meshElements[meshIndex];
+            string meshName = meshEl.TryGetProperty("name", out var mn) ? mn.GetString() ?? $"Mesh {meshCounter + 1}" : $"Mesh {meshCounter + 1}";
+            if (!meshEl.TryGetProperty("primitives", out var primsEl)) return;
+
+            int primIndex = -1;
+            foreach (var prim in primsEl.EnumerateArray())
+            {
+                primIndex++;
+                if (!prim.TryGetProperty("attributes", out var attrs) ||
+                    !attrs.TryGetProperty("POSITION", out var posAccIdx))
                 {
-                    foreach (var prim in primsEl.EnumerateArray())
+                    continue;
+                }
+
+                if (!geometryIds.TryGetValue((meshIndex, primIndex), out int? geometryId))
+                {
+                    var positions = ReadVec3Accessor(posAccIdx.GetInt32(), accessors, bufferViews, binBuffer);
+                    if (positions.Count == 0)
                     {
-                        if (!prim.TryGetProperty("attributes", out var attrs) ||
-                            !attrs.TryGetProperty("POSITION", out var posAccIdx))
-                        {
-                            continue;
-                        }
-
-                        var positions = ReadVec3Accessor(posAccIdx.GetInt32(), accessors, bufferViews, binBuffer);
-                        if (positions.Count == 0) continue;
-
+                        geometryId = null;
+                    }
+                    else
+                    {
                         List<int> indices;
                         if (prim.TryGetProperty("indices", out var indAccIdx))
                         {
@@ -150,37 +164,129 @@ public static class GlbViewerImporter
                             normals = ReadVec3Accessor(normAccIdx.GetInt32(), accessors, bufferViews, binBuffer);
                         }
 
-                        int? matId = null;
-                        RgbaColor? col = null;
-                        if (prim.TryGetProperty("material", out var mProp))
+                        geometryId = doc.Geometries.Count;
+                        doc.Geometries.Add(new ViewerGeometry
                         {
-                            int mid = mProp.GetInt32();
-                            if (mid >= 0 && mid < materials.Count)
-                            {
-                                matId = mid;
-                                col = materials[mid].Color;
-                            }
-                        }
-
-                        var vMesh = new ViewerMesh
-                        {
-                            Id = ++meshCounter,
-                            Name = meshName,
+                            Id = geometryId.Value,
                             Vertices = positions,
                             Indices = indices,
-                            Normals = normals,
-                            MaterialId = matId,
-                            Color = col ?? new RgbaColor(200, 200, 200)
-                        };
+                            Normals = normals
+                        });
+                    }
 
-                        doc.Meshes.Add(vMesh);
+                    geometryIds[(meshIndex, primIndex)] = geometryId;
+                }
+
+                if (geometryId is null) continue;
+
+                int? matId = null;
+                RgbaColor? col = null;
+                if (prim.TryGetProperty("material", out var mProp))
+                {
+                    int mid = mProp.GetInt32();
+                    if (mid >= 0 && mid < materials.Count)
+                    {
+                        matId = mid;
+                        col = materials[mid].Color;
                     }
                 }
+
+                doc.Meshes.Add(new ViewerMesh
+                {
+                    Id = ++meshCounter,
+                    Name = meshName,
+                    GeometryId = geometryId,
+                    Transform = world.Then(YupToZup),
+                    MaterialId = matId,
+                    Color = col ?? new RgbaColor(200, 200, 200)
+                });
             }
+        }
+
+        if (root.TryGetProperty("scenes", out var scenesEl) && root.TryGetProperty("nodes", out var nodesEl))
+        {
+            var nodes = nodesEl.EnumerateArray().ToArray();
+            var scenes = scenesEl.EnumerateArray().ToArray();
+            int sceneIndex = root.TryGetProperty("scene", out var sceneProp) ? sceneProp.GetInt32() : 0;
+            if (sceneIndex >= 0 && sceneIndex < scenes.Length &&
+                scenes[sceneIndex].TryGetProperty("nodes", out var rootNodes))
+            {
+                var path = new HashSet<int>();
+
+                void Visit(int nodeIndex, Transform3d parentWorld)
+                {
+                    if (nodeIndex < 0 || nodeIndex >= nodes.Length)
+                    {
+                        throw new InvalidDataException($"glTF references missing node {nodeIndex}.");
+                    }
+
+                    if (!path.Add(nodeIndex))
+                    {
+                        throw new InvalidDataException($"glTF node hierarchy contains a cycle at node {nodeIndex}.");
+                    }
+
+                    var node = nodes[nodeIndex];
+                    var world = ReadNodeTransform(node).Then(parentWorld);
+                    if (node.TryGetProperty("mesh", out var meshProp))
+                    {
+                        Instantiate(meshProp.GetInt32(), world);
+                    }
+
+                    if (node.TryGetProperty("children", out var children))
+                    {
+                        foreach (var child in children.EnumerateArray()) Visit(child.GetInt32(), world);
+                    }
+
+                    path.Remove(nodeIndex);
+                }
+
+                foreach (var rootNode in rootNodes.EnumerateArray()) Visit(rootNode.GetInt32(), Transform3d.Identity);
+            }
+        }
+        else
+        {
+            // No scene graph: import every mesh once without a node transform.
+            for (int i = 0; i < meshElements.Length; i++) Instantiate(i, Transform3d.Identity);
         }
 
         doc.ComputeBoundingBox();
         return doc;
+    }
+
+    // glTF is Y-up; the viewer model is Z-up: (x, y, z) becomes (x, -z, y).
+    private static readonly Transform3d YupToZup = new(new Vector3d(1, 0, 0), new Vector3d(0, 0, 1), new Vector3d(0, -1, 0), Vector3d.Zero);
+
+    private static Transform3d ReadNodeTransform(JsonElement node)
+    {
+        if (node.TryGetProperty("matrix", out var m))
+        {
+            var v = m.EnumerateArray().Select(e => e.GetDouble()).ToArray();
+            if (v.Length != 16) throw new InvalidDataException("glTF node matrix must have 16 elements.");
+            // Column-major: columns 0..2 are the axes, column 3 the translation.
+            return new Transform3d(new(v[0], v[1], v[2]), new(v[4], v[5], v[6]), new(v[8], v[9], v[10]), new(v[12], v[13], v[14]));
+        }
+
+        var t = ReadVector(node, "translation", 3, [0, 0, 0]);
+        var r = ReadVector(node, "rotation", 4, [0, 0, 0, 1]);
+        var s = ReadVector(node, "scale", 3, [1, 1, 1]);
+
+        double len = Math.Sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + r[3] * r[3]);
+        if (len < 1e-12) throw new InvalidDataException("glTF node rotation quaternion has zero length.");
+        double x = r[0] / len, y = r[1] / len, z = r[2] / len, w = r[3] / len;
+
+        return new Transform3d(
+            new Vector3d(1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)) * s[0],
+            new Vector3d(2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)) * s[1],
+            new Vector3d(2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)) * s[2],
+            new Vector3d(t[0], t[1], t[2]));
+    }
+
+    private static double[] ReadVector(JsonElement node, string name, int length, double[] fallback)
+    {
+        if (!node.TryGetProperty(name, out var el)) return fallback;
+        var v = el.EnumerateArray().Select(e => e.GetDouble()).ToArray();
+        if (v.Length != length) throw new InvalidDataException($"glTF node {name} must have {length} elements.");
+        return v;
     }
 
     private static List<Vector3d> ReadVec3Accessor(int accIndex, JsonElement[] accessors, JsonElement[] bufferViews, byte[] bin)

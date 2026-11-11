@@ -152,8 +152,10 @@ public class JsonAndImportTests
         Assert.Single(doc.Meshes);
         var mesh = doc.Meshes[0];
         Assert.Equal("GlbTriangle", mesh.Name);
-        Assert.Equal(3, mesh.Vertices.Count);
-        Assert.Equal(3, mesh.Indices.Count);
-        Assert.Equal(new Vector3d(1, 0, 0), mesh.Vertices[1]);
+        var geometry = Assert.Single(doc.Geometries);
+        Assert.Equal(geometry.Id, mesh.GeometryId);
+        Assert.Equal(3, geometry.Vertices.Count);
+        Assert.Equal(3, geometry.Indices.Count);
+        Assert.Equal(new Vector3d(1, 0, 0), geometry.Vertices[1]);
     }
 }
