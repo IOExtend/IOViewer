@@ -6,7 +6,7 @@ using Xunit;
 
 namespace IOViewer.Tests;
 
-/// <summary>Reads the data blocks of an exported viewer HTML page (format 2).</summary>
+/// <summary>Reads the data blocks of an exported viewer HTML page (format 2 or 3).</summary>
 internal sealed class ViewerHtml
 {
     public string Html { get; }
@@ -49,10 +49,50 @@ internal sealed class ViewerHtml
             {
                 "f32" => BinaryPrimitives.ReadSingleLittleEndian(span[(i * 4)..]),
                 "u16" => BinaryPrimitives.ReadUInt16LittleEndian(span[(i * 2)..]),
+                "i16" => BinaryPrimitives.ReadInt16LittleEndian(span[(i * 2)..]),
                 "u32" => BinaryPrimitives.ReadUInt32LittleEndian(span[(i * 4)..]),
                 "i32" => BinaryPrimitives.ReadInt32LittleEndian(span[(i * 4)..]),
                 _ => throw new InvalidDataException($"Unknown view type '{type}'."),
             };
+        }
+        return result;
+    }
+
+    /// <summary>Positions of a META geometry in its local space: <c>o + q·s</c> for u16 views with <c>q</c>, else f32 as written.</summary>
+    public double[] Positions(JsonElement geometry)
+    {
+        var view = geometry.GetProperty("positions");
+        var values = Read(view);
+        if (!geometry.TryGetProperty("q", out var q))
+        {
+            Assert.Equal("f32", view.GetProperty("t").GetString());
+            return values;
+        }
+        Assert.Equal("u16", view.GetProperty("t").GetString());
+        var origin = q.GetProperty("o").EnumerateArray().Select(e => e.GetDouble()).ToArray();
+        double step = q.GetProperty("s").GetDouble();
+        for (int i = 0; i < values.Length; i++) values[i] = origin[i % 3] + values[i] * step;
+        return values;
+    }
+
+    /// <summary>Unit normals of a META geometry (3 per vertex), decoded from octahedral i16 pairs or f32 as written; null when absent.</summary>
+    public double[]? Normals(JsonElement geometry)
+    {
+        var view = geometry.GetProperty("normals");
+        if (view.ValueKind == JsonValueKind.Null) return null;
+        var values = Read(view);
+        if (view.GetProperty("t").GetString() == "f32") return values;
+        Assert.Equal("i16", view.GetProperty("t").GetString());
+        var result = new double[values.Length / 2 * 3];
+        for (int v = 0; v < values.Length / 2; v++)
+        {
+            double x = Math.Max(values[v * 2] / short.MaxValue, -1), y = Math.Max(values[v * 2 + 1] / short.MaxValue, -1);
+            double z = 1 - Math.Abs(x) - Math.Abs(y);
+            if (z < 0) (x, y) = ((1 - Math.Abs(y)) * (x < 0 ? -1 : 1), (1 - Math.Abs(x)) * (y < 0 ? -1 : 1));
+            double length = Math.Sqrt(x * x + y * y + z * z);
+            result[v * 3] = x / length;
+            result[v * 3 + 1] = y / length;
+            result[v * 3 + 2] = z / length;
         }
         return result;
     }

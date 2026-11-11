@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { detailThreshold, frustumPlanes, outsideFrustum, screenRadius, viewMetrics } from './culling.js';
+import { geometryNormals, geometryPositions } from './quantize.js';
 
 export const DISPLAY_MODES = ['materials', 'textures', 'white', 'wireframe'];
 const HIGHLIGHT_COLOR = new THREE.Color('#f59e0b');
@@ -452,10 +453,11 @@ export class ModelScene {
       cache.set(key, base);
     } else if (!base) {
       base = new THREE.BufferGeometry();
-      base.setAttribute('position', new THREE.BufferAttribute(data.view(source.positions), 3));
+      base.setAttribute('position', new THREE.BufferAttribute(geometryPositions(data, source), 3));
       base.setIndex(new THREE.BufferAttribute(data.view(source.indices), 1));
       // Normals are in geometry-local space; the batching shader rotates them with the instance matrix.
-      if (source.normals) base.setAttribute('normal', new THREE.BufferAttribute(data.view(source.normals), 3));
+      const normals = geometryNormals(data, source);
+      if (normals) base.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       else base.computeVertexNormals();
       cache.set(key, base);
     }

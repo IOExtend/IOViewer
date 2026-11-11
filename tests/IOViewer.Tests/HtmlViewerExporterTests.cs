@@ -98,12 +98,12 @@ public class HtmlViewerExporterTests
         array.EnumerateArray().Select(e => e.GetDouble()).ToArray();
 
     [Fact]
-    public void Meta_HasFormat2AndRtcOffset()
+    public void Meta_HasFormat3AndRtcOffset()
     {
         var view = ViewerHtml.Export(GeoreferencedModel(), new HtmlViewerOptions { Title = "Commercial Center 3D" });
         var meta = view.Meta;
 
-        Assert.Equal(2, meta.GetProperty("format").GetInt32());
+        Assert.Equal(3, meta.GetProperty("format").GetInt32());
         Assert.Equal([500005, 2000007.5, 0], Vec(meta.GetProperty("rtcOffset")));
         Assert.Equal([-5, -7.5, 0], Vec(meta.GetProperty("bbox").GetProperty("min")));
         Assert.Equal([5, 7.5, 0], Vec(meta.GetProperty("bbox").GetProperty("max")));
@@ -115,7 +115,7 @@ public class HtmlViewerExporterTests
         Assert.Equal(1, view.InstanceCount);
         var matrix = view.Instances("matrix");
         Assert.Equal([1, 0, 0, 0, 1, 0, 0, 0, 1, -5, -7.5, 0], matrix);
-        var positions = view.Read(view.Geometries[0].GetProperty("positions"));
+        var positions = view.Positions(view.Geometries[0]);
         Assert.Equal([0, 0, 0, 10, 0, 0, 10, 15, 0, 0, 15, 0], positions);
         Assert.Equal([0, 1, 2, 0, 2, 3], view.Read(view.Geometries[0].GetProperty("indices")));
         Assert.Equal("u16", view.Geometries[0].GetProperty("indices").GetProperty("t").GetString());
@@ -208,7 +208,7 @@ public class HtmlViewerExporterTests
         Assert.True(Math.Abs(x0) < 20 && Math.Abs(x1) < 20, $"translations {x0}, {x1} are not in RTC");
         Assert.True(Math.Abs(m[10]) < 20 && Math.Abs(m[12 + 10]) < 20);
         Assert.Equal([1, 0, 0, 0, 1, 0, 0, 0, 1], m[..9]);
-        Assert.Equal([0, 0, 0, 1, 0, 0, 0, 1, 0], view.Read(view.Geometries[0].GetProperty("positions")));
+        Assert.Equal([0, 0, 0, 1, 0, 0, 0, 1, 0], view.Positions(view.Geometries[0]));
     }
 
     [Fact]
@@ -229,8 +229,8 @@ public class HtmlViewerExporterTests
         var view = ViewerHtml.Export(doc);
         var geometry = view.Geometries[0];
 
-        Assert.Equal([0, 0, 0, 0, 1, 0, 0, 0, 1], view.Read(geometry.GetProperty("positions")));
-        Assert.Equal([1, 0, 0, 1, 0, 0, 1, 0, 0], view.Read(geometry.GetProperty("normals")));
+        Assert.Equal([0, 0, 0, 0, 1, 0, 0, 0, 1], view.Positions(geometry));
+        Assert.Equal([1, 0, 0, 1, 0, 0, 1, 0, 0], view.Normals(geometry)!);
         Assert.Equal([0, 0, 1, 0, 0, 1], view.Read(geometry.GetProperty("uvs")));
     }
 
@@ -506,5 +506,110 @@ public class HtmlViewerExporterTests
 
         Assert.Equal(1, view.Geometries.GetArrayLength());
         Assert.Equal(2, view.InstanceCount);
+    }
+
+    private const double Step = 1.0 / 1024;
+
+    [Fact]
+    public void Format3_QuantizesSmallGeometry()
+    {
+        Vector3d[] vertices = [new(-1.2345678, 0.3, 2.000123), new(3.14159, -2.71828, 0.5), new(0.1, 7.777777, -3.3)];
+        var doc = new ViewerDocument();
+        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = [0, 1, 2] });
+        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1 });
+
+        var view = ViewerHtml.Export(doc);
+        var geometry = view.Geometries[0];
+
+        Assert.Equal(3, view.Meta.GetProperty("format").GetInt32());
+        Assert.Equal("u16", geometry.GetProperty("positions").GetProperty("t").GetString());
+        Assert.Equal(Step, geometry.GetProperty("q").GetProperty("s").GetDouble());
+        var decoded = view.Positions(geometry);
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Assert.InRange(Math.Abs(decoded[i * 3] - vertices[i].X), 0, Step / 2);
+            Assert.InRange(Math.Abs(decoded[i * 3 + 1] - vertices[i].Y), 0, Step / 2);
+            Assert.InRange(Math.Abs(decoded[i * 3 + 2] - vertices[i].Z), 0, Step / 2);
+        }
+    }
+
+    [Fact]
+    public void Format3_KeepsF32ForOver64m()
+    {
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(new ViewerMesh { Vertices = [new(0, 0, 0), new(100, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] });
+
+        var geometry = ViewerHtml.Export(doc).Geometries[0];
+
+        Assert.Equal("f32", geometry.GetProperty("positions").GetProperty("t").GetString());
+        Assert.False(geometry.TryGetProperty("q", out _));
+    }
+
+    [Fact]
+    public void Format3_OwnMeshesShareGridVertices()
+    {
+        // Two georeferenced meshes off the grid that meet at a corner; each is placed by its own translation.
+        var corner = new Vector3d(OffsetX + 1.2345678, OffsetY + 2.3456789, 0.1234567);
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(new ViewerMesh { Vertices = [corner, corner + new Vector3d(-2.5, 0.1, 0), corner + new Vector3d(0, -1.7, 0.3)], Indices = [0, 1, 2] });
+        doc.Meshes.Add(new ViewerMesh
+        {
+            Vertices = [corner + new Vector3d(1.1, 0.9, 0), corner, corner + new Vector3d(3.3, 0, 0.2), corner + new Vector3d(0, 2, 1)],
+            Indices = [0, 1, 2, 0, 2, 3],
+        });
+
+        var view = ViewerHtml.Export(doc);
+        var matrix = view.Instances("matrix");
+        var geometries = view.Instances("geometry");
+        double[] World(int instance, int vertex)
+        {
+            var p = view.Positions(view.Geometries[(int)geometries[instance]]);
+            return [.. Enumerable.Range(0, 3).Select(k => matrix[instance * 12 + 9 + k] + p[vertex * 3 + k])];
+        }
+
+        var fromFirst = World(0, 0);
+        Assert.Equal(fromFirst, World(1, 1)); // exactly the same point
+        var rtc = Vec(view.Meta.GetProperty("rtcOffset"));
+        Assert.InRange(Math.Abs(fromFirst[0] - (corner.X - rtc[0])), 0, Step / 2);
+        Assert.InRange(Math.Abs(fromFirst[1] - (corner.Y - rtc[1])), 0, Step / 2);
+        Assert.InRange(Math.Abs(fromFirst[2] - (corner.Z - rtc[2])), 0, Step / 2);
+    }
+
+    [Fact]
+    public void Format3_OctNormals_MatchSharedVectors()
+    {
+        // The same table is in the viewer's quantize.test.js.
+        Vector3d[] normals = [new(1, 0, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1), new(1, 1, 1), new(1, -2, -3)];
+        double[] expected = [32767, 0, 0, -32767, 0, 0, 32767, 32767, 10922, 10922, 21845, -27306];
+        var doc = new ViewerDocument();
+        doc.Geometries.Add(new ViewerGeometry
+        {
+            Id = 1,
+            Vertices = [.. Enumerable.Range(0, 6).Select(i => new Vector3d(i, i % 2, 0))],
+            Normals = normals,
+            Indices = [0, 1, 2, 3, 4, 5],
+        });
+        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1 });
+
+        var view = ViewerHtml.Export(doc);
+        var written = view.Geometries[0].GetProperty("normals");
+
+        Assert.Equal("i16", written.GetProperty("t").GetString());
+        Assert.Equal(expected, view.Read(written));
+    }
+
+    [Fact]
+    public void Format3_DedupesTranslatedCopies()
+    {
+        Vector3d[] shape = [new(0.1234, 0.5678, 0.9012), new(1.3456, 0.2345, 0.1111), new(0.4444, 2.3333, 0.7777)];
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(new ViewerMesh { Vertices = shape, Indices = [0, 1, 2] });
+        doc.Meshes.Add(new ViewerMesh { Vertices = [.. shape.Select(v => v + new Vector3d(3.0, 0, 0))], Indices = [0, 1, 2] });
+
+        var view = ViewerHtml.Export(doc);
+
+        Assert.Equal(1, view.Geometries.GetArrayLength());
+        Assert.Equal([0, 0], view.Instances("geometry"));
+        Assert.Equal(3.0, view.Instances("matrix")[12 + 9] - view.Instances("matrix")[9]);
     }
 }

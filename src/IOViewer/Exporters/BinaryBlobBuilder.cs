@@ -37,6 +37,8 @@ internal sealed class BinaryBlobBuilder
 
     public BlobView Add(ReadOnlySpan<ushort> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "u16");
 
+    public BlobView Add(ReadOnlySpan<short> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "i16");
+
     public BlobView Add(ReadOnlySpan<uint> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "u32");
 
     public BlobView Add(ReadOnlySpan<int> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "i32");
@@ -44,7 +46,7 @@ internal sealed class BinaryBlobBuilder
     /// <summary>Returns the bytes of a previously added array.</summary>
     public ReadOnlySpan<byte> Bytes(BlobView view)
     {
-        int size = view.Type == "u16" ? 2 : 4;
+        int size = view.Type is "u16" or "i16" ? 2 : 4;
         return _buffer.WrittenSpan.Slice(checked((int)view.Offset), view.Count * size);
     }
 

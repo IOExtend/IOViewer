@@ -89,7 +89,7 @@ public class ModelAndCliIntegrationTests
             Assert.Equal("Pyramid Test", view.Meta.GetProperty("title").GetString());
             Assert.True(view.Meta.GetProperty("options").GetProperty("initialWireframe").GetBoolean());
             Assert.Equal(1, view.InstanceCount);
-            Assert.Equal(12, view.Read(view.Geometries[0].GetProperty("positions")).Length);
+            Assert.Equal(12, view.Positions(view.Geometries[0]).Length);
             Assert.Equal(12, view.Read(view.Geometries[0].GetProperty("indices")).Length);
         }
         finally

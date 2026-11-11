@@ -6,7 +6,9 @@ using IOViewer.Model;
 namespace IOViewer.Exporters;
 
 /// <summary>
-/// Builds the META, BIN and PROPS blocks of the HTML viewer (format 2) from a <see cref="ViewerDocument"/>.
+/// Builds the META, BIN and PROPS blocks of the HTML viewer (format 3) from a <see cref="ViewerDocument"/>.
+/// Geometry positions are written as u16 steps on the <see cref="GeometryQuantizer"/> grid (with META <c>q</c>) when
+/// they span at most 65535 steps, else as f32; normals as octahedral i16 pairs.
 /// All input is validated and the binary blob is assembled by <see cref="Create"/>, before anything is written.
 /// </summary>
 internal sealed class ViewerPayloadWriter
@@ -95,6 +97,7 @@ internal sealed class ViewerPayloadWriter
 
             var transform = mesh.Transform ?? Transform3d.Identity;
             int geometryIndex;
+            Vector3d translation; // in RTC
             if (geometry is not null)
             {
                 if (!sharedOutput.TryGetValue(geometry.Id, out geometryIndex))
@@ -102,17 +105,18 @@ internal sealed class ViewerPayloadWriter
                     geometryIndex = AddSharedGeometry(geometry);
                     sharedOutput.Add(geometry.Id, geometryIndex);
                 }
+                translation = transform.Translation - _rtcOffset;
             }
             else
             {
-                (geometryIndex, var min) = AddOwnGeometry(mesh, transform);
-                transform = Transform3d.Translate(min);
+                (geometryIndex, translation) = AddOwnGeometry(mesh, transform);
+                transform = Transform3d.Identity;
             }
 
             _instanceGeometry.Add((uint)geometryIndex);
             _instanceMaterial.Add((uint)MaterialIndex(mesh));
             _instanceElement.Add(mesh.ElementId is long e && elementIndex.TryGetValue(e, out int index) ? index : -1);
-            AddMatrix(transform);
+            AddMatrix(transform, translation);
             _writtenMeshes++;
         }
 
@@ -135,48 +139,48 @@ internal sealed class ViewerPayloadWriter
         }
     }
 
+    // Quantized with the origin Snap(local minimum) (META q.o) when it fits, else f32 as written.
     private int AddSharedGeometry(ViewerGeometry geometry)
     {
-        var vertices = geometry.Vertices;
-        var positions = new float[vertices.Count * 3];
-        for (int i = 0; i < vertices.Count; i++) SetVector(positions, i, vertices[i]);
-        float[]? normals = null;
-        if (geometry.Normals is { } n && n.Count == vertices.Count)
-        {
-            normals = new float[n.Count * 3];
-            for (int i = 0; i < n.Count; i++) SetVector(normals, i, n[i]);
-        }
-        return AddGeometry(positions, geometry.Indices, normals, Uvs(geometry.UVs, vertices.Count), geometry.ComputeBoundingBox());
+        var vertices = geometry.Vertices.ToArray();
+        var normals = geometry.Normals is { } n && n.Count == vertices.Length ? GeometryQuantizer.OctEncode(n) : null;
+        var uvs = Uvs(geometry.UVs, vertices.Length);
+        var bounds = geometry.ComputeBoundingBox();
+        return GeometryQuantizer.TryQuantize(vertices, out var origin, out var q)
+            ? AddGeometry(q, null, origin, geometry.Indices, normals, uvs, bounds)
+            : AddGeometry(null, Floats(vertices, Vector3d.Zero), null, geometry.Indices, normals, uvs, bounds);
     }
 
-    // Bakes the mesh transform into its vertices and moves them to the mesh's own minimum corner.
-    private (int Index, Vector3d Min) AddOwnGeometry(ViewerMesh mesh, Transform3d transform)
+    // Bakes the mesh transform into its vertices (in RTC); returns the geometry and the instance translation (RTC).
+    // Quantized, the translation is the snapped minimum corner, a point of the global RTC grid, and q has origin 0, so
+    // vertices that coincide in the world decode to the same grid point in every mesh. Otherwise (over 64 m) the
+    // vertices are f32 relative to the exact minimum corner, as in format 2.
+    private (int Index, Vector3d Translation) AddOwnGeometry(ViewerMesh mesh, Transform3d transform)
     {
         var vertices = mesh.Vertices;
-        var world = new Vector3d[vertices.Count];
+        var rtc = new Vector3d[vertices.Count];
         var box = BoundingBox3d.Empty;
-        for (int i = 0; i < world.Length; i++)
+        for (int i = 0; i < rtc.Length; i++)
         {
-            world[i] = transform.Apply(vertices[i]);
-            box = box.Encapsulate(world[i]);
+            rtc[i] = transform.Apply(vertices[i]) - _rtcOffset;
+            box = box.Encapsulate(rtc[i]);
         }
-        var min = box.IsEmpty ? Vector3d.Zero : box.Min;
 
-        var positions = new float[world.Length * 3];
-        for (int i = 0; i < world.Length; i++) SetVector(positions, i, world[i] - min);
-
-        float[]? normals = null;
+        short[]? normals = null;
         if (mesh.Normals is { } n && n.Count == vertices.Count)
         {
-            normals = new float[n.Count * 3];
-            for (int i = 0; i < n.Count; i++)
-            {
-                SetVector(normals, i, mesh.Transform is null ? n[i] : TransformNormal(transform, n[i]));
-            }
+            normals = GeometryQuantizer.OctEncode(mesh.Transform is null ? n : [.. n.Select(v => TransformNormal(transform, v))]);
         }
+        var uvs = Uvs(mesh.UVs, vertices.Count);
 
-        var local = box.IsEmpty ? box : new BoundingBox3d(Vector3d.Zero, box.Max - min);
-        return (AddGeometry(positions, mesh.Indices, normals, Uvs(mesh.UVs, vertices.Count), local), min);
+        if (GeometryQuantizer.TryQuantize(rtc, out var origin, out var q))
+        {
+            var local = box.IsEmpty ? box : new BoundingBox3d(box.Min - origin, box.Max - origin);
+            return (AddGeometry(q, null, Vector3d.Zero, mesh.Indices, normals, uvs, local), origin);
+        }
+        var min = box.Min; // not empty: no vertices always quantize
+        var bounds = new BoundingBox3d(Vector3d.Zero, box.Max - min);
+        return (AddGeometry(null, Floats(rtc, min), null, mesh.Indices, normals, uvs, bounds), min);
     }
 
     // Multiplies by the inverse transpose of the linear part, so normals stay perpendicular under any affine map.
@@ -199,19 +203,26 @@ internal sealed class ViewerPayloadWriter
         return result;
     }
 
-    private static void SetVector(float[] target, int index, Vector3d v)
+    private static float[] Floats(Vector3d[] vertices, Vector3d offset)
     {
-        target[index * 3] = (float)v.X;
-        target[index * 3 + 1] = (float)v.Y;
-        target[index * 3 + 2] = (float)v.Z;
+        var result = new float[vertices.Length * 3];
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            result[i * 3] = (float)(vertices[i].X - offset.X);
+            result[i * 3 + 1] = (float)(vertices[i].Y - offset.Y);
+            result[i * 3 + 2] = (float)(vertices[i].Z - offset.Z);
+        }
+        return result;
     }
 
-    // Returns the index of an identical geometry written before, or writes this one.
-    private int AddGeometry(float[] positions, IReadOnlyList<int> indices, float[]? normals, float[]? uvs, BoundingBox3d bounds)
+    // Returns the index of an identical geometry written before (same bytes and origin), or writes this one. Positions
+    // are either grid steps q from origin, or f32 positions (origin null).
+    private int AddGeometry(ushort[]? q, float[]? positions, Vector3d? origin, IReadOnlyList<int> indices, short[]? normals, float[]? uvs, BoundingBox3d bounds)
     {
+        int vertexCount = (q?.Length ?? positions!.Length) / 3;
         ushort[]? indices16 = null;
         uint[]? indices32 = null;
-        if (positions.Length / 3 <= ushort.MaxValue)
+        if (vertexCount <= ushort.MaxValue)
         {
             indices16 = new ushort[indices.Count];
             for (int i = 0; i < indices.Count; i++) indices16[i] = (ushort)indices[i];
@@ -223,6 +234,8 @@ internal sealed class ViewerPayloadWriter
         }
 
         var hasher = new HashCode();
+        hasher.Add(origin);
+        hasher.AddBytes(Bytes(q));
         hasher.AddBytes(Bytes(positions));
         hasher.AddBytes(Bytes(indices16));
         hasher.AddBytes(Bytes(indices32));
@@ -240,7 +253,8 @@ internal sealed class ViewerPayloadWriter
         foreach (int candidate in candidates)
         {
             var entry = _geometries[candidate];
-            if (Same(positions, entry.Positions)
+            if (entry.Origin == origin
+                && (q is not null ? Same(q, entry.Positions) : Same(positions, entry.Positions))
                 && (indices16 is not null ? Same(indices16, entry.Indices) : Same(indices32, entry.Indices))
                 && Same(normals, entry.Normals)
                 && Same(uvs, entry.Uvs))
@@ -250,7 +264,8 @@ internal sealed class ViewerPayloadWriter
         }
 
         var written = new GeometryEntry(
-            _blob.Add(positions),
+            q is not null ? _blob.Add(q) : _blob.Add(positions),
+            origin,
             indices16 is not null ? _blob.Add(indices16) : _blob.Add(indices32),
             normals is null ? null : _blob.Add(normals),
             uvs is null ? null : _blob.Add(uvs),
@@ -290,10 +305,10 @@ internal sealed class ViewerPayloadWriter
         return index;
     }
 
-    // Matrix4.elements[0,1,2,4,5,6,8,9,10,12,13,14]: the three axes, then the translation in RTC space.
-    private void AddMatrix(Transform3d t)
+    // Matrix4.elements[0,1,2,4,5,6,8,9,10,12,13,14]: the three axes of t, then the translation, already in RTC.
+    private void AddMatrix(Transform3d t, Vector3d translation)
     {
-        foreach (var axis in (ReadOnlySpan<Vector3d>)[t.XAxis, t.YAxis, t.ZAxis, t.Translation - _rtcOffset])
+        foreach (var axis in (ReadOnlySpan<Vector3d>)[t.XAxis, t.YAxis, t.ZAxis, translation])
         {
             _instanceMatrix.Add((float)axis.X);
             _instanceMatrix.Add((float)axis.Y);
@@ -330,7 +345,7 @@ internal sealed class ViewerPayloadWriter
     {
         using var w = new Utf8JsonWriter(output);
         w.WriteStartObject();
-        w.WriteNumber("format", 2);
+        w.WriteNumber("format", 3);
         w.WriteString("title", _options.Title);
         w.WriteString("author", _doc.Author ?? "IOViewer");
         w.WriteString("createdAt", _doc.CreatedAt ?? DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
@@ -389,6 +404,13 @@ internal sealed class ViewerPayloadWriter
             w.WriteStartObject();
             w.WritePropertyName("positions");
             g.Positions.WriteTo(w);
+            if (g.Origin is { } origin)
+            {
+                w.WriteStartObject("q");
+                WriteVector(w, "o", origin);
+                w.WriteNumber("s", GeometryQuantizer.Step);
+                w.WriteEndObject();
+            }
             w.WritePropertyName("indices");
             g.Indices.WriteTo(w);
             WriteView(w, "normals", g.Normals);
@@ -593,7 +615,8 @@ internal sealed class ViewerPayloadWriter
 
     private readonly record struct MaterialKey(byte R, byte G, byte B, double Opacity, int? Texture);
 
-    private sealed record GeometryEntry(BlobView Positions, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds);
+    // Origin is META q.o: set for u16 grid-step positions, null for f32.
+    private sealed record GeometryEntry(BlobView Positions, Vector3d? Origin, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds);
 
     private readonly record struct InstanceViews(BlobView Geometry, BlobView Material, BlobView Element, BlobView Matrix);
 }

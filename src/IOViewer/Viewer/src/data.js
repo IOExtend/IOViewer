@@ -1,6 +1,6 @@
-// Reads the data blocks of an exported page (format 2): META and PROPS as JSON, BIN as one base64 blob.
+// Reads the data blocks of an exported page (format 2 or 3): META and PROPS as JSON, BIN as one base64 blob.
 
-const VIEW_TYPES = { f32: Float32Array, u16: Uint16Array, u32: Uint32Array, i32: Int32Array };
+const VIEW_TYPES = { f32: Float32Array, u16: Uint16Array, i16: Int16Array, u32: Uint32Array, i32: Int32Array };
 const CHUNK_CHARS = 4 * 1024 * 1024; // multiple of 4, so every chunk decodes on its own
 
 function block(doc, id) {

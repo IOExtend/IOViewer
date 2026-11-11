@@ -65,6 +65,20 @@ test('decodes i32 and u32 views', () => {
   assert.deepEqual([...data.view({ o: 4, n: 1, t: 'u32' })], [4000000000]);
 });
 
+test('decodes i16 views (format 3 octahedral normals)', () => {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setInt16(0, -32767, true);
+  new DataView(bytes.buffer).setInt16(2, 12345, true);
+  const blocks = {
+    'ioviewer-meta': { textContent: '{"format":3}' },
+    'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64')),
+    'ioviewer-props': { textContent: '{}' },
+  };
+  const view = loadModelData({ getElementById: (id) => blocks[id] }).view({ o: 0, n: 2, t: 'i16' });
+  assert.ok(view instanceof Int16Array);
+  assert.deepEqual([...view], [-32767, 12345]);
+});
+
 test('decodes BIN larger than one 4 MB chunk', () => {
   // 3 MiB + 8 bytes: base64 text is just over 4 MiB and ends with '=' padding.
   const bytes = new Uint8Array(3 * 1024 * 1024 + 8);
