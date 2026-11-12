@@ -237,7 +237,7 @@ test('tree: categories collapsed with counts; a row click selects and zooms; sel
   await rail(page, 'model').click();
   const columns = rows(page).filter({ hasText: 'Structural Columns' });
   await expect(columns.locator('.tree-count')).toHaveText('26');
-  await expect(rows(page)).toHaveCount(6); // only category headers
+  await expect(rows(page)).toHaveCount(7); // only category headers, the survey marker's empty category included
 
   await columns.click();
   const d2 = await indexOf(page, 'Column D2 Level 1');
@@ -268,6 +268,8 @@ test('tree: search by Id, type and name flattens the matches', async ({ page }) 
   const search = sidePanel(page, 'model').locator('input');
   await expect(search).toHaveAttribute('placeholder', 'Поиск по имени, типу, Id…');
   await search.fill('300063');
+  await expect(rows(page)).toHaveText(['Supply Duct SA-1Rectangular 600x400']);
+  await search.fill('2XQ$N5SLP');
   await expect(rows(page)).toHaveText(['Supply Duct SA-1Rectangular 600x400']);
   await search.fill('steel i');
   await expect(rows(page)).toHaveCount(34);
@@ -339,7 +341,7 @@ test('status bar counts the selection; the truncation banner shows and closes', 
   const d2 = await indexOf(page, 'Column D2 Level 1');
   await expect(page.locator('.ioviewer-banner')).toHaveCount(0);
   await page.mouse.click(...(await screenAt(page, d2)));
-  await expect(page.locator('#ioviewer-status')).toHaveText('Выбрано: 1 · Элементов: 65');
+  await expect(page.locator('#ioviewer-status')).toHaveText('Выбрано: 1 · Элементов: 66');
 
   const html = readFileSync(path.join(viewerDir, 'test-results', 'building.html'), 'utf8');
   const truncated = html.replace('"truncated":null', '"truncated":{"meshes":40,"totalMeshes":67}');
@@ -402,6 +404,7 @@ test('hostile names and properties are shown as text and never run (Review Focus
   const errors = await open(page, 'escaping');
   const name = '<img src=x onerror="window.__xss=1">';
   const script = '</script><script>window.__xss=2</script>';
+  const sourceId = '"><svg onload="window.__xss=3">';
   await rail(page, 'model').click();
   await rows(page).filter({ hasText: 'Walls' }).click();
   const row = rows(page).filter({ hasText: name });
@@ -413,6 +416,7 @@ test('hostile names and properties are shown as text and never run (Review Focus
   await expect(panel.locator('h3').nth(1)).toHaveText(script);
   await expect(panel.locator('th', { hasText: 'window.__xss=2' })).toHaveText(script);
   await expect(panel.locator('td', { hasText: 'window.__xss=2' })).toHaveText(script);
+  await expect(panel.locator('tr', { hasText: 'ID источника' }).locator('td')).toHaveText(sourceId);
   expect(await page.evaluate(() => window.__xss)).toBeUndefined();
   expect(await page.locator('#ioviewer-ui img').count()).toBe(0);
   expect(errors).toEqual([]);
@@ -424,9 +428,19 @@ test.describe('in English', () => {
   test('labels, menu and status are English', async ({ page }) => {
     await open(page);
     await expect(page.locator('.ioviewer-toolbar-label')).toHaveText(['Navigation', 'Sections', 'Measure', 'Display', 'View']);
-    await expect(page.locator('#ioviewer-status')).toHaveText('Selected: 0 · Elements: 65');
+    await expect(page.locator('#ioviewer-status')).toHaveText('Selected: 0 · Elements: 66');
     await expect(rail(page, 'links')).toHaveAttribute('title', 'Linked files');
     await page.mouse.click(...blank, { button: 'right' });
     await expect(menu(page).locator('.ioviewer-menu-item span')).toHaveText(['Show all', 'Fit all', 'Reset sections']);
+  });
+
+  test('properties show the source id as its own row, only for elements that have one', async ({ page }) => {
+    await open(page);
+    const panel = page.locator('#ioviewer-properties');
+    await page.evaluate((i) => window.__ioviewer.selection.set([i]), await indexOf(page, 'Supply Duct SA-1'));
+    await expect(panel.locator('table').first().locator('th')).toHaveText(['Id', 'Category', 'Type', 'Level', 'Source ID', 'Link']);
+    await expect(panel.locator('tr', { hasText: 'Source ID' }).locator('td')).toHaveText('2xQ$n5SLP5MBLyL442paFx');
+    await page.evaluate((i) => window.__ioviewer.selection.set([i]), await indexOf(page, 'Column D2 Level 1'));
+    await expect(panel.locator('table').first().locator('th')).toHaveText(['Id', 'Category', 'Type', 'Level', 'Link']);
   });
 });

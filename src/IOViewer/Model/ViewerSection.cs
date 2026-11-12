@@ -1,3 +1,5 @@
+using IOScene;
+
 namespace IOViewer.Model;
 
 public enum ViewerSectionAxis

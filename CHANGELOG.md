@@ -6,6 +6,93 @@ API between minor releases.
 
 ## [Unreleased]
 
+Version 0.3.0 builds the viewer on the scene model of the [IOScene](https://github.com/IOExtend/IOScene) package
+(`IOScene` `[0.1.0-preview.2, 0.2.0-0)`, a new dependency of the `IOViewer` package). This is a breaking change of the
+library API. What breaks for existing users:
+
+1. The model types move to namespace `IOScene` with `Scene*` names, `ViewerClash*` included; `doc.Elements` becomes
+   `doc.Scene.Elements`, and the members in the table below change.
+2. The documented quick start (a `ViewerMesh` with its own vertices) becomes `SceneDocument.AddMesh`.
+3. Written JSON has a new shape. IOViewer 0.2.0 reads a 0.3.0 file as an empty document with exit code 0, because it
+   ignores unknown members.
+4. A page regenerated from an old snapshot shows each mesh without an element as an element (in the element count, the
+   tree and hide).
+
+Not broken: loading 0.1/0.2 JSON, existing HTML pages, the `ioviewer` arguments, the importer to exporter pipeline
+(`GlbViewerImporter` to `HtmlViewerExporter`, `ViewerDocument.Title`) and the one-package install (`IOScene` comes with
+the `IOViewer` package). The `IOViewer.Cli` tool only gains inputs.
+
+### Migration from 0.2.0
+
+| 0.2.0 (`IOViewer.Model`) | 0.3.0 |
+|---|---|
+| `Vector2d`, `Vector3d`, `BoundingBox3d`, `Transform3d`, `RgbaColor` | the same names in namespace `IOScene` |
+| `Vector4d`, `Quaterniond` | removed, no replacement |
+| `ViewerDocument.Elements`, `Meshes`, `Geometries`, `Materials`, `Textures`, `Viewpoints`, `ClashTests` | `ViewerDocument.Scene.Elements`, `Instances`, `Geometries`, `Materials`, `Textures`, `Viewpoints`, `ClashTests` |
+| `ViewerDocument.SourcePath`, `Author`, `CreatedAt`, `Application` | `Scene.Models[0].Path`, `Author`, `CreatedAt`, `Application` |
+| `ViewerDocument.Grids` (one grid system) | `Scene.Grids` (a list of `SceneGridSystem`, each with `ModelId`) |
+| `ViewerDocument.TimeLiner` | `Scene.Schedules` (a list of `SceneSchedule`) |
+| `ViewerDocument.LinkedFiles` (`ViewerLinkedFile` `Name`, `Path`, `Visible`) | `Scene.Models` (`SceneModel` with a unique `Key`, `Name`, `Path`); `Visible = false` is the model's key in `ViewerDocument.HiddenModelKeys` |
+| `ViewerDocument.BoundingBox`, `ComputeBoundingBox()` | `Scene.ComputeBounds()` |
+| `ViewerDocument.Title` (default `3D BIM Model`) | kept; it reads and writes `Scene.Title` (default empty) |
+| `ViewerDocument.SectionPlanes`, `SectionBox`, `ViewerSectionPlane`, `ViewerSectionBox` | kept; their `Vector3d` is `IOScene.Vector3d` |
+| - | `ViewerDocument.Scene`, `ViewerDocument.HiddenModelKeys`, `new ViewerDocument(SceneDocument)` |
+| `ViewerElement` | `SceneElement` |
+| `ViewerElement.LinkName` | `SceneElement.ModelId`, the id of a `SceneModel` |
+| `ViewerElement.Level` (a string) | `SceneElement.LevelId`, the id of a `SceneLevel` in `Scene.Levels` |
+| `ViewerElement.Properties`, `AddProperty(group, name, value)` | `ScenePropertySet` in `Scene.PropertySets` (`Name` = group), referenced by `SceneElement.PropertySetIds`; each `SceneProperty` has a `SceneValue` (`SceneValue.FromText` for a string) |
+| `ViewerElement.MeshIndices`, `ViewerElement.BoundingBox` | removed; `SceneInstance.ElementId` links an element to its geometry |
+| `ViewerMesh` | `SceneInstance`, which places a `SceneGeometry` for an element |
+| `ViewerMesh.Vertices`, `Indices`, `Normals`, `UVs` (own geometry) | a `SceneGeometry` placed by one instance; `SceneDocument.AddMesh` adds both and the element |
+| `ViewerMesh.ElementId` (optional) | `SceneInstance.ElementId` (required: every instance belongs to an element) |
+| `ViewerMesh.GeometryId`, `Transform`, `MaterialId`, `Name` | `SceneInstance.GeometryId`, `Transform`, `MaterialId`, `Name` |
+| `ViewerMesh.Color`, `ViewerMesh.Opacity`, `ViewerMaterial.Opacity` | the alpha of `SceneInstance.Color` or `SceneMaterial.Color`, the only opacity |
+| `ViewerMesh.TextureIndex`, `ViewerMaterial.TextureIndex` | `SceneMaterial.TextureId`, the id of a `SceneTexture` |
+| `ViewerMesh.Id`, `BoundingBox`, `ComputeBoundingBox()` | removed |
+| `ViewerGeometry` | `SceneGeometry`, with `Topology` (`Triangles`, `Lines`, `Points`); empty `Indices` means non-indexed |
+| `ViewerMaterial` | `SceneMaterial` |
+| `ViewerTexture` (`Base64Data` string) | `SceneTexture` (`Data` bytes) |
+| `ViewerGridSystem`, `ViewerGridLine` | `SceneGridSystem`, `SceneGridLine` |
+| `ViewerViewpoint`, `ViewerCamera`, `ViewerProjection` | `SceneViewpoint`, `SceneCamera`, `SceneProjection` |
+| `ViewerTimeLinerSchedule` | `SceneSchedule`; `GetOverallStart()` and `GetOverallEnd()` are removed |
+| `ViewerTimeLinerTask`, `ViewerTimeLinerTaskType` | `SceneTask`, `SceneTaskType` |
+| `ViewerTimeLinerTask.AttachedElementIds` | `SceneTask.ElementIds` |
+| `ViewerTimeLinerTask.AttachedSetName` | removed |
+| `ViewerClashTest`, `ViewerClashResult`, `ViewerClashStatus` | `SceneClashTest`, `SceneClashResult`, `SceneClashStatus` |
+| `ViewerClashResult.Distance` (`double`) | `SceneClashResult.Distance` (`double?`, null when the source does not report it) |
+| constructors with parameters (`new ViewerViewpoint(name, camera)` and others) | object initializers |
+
+### Added
+- `HtmlViewerExporter.Save`, `Export` and `ExportToString` take a `SceneDocument` too.
+- `JsonViewerImporter` and the `ioviewer` tool read three kinds of JSON: viewer JSON (`"Kind": "ioviewer"`), IOScene
+  scene files (`"Kind": "ioscene"`) and IOViewer 0.1/0.2 snapshots (no `Kind`). In a snapshot, meshes that share an
+  `ElementId` no element has get one element with that id, and each other mesh without an element gets one of its own.
+  A newer format, a missing or wrong `Format` and an unknown kind are rejected with `InvalidDataException`.
+- The HTML viewer shows `SceneElement.SourceId`, the element's id in its source format (such as a Revit UniqueId or an
+  IFC GlobalId), as its own row in the properties panel ("Source ID" / "ID источника"), and the model tree search finds
+  it. It is written to the page's element list only when set.
+
+### Changed
+- `JsonViewerExporter` writes viewer JSON format 2: `{ "Kind": "ioviewer", "Format": 2, "Scene", "SectionPlanes",
+  "SectionBox", "HiddenModelKeys" }`, with the scene in the encoding of IOScene's `SceneJson`.
+- `GlbViewerImporter` and `ObjViewerImporter` return documents whose scene has one model and passes
+  `SceneDocument.Validate()`.
+- The viewer draws triangles only: instances of line or point geometry are skipped, and the `ioviewer` tool prints a
+  warning with their number.
+- Opacity is a colour alpha byte, so an opacity that is not a multiple of 1/255 is rounded (0.35 becomes 89/255).
+- In an IOViewer 0.1/0.2 snapshot, an element `LinkName` that matches no linked file becomes a model of the scene, so
+  a page made from the snapshot lists it in the linked files panel, where its elements can be hidden.
+- The documentation states the model's units and axes: all coordinates and lengths are in metres, with Z up.
+- A clash distance is nullable. The page writes `null` for a distance the source does not report and the clash list
+  shows no distance for it, where it showed 0. A 0.1/0.2 snapshot keeps the distance it has (0 when it has none).
+- `GlbViewerImporter` converts a material's base colour factor from glTF's linear values to sRGB. Imported GLB colours
+  look lighter than in 0.2.0, which is now correct. The alpha stays linear; every channel is now rounded to the nearest
+  byte, where it was truncated.
+- A 4D task of a type this version does not know is shown as a construct task; it was left out of the schedule.
+- The properties panel shows the property sets of an element that have the same name as one group, and a property name
+  that repeats in a group gets a numbered suffix (`Height (2)`), so no property is lost. Elements that share an id,
+  which `SceneDocument.Validate()` rejects, show the properties of all of them.
+
 ## [0.2.0] - 2026-11-12
 
 ### Fixed

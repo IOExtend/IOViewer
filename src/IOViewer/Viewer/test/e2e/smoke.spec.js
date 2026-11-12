@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fixturesDir, viewerDir } from './global-setup.js';
 
-const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
+const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8')).Scene;
 
 async function open(page, name) {
   const errors = [];
@@ -289,7 +289,7 @@ test.describe('a model over the slot limit', () => {
 
   test('opens without geometry and says it is too large; the element tree still counts', async ({ page }) => {
     const { errors } = await open(page, 'building');
-    const drawable = building.Meshes.filter((m) => m.Vertices.length > 0 || m.GeometryId != null).length;
+    const drawable = building.Instances.length; // every geometry of the building is triangles
     await expect(page.locator('#ioviewer-message')).toHaveText(`Модель слишком большая для этого просмотрщика: объектов с геометрией — ${drawable}, предел — 10`);
     await expect(page.locator('#ioviewer-status')).toHaveText(`Выбрано: 0 · Элементов: ${building.Elements.length}`);
     expect(await page.evaluate(() => window.__ioviewer.scene.memory().mergedInstances)).toBe(0);

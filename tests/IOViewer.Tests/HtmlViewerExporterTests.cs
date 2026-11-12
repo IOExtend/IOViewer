@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using IOScene;
 using IOViewer.Exporters;
 using IOViewer.Model;
 using Xunit;
@@ -14,17 +17,29 @@ public class HtmlViewerExporterTests
     // A georeferenced slab with one element, viewpoint, grids, 4D schedule and a clash.
     private static ViewerDocument GeoreferencedModel()
     {
-        var doc = new ViewerDocument("Commercial Center 3D")
-        {
-            Author = "IOExtend",
-            CreatedAt = "2026-11-11T12:00:00Z"
-        };
-
-        doc.Meshes.Add(new ViewerMesh
+        var scene = new SceneDocument { Title = "Commercial Center 3D" };
+        scene.Models.Add(new SceneModel { Id = 1, Key = "center", Name = "Commercial Center 3D", Author = "IOExtend", CreatedAt = "2026-11-11T12:00:00Z" });
+        scene.Models.Add(new SceneModel { Id = 2, Key = "structure.rvt", Name = "Structure", Path = "structure.rvt" });
+        scene.Levels.Add(new SceneLevel { Id = 1, ModelId = 1, Name = "Level 1" });
+        scene.PropertySets.Add(new ScenePropertySet
         {
             Id = 1,
-            Name = "Structural Slab",
-            ElementId = 101,
+            Name = "Dimensions",
+            Properties = [new SceneProperty { Name = "Thickness", Value = SceneValue.FromNumber(0.3, "m", "300 mm") }],
+        });
+        scene.Elements.Add(new SceneElement
+        {
+            Id = 101,
+            ModelId = 1,
+            Name = "Ground Floor Slab",
+            Category = "Floors",
+            TypeName = "Generic 300mm",
+            LevelId = 1,
+            PropertySetIds = [1],
+        });
+        scene.Geometries.Add(new SceneGeometry
+        {
+            Id = 1,
             Vertices = [
                 new(OffsetX + 0, OffsetY + 0, 0),
                 new(OffsetX + 10, OffsetY + 0, 0),
@@ -32,47 +47,56 @@ public class HtmlViewerExporterTests
                 new(OffsetX + 0, OffsetY + 15, 0)
             ],
             Indices = [0, 1, 2, 0, 2, 3],
-            Color = new RgbaColor(180, 180, 190)
+        });
+        scene.Instances.Add(new SceneInstance { ElementId = 101, GeometryId = 1, Color = new RgbaColor(180, 180, 190), Name = "Structural Slab" });
+
+        scene.Viewpoints.Add(new SceneViewpoint
+        {
+            Name = "Isometric Overview",
+            Camera = new SceneCamera { Position = new Vector3d(OffsetX + 25, OffsetY - 25, 30), Target = new Vector3d(OffsetX + 5, OffsetY + 7.5, 0) },
         });
 
-        var el = new ViewerElement
+        scene.Grids.Add(new SceneGridSystem
         {
-            Id = 101,
-            Name = "Ground Floor Slab",
-            Category = "Floors",
-            TypeName = "Generic 300mm",
-            Level = "Level 1"
-        };
-        el.AddProperty("Dimensions", "Thickness", "300 mm");
-        el.MeshIndices.Add(0);
-        doc.Elements.Add(el);
+            ModelId = 1,
+            Name = "Structural Grids",
+            Lines = [new SceneGridLine { Name = "Axis 1", Start = new(OffsetX, OffsetY, 0), End = new(OffsetX + 10, OffsetY, 0) }],
+        });
 
-        doc.Viewpoints.Add(new ViewerViewpoint("Isometric Overview", new ViewerCamera
+        scene.Schedules.Add(new SceneSchedule
         {
-            Position = new Vector3d(OffsetX + 25, OffsetY - 25, 30),
-            Target = new Vector3d(OffsetX + 5, OffsetY + 7.5, 0)
-        }));
+            Name = "4D Construction",
+            Tasks =
+            [
+                new SceneTask
+                {
+                    Id = "T1",
+                    Name = "Pour Slab",
+                    PlannedStart = DateTimeOffset.Parse("2026-06-01T08:00:00Z", CultureInfo.InvariantCulture),
+                    PlannedEnd = DateTimeOffset.Parse("2026-06-10T17:00:00Z", CultureInfo.InvariantCulture),
+                    TaskType = SceneTaskType.Construct,
+                    ElementIds = [101],
+                },
+            ],
+        });
 
-        var grids = new ViewerGridSystem { Name = "Structural Grids" };
-        grids.Lines.Add(new ViewerGridLine("Axis 1", new(OffsetX, OffsetY, 0), new(OffsetX + 10, OffsetY, 0)));
-        doc.Grids = grids;
-
-        var schedule = new ViewerTimeLinerSchedule("4D Construction");
-        var task = new ViewerTimeLinerTask("T1", "Pour Slab",
-            DateTimeOffset.Parse("2026-06-01T08:00:00Z", CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse("2026-06-10T17:00:00Z", CultureInfo.InvariantCulture),
-            ViewerTimeLinerTaskType.Construct);
-        task.AttachedElementIds.Add(101);
-        schedule.Tasks.Add(task);
-        doc.TimeLiner = schedule;
-
-        var clashTest = new ViewerClashTest("Hard Clashes");
-        clashTest.Clashes.Add(new ViewerClashResult("C1", "Slab vs Column", "Ground Floor Slab", "Column C1",
-            new Vector3d(OffsetX + 5, OffsetY + 5, 0), -0.02));
-        doc.ClashTests.Add(clashTest);
-
-        doc.LinkedFiles.Add(new ViewerLinkedFile("Structure", "structure.rvt"));
-        return doc;
+        scene.ClashTests.Add(new SceneClashTest
+        {
+            Name = "Hard Clashes",
+            Clashes =
+            [
+                new SceneClashResult
+                {
+                    Id = "C1",
+                    Name = "Slab vs Column",
+                    Element1Name = "Ground Floor Slab",
+                    Element2Name = "Column C1",
+                    Point = new Vector3d(OffsetX + 5, OffsetY + 5, 0),
+                    Distance = -0.02,
+                },
+            ],
+        });
+        return new ViewerDocument(scene);
     }
 
     private static readonly Vector3d[] CubeVertices =
@@ -87,12 +111,8 @@ public class HtmlViewerExporterTests
         1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7
     ];
 
-    private static ViewerMesh Cube(int id, Vector3d at) => new()
-    {
-        Id = id,
-        Vertices = CubeVertices.Select(v => v + at).ToArray(),
-        Indices = CubeIndices
-    };
+    private static SceneInstance Cube(SceneDocument scene, Vector3d at) =>
+        scene.Mesh(CubeVertices.Select(v => v + at).ToArray(), CubeIndices);
 
     private static double[] Vec(System.Text.Json.JsonElement array) =>
         array.EnumerateArray().Select(e => e.GetDouble()).ToArray();
@@ -129,6 +149,7 @@ public class HtmlViewerExporterTests
         Assert.Equal(101, element.GetProperty("id").GetInt64());
         Assert.Equal("Ground Floor Slab", element.GetProperty("name").GetString());
         Assert.Equal("Generic 300mm", element.GetProperty("type").GetString());
+        Assert.Equal("Level 1", element.GetProperty("level").GetString());
         Assert.Equal(System.Text.Json.JsonValueKind.Null, element.GetProperty("link").ValueKind);
         Assert.Equal([0], view.Instances("element"));
         Assert.Equal("300 mm", view.Props.GetProperty("101").GetProperty("Dimensions").GetProperty("Thickness").GetString());
@@ -140,7 +161,30 @@ public class HtmlViewerExporterTests
         var clash = meta.GetProperty("clashTests")[0].GetProperty("clashes")[0];
         Assert.Equal("Slab vs Column", clash.GetProperty("name").GetString());
         Assert.Equal([0, -2.5, 0], Vec(clash.GetProperty("point")));
-        Assert.Equal("structure.rvt", meta.GetProperty("linkedFiles")[0].GetProperty("path").GetString());
+        var linked = meta.GetProperty("linkedFiles")[0];
+        Assert.Equal(("Structure", "structure.rvt", true), (linked.GetProperty("name").GetString(), linked.GetProperty("path").GetString(), linked.GetProperty("visible").GetBoolean()));
+        Assert.False(meta.TryGetProperty("skipped", out _));
+    }
+
+    [Fact]
+    public void Meta_WritesSourceIdOnlyWhenSet()
+    {
+        const string hostile = "\"></script><script>window.__xss=1</script>";
+        var scene = TestScenes.Empty("Source ids");
+        scene.Elements.Add(new SceneElement { Id = 1, ModelId = 1, Name = "Wall", SourceId = "2xQ$n5SLP5MBLyL442paFx" });
+        scene.Elements.Add(new SceneElement { Id = 2, ModelId = 1, Name = "Door" });
+        scene.Elements.Add(new SceneElement { Id = 3, ModelId = 1, Name = "Empty", SourceId = "" });
+        scene.Elements.Add(new SceneElement { Id = 4, ModelId = 1, Name = "Hostile", SourceId = hostile });
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+        var elements = view.Meta.GetProperty("elements");
+
+        Assert.Equal("2xQ$n5SLP5MBLyL442paFx", elements[0].GetProperty("sourceId").GetString());
+        Assert.False(elements[1].TryGetProperty("sourceId", out _));
+        Assert.False(elements[2].TryGetProperty("sourceId", out _));
+        Assert.Equal(hostile, elements[3].GetProperty("sourceId").GetString());
+        // The value is escaped inside the META block: the markup never reaches the page as is.
+        Assert.DoesNotContain(hostile, view.Html);
     }
 
     [Fact]
@@ -152,6 +196,14 @@ public class HtmlViewerExporterTests
         {
             HtmlViewerExporter.Save(doc, tempPath);
             Assert.Equal(HtmlViewerExporter.ExportToString(doc), File.ReadAllText(tempPath));
+
+            // A scene alone is the document with no sections and every model shown.
+            HtmlViewerExporter.Save(doc.Scene, tempPath);
+            Assert.Equal(HtmlViewerExporter.ExportToString(doc), File.ReadAllText(tempPath));
+            Assert.Equal(HtmlViewerExporter.ExportToString(doc), HtmlViewerExporter.ExportToString(doc.Scene));
+            using var stream = new MemoryStream();
+            HtmlViewerExporter.Export(doc.Scene, stream);
+            Assert.Equal(HtmlViewerExporter.ExportToString(doc), System.Text.Encoding.UTF8.GetString(stream.ToArray()));
         }
         finally
         {
@@ -162,13 +214,13 @@ public class HtmlViewerExporterTests
     [Fact]
     public void TranslatedDuplicates_ShareOneGeometry()
     {
-        var doc = new ViewerDocument();
+        var scene = TestScenes.Empty();
         for (int i = 0; i < 100; i++)
         {
-            doc.Meshes.Add(Cube(i, new Vector3d(i * 3, i * 7 % 11, 0)));
+            Cube(scene, new Vector3d(i * 3, i * 7 % 11, 0));
         }
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
         Assert.Equal(1, view.Geometries.GetArrayLength());
         Assert.Equal(100, view.InstanceCount);
@@ -178,13 +230,11 @@ public class HtmlViewerExporterTests
     [Fact]
     public void DifferentShapes_AreNotMerged()
     {
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(Cube(0, Vector3d.Zero));
-        var stretched = Cube(1, Vector3d.Zero);
-        stretched.Vertices = stretched.Vertices.Select(v => new Vector3d(v.X * 2, v.Y, v.Z)).ToArray();
-        doc.Meshes.Add(stretched);
+        var scene = TestScenes.Empty();
+        Cube(scene, Vector3d.Zero);
+        scene.Mesh(CubeVertices.Select(v => new Vector3d(v.X * 2, v.Y, v.Z)).ToArray(), CubeIndices);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
         Assert.Equal(2, view.Geometries.GetArrayLength());
         Assert.Equal([0, 1], view.Instances("geometry"));
@@ -193,12 +243,12 @@ public class HtmlViewerExporterTests
     [Fact]
     public void SharedGeometry_WritesTransformMatrixInRtc()
     {
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry { Id = 7, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 7, Transform = Transform3d.Translate(new(1_000_000, 2_000_000, 0)) });
-        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 7, Transform = Transform3d.Translate(new(1_000_010, 2_000_000, 0)) });
+        var scene = TestScenes.Empty();
+        var triangle = scene.Geometry([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.Place(triangle, Transform3d.Translate(new(1_000_000, 2_000_000, 0)));
+        scene.Place(triangle, Transform3d.Translate(new(1_000_010, 2_000_000, 0)));
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
         Assert.Equal(1, view.Geometries.GetArrayLength());
         Assert.Equal(2, view.InstanceCount);
@@ -216,17 +266,11 @@ public class HtmlViewerExporterTests
     {
         // Rotation by 90 degrees around Z: X -> Y.
         var rotate = new Transform3d(Vector3d.UnitY, -Vector3d.UnitX, Vector3d.UnitZ, new Vector3d(5, 0, 0));
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh
-        {
-            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 0, 1)],
-            Indices = [0, 1, 2],
-            Normals = [new(0, -1, 0), new(0, -1, 0), new(0, -1, 0)],
-            UVs = [new(0, 0), new(1, 0), new(0, 1)],
-            Transform = rotate
-        });
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 0, 1)], [0, 1, 2], rotate,
+            normals: [new(0, -1, 0), new(0, -1, 0), new(0, -1, 0)], uvs: [new(0, 0), new(1, 0), new(0, 1)]);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var geometry = view.Geometries[0];
 
         Assert.Equal([0, 0, 0, 0, 1, 0, 0, 0, 1], view.Positions(geometry));
@@ -237,12 +281,10 @@ public class HtmlViewerExporterTests
     [Fact]
     public void MissingNormals_AreNull()
     {
-        var doc = new ViewerDocument();
-        var cube = Cube(0, Vector3d.Zero);
-        cube.Normals = [Vector3d.UnitZ];
-        doc.Meshes.Add(cube);
+        var scene = TestScenes.Empty();
+        scene.Mesh(CubeVertices, CubeIndices, normals: [Vector3d.UnitZ]);
 
-        var geometry = ViewerHtml.Export(doc).Geometries[0];
+        var geometry = ViewerHtml.Export(new ViewerDocument(scene)).Geometries[0];
 
         Assert.Equal(System.Text.Json.JsonValueKind.Null, geometry.GetProperty("normals").ValueKind);
         Assert.Equal(System.Text.Json.JsonValueKind.Null, geometry.GetProperty("uvs").ValueKind);
@@ -252,13 +294,13 @@ public class HtmlViewerExporterTests
     public void ScriptInNames_IsEscaped()
     {
         const string evil = "</script><script>alert(1)</script>";
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { ElementId = 1, Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] });
-        var el = new ViewerElement { Id = 1, Name = evil };
-        el.AddProperty(evil, evil, evil);
-        doc.Elements.Add(el);
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.Elements[0].Name = evil;
+        scene.PropertySets.Add(new ScenePropertySet { Id = 1, Name = evil, Properties = [new SceneProperty { Name = evil, Value = SceneValue.FromText(evil) }] });
+        scene.Elements[0].PropertySetIds.Add(1);
 
-        var view = ViewerHtml.Export(doc, new HtmlViewerOptions { Title = evil });
+        var view = ViewerHtml.Export(new ViewerDocument(scene), new HtmlViewerOptions { Title = evil });
 
         Assert.DoesNotContain("</script><script>alert", view.Html, StringComparison.Ordinal);
         Assert.Equal(evil, view.Meta.GetProperty("elements")[0].GetProperty("name").GetString());
@@ -271,10 +313,10 @@ public class HtmlViewerExporterTests
     {
         var vertices = new Vector3d[70_000];
         for (int i = 0; i < vertices.Length; i++) vertices[i] = new Vector3d(i, i % 2, 0);
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Vertices = vertices, Indices = [0, 1, 69_999] });
+        var scene = TestScenes.Empty();
+        scene.Mesh(vertices, [0, 1, 69_999]);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var indices = view.Geometries[0].GetProperty("indices");
 
         Assert.Equal("u32", indices.GetProperty("t").GetString());
@@ -284,10 +326,10 @@ public class HtmlViewerExporterTests
     [Fact]
     public void MaxMeshVertices_Exceeded_SetsTruncated()
     {
-        var doc = new ViewerDocument();
-        for (int i = 0; i < 10; i++) doc.Meshes.Add(Cube(i, new Vector3d(i * 2, 0, 0)));
+        var scene = TestScenes.Empty();
+        for (int i = 0; i < 10; i++) Cube(scene, new Vector3d(i * 2, 0, 0));
 
-        var view = ViewerHtml.Export(doc, new HtmlViewerOptions { MaxMeshVertices = 20 });
+        var view = ViewerHtml.Export(new ViewerDocument(scene), new HtmlViewerOptions { MaxMeshVertices = 20 });
         var truncated = view.Meta.GetProperty("truncated");
 
         Assert.Equal(10, truncated.GetProperty("totalMeshes").GetInt32());
@@ -304,37 +346,39 @@ public class HtmlViewerExporterTests
     [Fact]
     public void MissingGeometryId_Throws()
     {
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Id = 3, GeometryId = 42 });
+        var scene = TestScenes.Empty();
+        scene.Elements.Add(new SceneElement { Id = 3, ModelId = 1 });
+        scene.Instances.Add(new SceneInstance { ElementId = 3, GeometryId = 42 });
 
-        var ex = Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(doc));
+        var ex = Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(scene));
         Assert.Contains("42", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void GeometryIdWithOwnVertices_Throws()
+    public void DuplicateGeometryId_Throws()
     {
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = [new(0, 0, 0)], Indices = [] });
-        doc.Meshes.Add(new ViewerMesh { GeometryId = 1, Vertices = [new(0, 0, 0)] });
+        var scene = TestScenes.Empty();
+        scene.Geometries.Add(new SceneGeometry { Id = 1 });
+        scene.Geometries.Add(new SceneGeometry { Id = 1 });
 
-        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(doc));
+        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(scene));
     }
 
     [Fact]
     public void IndexOutOfRange_Throws()
     {
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 3] });
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 3]);
 
-        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(doc));
+        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(scene));
     }
 
     [Fact]
     public void Save_InvalidData_LeavesExistingFileUntouched()
     {
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], Indices = [0, 1, 3] });
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 3]);
+        var doc = new ViewerDocument(scene);
         string tempPath = Path.Combine(Path.GetTempPath(), $"ioviewer_test_{Guid.NewGuid():N}.html");
         byte[] previous = [0x3C, 0x68, 0x74, 0x6D, 0x6C, 0x3E, 0x00, 0xFF];
         try
@@ -352,11 +396,12 @@ public class HtmlViewerExporterTests
     [Fact]
     public void SharedGeometryIndexOutOfRange_Throws()
     {
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = [new(0, 0, 0)], Indices = [0, -1, 0] });
-        doc.Meshes.Add(new ViewerMesh { GeometryId = 1 });
+        var scene = TestScenes.Empty();
+        var geometry = scene.Geometry([new(0, 0, 0)], [0, -1, 0]);
+        scene.Place(geometry);
+        scene.Place(geometry);
 
-        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(doc));
+        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(scene));
     }
 
     [Fact]
@@ -372,95 +417,285 @@ public class HtmlViewerExporterTests
         Assert.True(with.Props.TryGetProperty("101", out _));
     }
 
+    // JsonDocument keeps duplicate members, but JSON.parse in the page keeps only the last one.
+    private static void AssertNoDuplicateMembers(JsonElement json)
+    {
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(json.GetRawText()));
+        var objects = new Stack<HashSet<string>>();
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.StartObject) objects.Push([]);
+            else if (reader.TokenType == JsonTokenType.EndObject) objects.Pop();
+            else if (reader.TokenType == JsonTokenType.PropertyName)
+            {
+                string name = reader.GetString()!;
+                Assert.True(objects.Peek().Add(name), $"Member '{name}' is written twice in one object.");
+            }
+        }
+    }
+
+    private static (string Name, string? Value)[] Members(JsonElement group) =>
+        [.. group.EnumerateObject().Select(p => (p.Name, p.Value.GetString()))];
+
+    private static ScenePropertySet Set(int id, string name, params (string Name, string Value)[] properties) =>
+        new() { Id = id, Name = name, Properties = [.. properties.Select(p => new SceneProperty { Name = p.Name, Value = SceneValue.FromText(p.Value) })] };
+
+    [Fact]
+    public void Props_SetsWithTheSameName_AreOneGroup()
+    {
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "3000 mm")));
+        scene.PropertySets.Add(Set(2, "Identity Data", ("Mark", "D1")));
+        scene.PropertySets.Add(Set(3, "Dimensions", ("Width", "900 mm")));
+        scene.Elements[0].PropertySetIds.AddRange([1, 2, 3, 1]);
+        Assert.Empty(scene.Validate());
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        var element = view.Props.GetProperty("1");
+        Assert.Equal(["Dimensions", "Identity Data"], element.EnumerateObject().Select(p => p.Name));
+        Assert.Equal([("Height", "3000 mm"), ("Width", "900 mm")], Members(element.GetProperty("Dimensions")));
+        Assert.Equal([("Mark", "D1")], Members(element.GetProperty("Identity Data")));
+    }
+
+    [Fact]
+    public void Props_RepeatedPropertyName_GetsNumberedSuffix()
+    {
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "a"), ("Height (2)", "b")));
+        scene.PropertySets.Add(Set(2, "Dimensions", ("Height", "c"), ("Height", "d")));
+        scene.Elements[0].PropertySetIds.AddRange([1, 2]);
+        Assert.Empty(scene.Validate());
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        Assert.Equal(
+            [("Height", "a"), ("Height (2)", "b"), ("Height (3)", "c"), ("Height (4)", "d")],
+            Members(view.Props.GetProperty("1").GetProperty("Dimensions")));
+    }
+
+    [Fact]
+    public void Props_NameTakenAfterItsSuffixWasGiven_IsSkipped()
+    {
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "a"), ("Height", "b"), ("Height (3)", "c"), ("Height", "d"), ("Height", "e")));
+        scene.Elements[0].PropertySetIds.Add(1);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        Assert.Equal(
+            [("Height", "a"), ("Height (2)", "b"), ("Height (3)", "c"), ("Height (4)", "d"), ("Height (5)", "e")],
+            Members(view.Props.GetProperty("1").GetProperty("Dimensions")));
+    }
+
+    [Fact]
+    public void Props_ManyEqualNames_AreAllKept()
+    {
+        const int count = 20_000;
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", Enumerable.Range(0, count).Select(i => ("X", i.ToString(CultureInfo.InvariantCulture))).ToArray()));
+        scene.Elements[0].PropertySetIds.Add(1);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        var members = Members(view.Props.GetProperty("1").GetProperty("Dimensions"));
+        Assert.Equal(count, members.Length);
+        Assert.Equal(("X", "0"), members[0]);
+        Assert.Equal(($"X ({count})", (count - 1).ToString(CultureInfo.InvariantCulture)), members[^1]);
+    }
+
+    [Fact]
+    public void Props_NamesWrittenAlike_AreMerged()
+    {
+        // Each lone surrogate is written as U+FFFD, so these names differ in the scene but not in the page.
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Group \uD800", ("Name \uD800", "a")));
+        scene.PropertySets.Add(Set(2, "Group \uDC00", ("Name \uDC00", "b")));
+        scene.Elements[0].PropertySetIds.AddRange([1, 2]);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        Assert.Equal([("Name \uFFFD", "a"), ("Name \uFFFD (2)", "b")], Members(view.Props.GetProperty("1").GetProperty("Group \uFFFD")));
+    }
+
+    [Fact]
+    public void Props_ElementsThatShareAnId_AreOneEntry()
+    {
+        // A scene Validate rejects, but the page finds properties by element id.
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.Elements.Add(new SceneElement { Id = 1, ModelId = 1, Name = "Twin", PropertySetIds = [2] });
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "3000 mm")));
+        scene.PropertySets.Add(Set(2, "Identity Data", ("Mark", "D1")));
+        scene.Elements[0].PropertySetIds.Add(1);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        var element = view.Props.GetProperty("1");
+        Assert.Equal([("Height", "3000 mm")], Members(element.GetProperty("Dimensions")));
+        Assert.Equal([("Mark", "D1")], Members(element.GetProperty("Identity Data")));
+    }
+
     [Fact]
     public void Materials_AreDeduplicated()
     {
-        var doc = new ViewerDocument();
-        doc.Materials.Add(new ViewerMaterial { Id = 5, Color = new RgbaColor(10, 20, 30), Opacity = 0.5 });
+        var scene = TestScenes.Empty();
+        scene.Textures.Add(new SceneTexture { Id = 8, Data = [1, 2, 3] });
+        scene.Textures.Add(new SceneTexture { Id = 9, MimeType = "image/jpeg", Data = [4, 5], ScaleX = 2, ScaleY = 3 });
+        scene.Materials.Add(new SceneMaterial { Id = 5, Color = new RgbaColor(10, 20, 30, 102) });
+        scene.Materials.Add(new SceneMaterial { Id = 6, Color = new RgbaColor(10, 20, 30), TextureId = 9 });
         var red = new RgbaColor(255, 0, 0);
-        doc.Meshes.Add(Cube(0, Vector3d.Zero));
-        var m1 = Cube(1, Vector3d.Zero); m1.Color = red; doc.Meshes.Add(m1);
-        var m2 = Cube(2, Vector3d.Zero); m2.Color = red; doc.Meshes.Add(m2);
-        var m3 = Cube(3, Vector3d.Zero); m3.MaterialId = 5; doc.Meshes.Add(m3);
-        var m4 = Cube(4, Vector3d.Zero); m4.Color = new RgbaColor(255, 0, 0, 51); m4.Opacity = 0.5; doc.Meshes.Add(m4);
+        Cube(scene, Vector3d.Zero);
+        Cube(scene, Vector3d.Zero).Color = red;
+        Cube(scene, Vector3d.Zero).Color = red;
+        Cube(scene, Vector3d.Zero).MaterialId = 5;
+        Cube(scene, Vector3d.Zero).Color = new RgbaColor(255, 0, 0, 51);
+        var textured = Cube(scene, Vector3d.Zero);
+        textured.MaterialId = 6;
+        textured.Color = red; // the instance colour overrides the material colour, the texture stays
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var materials = view.Meta.GetProperty("materials");
 
-        Assert.Equal(4, materials.GetArrayLength());
-        Assert.Equal([0, 1, 1, 2, 3], view.Instances("material"));
+        Assert.Equal(5, materials.GetArrayLength());
+        Assert.Equal([0, 1, 1, 2, 3, 4], view.Instances("material"));
         Assert.Equal([200 / 255.0, 200 / 255.0, 200 / 255.0], Vec(materials[0].GetProperty("color")));
         Assert.Equal([10 / 255.0, 20 / 255.0, 30 / 255.0], Vec(materials[2].GetProperty("color")));
-        Assert.Equal(0.5, materials[2].GetProperty("opacity").GetDouble());
-        Assert.Equal(0.1, materials[3].GetProperty("opacity").GetDouble(), 9);
+        Assert.Equal(0.4, materials[2].GetProperty("opacity").GetDouble());
+        Assert.Equal(0.2, materials[3].GetProperty("opacity").GetDouble(), 9);
         Assert.Equal(System.Text.Json.JsonValueKind.Null, materials[0].GetProperty("texture").ValueKind);
+        Assert.Equal([1, 0, 0], Vec(materials[4].GetProperty("color")));
+        Assert.Equal(1, materials[4].GetProperty("texture").GetInt32()); // index into the textures, not the id
+        var texture = view.Meta.GetProperty("textures")[1];
+        Assert.Equal(("image/jpeg", "BAU=", 2.0, 3.0), (texture.GetProperty("mime").GetString(), texture.GetProperty("data").GetString(),
+            texture.GetProperty("sx").GetDouble(), texture.GetProperty("sy").GetDouble()));
     }
 
     [Fact]
-    public void MeshWithoutElement_HasElementIndexMinusOne()
+    public void InstanceOfMissingElement_HasElementIndexMinusOne()
     {
-        var doc = new ViewerDocument();
-        doc.Elements.Add(new ViewerElement { Id = 9 });
-        var a = Cube(0, Vector3d.Zero); a.ElementId = 9; doc.Meshes.Add(a);
-        doc.Meshes.Add(Cube(1, Vector3d.Zero));
-        var c = Cube(2, Vector3d.Zero); c.ElementId = 404; doc.Meshes.Add(c);
+        var scene = TestScenes.Empty();
+        Cube(scene, Vector3d.Zero);
+        Cube(scene, Vector3d.Zero).ElementId = 404;
 
-        Assert.Equal([0, -1, -1], ViewerHtml.Export(doc).Instances("element"));
+        Assert.Equal([0, -1], ViewerHtml.Export(new ViewerDocument(scene)).Instances("element"));
     }
 
     [Fact]
-    public void DocumentWithoutElements_WritesOneElementPerMesh()
+    public void Elements_ListEveryElementWithLevelAndLink()
     {
-        var doc = new ViewerDocument();
-        var pipe = Cube(5, Vector3d.Zero); pipe.Name = "Pipe"; doc.Meshes.Add(pipe);
-        doc.Meshes.Add(Cube(7, new Vector3d(3, 0, 0)));
+        var scene = TestScenes.Empty();
+        scene.Models.Add(new SceneModel { Id = 2, Key = "mep.rvt", Name = "MEP", Path = "links/mep.rvt" });
+        scene.Models.Add(new SceneModel { Id = 3, Key = "arch", Name = "Arch" });
+        scene.Levels.Add(new SceneLevel { Id = 4, ModelId = 2, Name = "L2" });
+        Cube(scene, Vector3d.Zero);
+        scene.Elements.Add(new SceneElement { Id = 2, ModelId = 2, Name = "Duct", LevelId = 4, Category = "Ducts" });
+        scene.Elements.Add(new SceneElement { Id = 3, ModelId = 3, Name = "Wall", Kind = (SceneNodeKind)99 });
+        var doc = new ViewerDocument(scene) { HiddenModelKeys = ["arch"] };
 
-        var view = ViewerHtml.Export(doc);
+        var meta = ViewerHtml.Export(doc).Meta;
+        var elements = meta.GetProperty("elements").EnumerateArray().ToArray();
 
-        Assert.Equal([0, 1], view.Instances("element"));
-        var elements = view.Meta.GetProperty("elements").EnumerateArray().ToArray();
-        Assert.Equal([5L, 7L], elements.Select(e => e.GetProperty("id").GetInt64()));
-        Assert.Equal(["Pipe", "Mesh 7"], elements.Select(e => e.GetProperty("name").GetString()));
-        Assert.All(elements, e => Assert.True(e.GetProperty("mesh").GetBoolean())); // mesh ids: no task or clash matches them
-        Assert.Empty(doc.Elements); // the document itself is not changed
+        // Elements without geometry are listed too; a link is the model's path, else its name.
+        Assert.Equal([1L, 2L, 3L], elements.Select(e => e.GetProperty("id").GetInt64()));
+        Assert.Equal(["", "L2", ""], elements.Select(e => e.GetProperty("level").GetString()));
+        Assert.Equal([null, "links/mep.rvt", "Arch"], elements.Select(e => e.GetProperty("link").GetString()));
+        Assert.Equal(["General", "Ducts", "General"], elements.Select(e => e.GetProperty("category").GetString()));
+        var files = meta.GetProperty("linkedFiles").EnumerateArray().ToArray();
+        Assert.Equal(["MEP", "Arch"], files.Select(f => f.GetProperty("name").GetString()));
+        Assert.Equal(["links/mep.rvt", ""], files.Select(f => f.GetProperty("path").GetString()));
+        Assert.Equal([true, false], files.Select(f => f.GetProperty("visible").GetBoolean()));
     }
 
     [Fact]
-    public void DocumentWithoutElements_GroupsMeshesByTheirElementId()
+    public void LinesAndPoints_AreSkippedAndCounted()
     {
-        var doc = new ViewerDocument();
-        var a = Cube(1, Vector3d.Zero); a.ElementId = 2; a.Name = "Wall part"; doc.Meshes.Add(a);
-        var b = Cube(2, new Vector3d(3, 0, 0)); b.ElementId = 2; doc.Meshes.Add(b);
-        var c = Cube(3, new Vector3d(6, 0, 0)); c.ElementId = 1; doc.Meshes.Add(c);
-        doc.Meshes.Add(Cube(4, new Vector3d(9, 0, 0)));
+        var scene = TestScenes.Empty();
+        Cube(scene, Vector3d.Zero);
+        scene.Place(scene.Geometry([new(0, 0, 0), new(5, 0, 0)], [], topology: SceneTopology.Lines));
+        scene.Place(scene.Geometry([new(0, 0, 9)], [], topology: SceneTopology.Points));
+        scene.Place(scene.Geometry([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2], topology: (SceneTopology)7));
+        Cube(scene, new Vector3d(2, 0, 0));
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene), new HtmlViewerOptions { MaxMeshVertices = CubeVertices.Length });
 
-        // Element ids stay the ids 4D tasks and clashes refer to; only the mesh without one is a per-mesh stand-in.
-        Assert.Equal([0, 0, 1, 2], view.Instances("element"));
-        var elements = view.Meta.GetProperty("elements").EnumerateArray().ToArray();
-        Assert.Equal([2L, 1L, 4L], elements.Select(e => e.GetProperty("id").GetInt64()));
-        Assert.Equal(["Wall part", "Element 1", "Mesh 4"], elements.Select(e => e.GetProperty("name").GetString()));
-        Assert.Equal([false, false, true], elements.Select(e => e.TryGetProperty("mesh", out var m) && m.GetBoolean()));
+        Assert.Equal(3, ViewerPayloadWriter.UndrawnInstances(scene));
+        Assert.Equal(3, view.Meta.GetProperty("skipped").GetProperty("instances").GetInt32());
+        Assert.Equal(1, view.InstanceCount);
+        Assert.Equal(2, view.Meta.GetProperty("truncated").GetProperty("totalMeshes").GetInt32());
+        Assert.Equal(5, view.Meta.GetProperty("elements").GetArrayLength());
+        Assert.Equal(9, view.Meta.GetProperty("bbox").GetProperty("max")[2].GetDouble() * 2); // the scene bounds count every placed vertex
     }
 
     [Fact]
-    public void DocumentWithoutElements_ListsOnlyWrittenMeshes()
+    public void NonIndexedTriangles_AreIndexedInOrder()
     {
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(Cube(1, Vector3d.Zero));
-        doc.Meshes.Add(Cube(2, new Vector3d(3, 0, 0)));
+        var scene = TestScenes.Empty();
+        var triangles = scene.Geometry([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0), new(0, 0, 1), new(1, 0, 1), new(0, 1, 1)], []);
+        scene.Place(triangles);
+        scene.Place(triangles, Transform3d.Translate(new(5, 0, 0)));
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], []);
 
-        var view = ViewerHtml.Export(doc, new HtmlViewerOptions { MaxMeshVertices = CubeVertices.Length });
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
-        Assert.Equal([0], view.Instances("element"));
-        Assert.Equal(1, view.Meta.GetProperty("elements").GetArrayLength());
+        Assert.Equal([0, 1, 2, 3, 4, 5], view.Read(view.Geometries[0].GetProperty("indices")));
+        Assert.Equal([0, 1, 2], view.Read(view.Geometries[1].GetProperty("indices")));
+    }
+
+    [Fact]
+    public void Schedules_AreShownAsOneTimeLiner()
+    {
+        DateTimeOffset At(string text) => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture);
+        var scene = TestScenes.Empty();
+        scene.Schedules.Add(new SceneSchedule { Name = "Empty" });
+        scene.Schedules.Add(new SceneSchedule
+        {
+            Name = "Project 4D",
+            Tasks =
+            [
+                new SceneTask { Id = "1", PlannedStart = At("2026-01-10T08:00:00Z"), PlannedEnd = At("2026-01-20T17:00:00Z") },
+                new SceneTask
+                {
+                    Id = "2",
+                    PlannedStart = At("2026-02-01T08:00:00Z"),
+                    PlannedEnd = At("2026-03-01T17:00:00Z"),
+                    Children = [new SceneTask { Id = "2.1", PlannedStart = At("2026-02-15T08:00:00Z"), PlannedEnd = At("2026-05-30T17:00:00Z"), TaskType = (SceneTaskType)9 }],
+                },
+            ],
+        });
+        scene.Schedules.Add(new SceneSchedule
+        {
+            Name = "Second",
+            ModelId = 1,
+            Tasks = [new SceneTask { Id = "3", PlannedStart = At("2025-12-01T08:00:00Z"), PlannedEnd = At("2026-01-01T08:00:00Z") }],
+        });
+
+        var timeliner = ViewerHtml.Export(new ViewerDocument(scene)).Meta.GetProperty("timeliner");
+
+        Assert.Equal("Project 4D", timeliner.GetProperty("name").GetString());
+        Assert.Equal("2025-12-01T08:00:00Z", timeliner.GetProperty("start").GetString());
+        Assert.Equal("2026-05-30T17:00:00Z", timeliner.GetProperty("end").GetString());
+        Assert.Equal(["1", "2", "2.1", "3"], timeliner.GetProperty("tasks").EnumerateArray().Select(t => t.GetProperty("id").GetString()));
+        Assert.Equal("construct", timeliner.GetProperty("tasks")[2].GetProperty("type").GetString()); // a type this version does not know
+        Assert.Equal(System.Text.Json.JsonValueKind.Null,
+            ViewerHtml.Export(new ViewerDocument(scene), new HtmlViewerOptions { IncludeTimeLiner = false }).Meta.GetProperty("timeliner").ValueKind);
     }
 
     [Fact]
     public void EmptyDocument_WritesEmptyPayload()
     {
         var view = ViewerHtml.Export(new ViewerDocument());
+        Assert.Equal("IOViewer", view.Meta.GetProperty("author").GetString());
 
         Assert.Equal(0, view.InstanceCount);
         Assert.Equal(0, view.Geometries.GetArrayLength());
@@ -504,7 +739,7 @@ public class HtmlViewerExporterTests
     public void ClashIds_AreWritten()
     {
         var doc = GeoreferencedModel();
-        var clash = doc.ClashTests[0].Clashes[0];
+        var clash = doc.Scene.ClashTests[0].Clashes[0];
         clash.Element1Id = 101;
 
         var written = ViewerHtml.Export(doc).Meta.GetProperty("clashTests")[0].GetProperty("clashes")[0];
@@ -515,42 +750,63 @@ public class HtmlViewerExporterTests
         Assert.Equal("Ground Floor Slab", written.GetProperty("element1Name").GetString());
         Assert.Equal("Column C1", written.GetProperty("element2Name").GetString());
         Assert.Equal("Active", written.GetProperty("status").GetString());
+
+        clash.Status = SceneClashStatus.Approved;
+        Assert.Equal("Approved", StatusOf(doc));
+        clash.Status = (SceneClashStatus)42; // a status this version does not know is shown as Active
+        Assert.Equal("Active", StatusOf(doc));
     }
+
+    [Fact]
+    public void ClashDistance_IsNullWhenNotReported()
+    {
+        var doc = GeoreferencedModel();
+        System.Text.Json.JsonElement Distance() => ViewerHtml.Export(doc).Meta.GetProperty("clashTests")[0].GetProperty("clashes")[0].GetProperty("distance");
+
+        Assert.Equal(-0.02, Distance().GetDouble());
+        doc.Scene.ClashTests[0].Clashes[0].Distance = null;
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, Distance().ValueKind);
+    }
+
+    private static string? StatusOf(ViewerDocument doc) =>
+        ViewerHtml.Export(doc).Meta.GetProperty("clashTests")[0].GetProperty("clashes")[0].GetProperty("status").GetString();
 
     [Fact]
     public void Viewpoints_WriteProjection()
     {
         var doc = GeoreferencedModel();
-        doc.Viewpoints.Add(new ViewerViewpoint("Plan", new ViewerCamera
+        doc.Scene.Viewpoints.Add(new SceneViewpoint
         {
-            Position = new Vector3d(OffsetX + 5, OffsetY + 7.5, 50),
-            Target = new Vector3d(OffsetX + 5, OffsetY + 7.5, 0),
-            Projection = ViewerProjection.Orthographic
-        }));
+            Name = "Plan",
+            Camera = new SceneCamera
+            {
+                Position = new Vector3d(OffsetX + 5, OffsetY + 7.5, 50),
+                Target = new Vector3d(OffsetX + 5, OffsetY + 7.5, 0),
+                Projection = SceneProjection.Orthographic
+            },
+        });
+        doc.Scene.Viewpoints.Add(new SceneViewpoint { Name = "Later", Camera = new SceneCamera { Projection = (SceneProjection)4 } });
 
         var viewpoints = ViewerHtml.Export(doc).Meta.GetProperty("viewpoints");
 
         Assert.Equal("perspective", viewpoints[0].GetProperty("camera").GetProperty("projection").GetString());
         Assert.Equal("orthographic", viewpoints[1].GetProperty("camera").GetProperty("projection").GetString());
+        Assert.Equal("perspective", viewpoints[2].GetProperty("camera").GetProperty("projection").GetString()); // a projection this version does not know
     }
 
     [Fact]
     public void Export_200kElements_DoesNotBuildWholeString()
     {
         const int count = 200_000;
-        var doc = new ViewerDocument();
+        var scene = TestScenes.Empty();
         for (int i = 0; i < count; i++)
         {
             double x = i % 1000 * 2, y = i / 1000 * 2;
-            doc.Meshes.Add(new ViewerMesh
-            {
-                Id = i,
-                ElementId = i,
-                Vertices = [new(x, y, 0), new(x + 1, y, 0), new(x, y + 1, 0)],
-                Indices = [0, 1, 2]
-            });
-            doc.Elements.Add(new ViewerElement { Id = i, Name = $"Element {i}", Category = "Walls" });
+            scene.Geometries.Add(new SceneGeometry { Id = i, Vertices = [new(x, y, 0), new(x + 1, y, 0), new(x, y + 1, 0)], Indices = [0, 1, 2] });
+            scene.Elements.Add(new SceneElement { Id = i, ModelId = 1, Name = $"Element {i}", Category = "Walls" });
+            scene.Instances.Add(new SceneInstance { ElementId = i, GeometryId = i });
         }
+        var doc = new ViewerDocument(scene);
 
         var sw = Stopwatch.StartNew();
         using var stream = new MemoryStream();
@@ -582,11 +838,12 @@ public class HtmlViewerExporterTests
     public void Format3_QuantizesSmallGeometry()
     {
         Vector3d[] vertices = [new(-1.2345678, 0.3, 2.000123), new(3.14159, -2.71828, 0.5), new(0.1, 7.777777, -3.3)];
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1 });
+        var scene = TestScenes.Empty();
+        var shared = scene.Geometry(vertices, [0, 1, 2]);
+        scene.Place(shared);
+        scene.Place(shared);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var geometry = view.Geometries[0];
 
         Assert.Equal(3, view.Meta.GetProperty("format").GetInt32());
@@ -599,10 +856,10 @@ public class HtmlViewerExporterTests
     [Fact]
     public void Format3_KeepsF32ForOver64m()
     {
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Vertices = [new(0, 0, 0), new(100, 0, 0), new(0, 1, 0)], Indices = [0, 1, 2] });
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(100, 0, 0), new(0, 1, 0)], [0, 1, 2]);
 
-        var geometry = ViewerHtml.Export(doc).Geometries[0];
+        var geometry = ViewerHtml.Export(new ViewerDocument(scene)).Geometries[0];
 
         Assert.Equal("f32", geometry.GetProperty("positions").GetProperty("t").GetString());
         Assert.False(geometry.TryGetProperty("q", out _));
@@ -613,15 +870,11 @@ public class HtmlViewerExporterTests
     {
         // Two georeferenced meshes off the grid that meet at a corner; each is placed by its own translation.
         var corner = new Vector3d(OffsetX + 1.2345678, OffsetY + 2.3456789, 0.1234567);
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Vertices = [corner, corner + new Vector3d(-2.5, 0.1, 0), corner + new Vector3d(0, -1.7, 0.3)], Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh
-        {
-            Vertices = [corner + new Vector3d(1.1, 0.9, 0), corner, corner + new Vector3d(3.3, 0, 0.2), corner + new Vector3d(0, 2, 1)],
-            Indices = [0, 1, 2, 0, 2, 3],
-        });
+        var scene = TestScenes.Empty();
+        scene.Mesh([corner, corner + new Vector3d(-2.5, 0.1, 0), corner + new Vector3d(0, -1.7, 0.3)], [0, 1, 2]);
+        scene.Mesh([corner + new Vector3d(1.1, 0.9, 0), corner, corner + new Vector3d(3.3, 0, 0.2), corner + new Vector3d(0, 2, 1)], [0, 1, 2, 0, 2, 3]);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var matrix = view.Instances("matrix");
         var geometries = view.Instances("geometry");
         double[] World(int instance, int vertex)
@@ -644,17 +897,12 @@ public class HtmlViewerExporterTests
         // The same table is in the viewer's quantize.test.js.
         Vector3d[] normals = [new(1, 0, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1), new(1, 1, 1), new(1, -2, -3)];
         double[] expected = [32767, 0, 0, -32767, 0, 0, 32767, 32767, 10922, 10922, 21845, -27306];
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry
-        {
-            Id = 1,
-            Vertices = [.. Enumerable.Range(0, 6).Select(i => new Vector3d(i, i % 2, 0))],
-            Normals = normals,
-            Indices = [0, 1, 2, 3, 4, 5],
-        });
-        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1 });
+        var scene = TestScenes.Empty();
+        var shared = scene.Geometry([.. Enumerable.Range(0, 6).Select(i => new Vector3d(i, i % 2, 0))], [0, 1, 2, 3, 4, 5], normals);
+        scene.Place(shared);
+        scene.Place(shared);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var written = view.Geometries[0].GetProperty("normals");
 
         Assert.Equal("i16", written.GetProperty("t").GetString());
@@ -665,11 +913,11 @@ public class HtmlViewerExporterTests
     public void Format3_DedupesTranslatedCopies()
     {
         Vector3d[] shape = [new(0.1234, 0.5678, 0.9012), new(1.3456, 0.2345, 0.1111), new(0.4444, 2.3333, 0.7777)];
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Vertices = shape, Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh { Vertices = [.. shape.Select(v => v + new Vector3d(3.0, 0, 0))], Indices = [0, 1, 2] });
+        var scene = TestScenes.Empty();
+        scene.Mesh(shape, [0, 1, 2]);
+        scene.Mesh([.. shape.Select(v => v + new Vector3d(3.0, 0, 0))], [0, 1, 2]);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
         Assert.Equal(1, view.Geometries.GetArrayLength());
         Assert.Equal([0, 0], view.Instances("geometry"));
@@ -708,12 +956,12 @@ public class HtmlViewerExporterTests
         // A unit primitive scaled x100: grid steps in local units would be 100 x coarser in the world.
         Vector3d[] vertices = [new(0.12345, 0.6789, 0.4321), new(1, 0.25, 0.5), new(0.5, 1, 0.98765)];
         var scaled = new Transform3d(Vector3d.UnitX * 100, Vector3d.UnitY * 100, Vector3d.UnitZ * 100, new Vector3d(OffsetX + 3.3, OffsetY + 4.4, 5.5));
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1, Transform = Transform3d.Translate(new(OffsetX, OffsetY, 0)) });
-        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 1, Transform = scaled });
+        var scene = TestScenes.Empty();
+        var shared = scene.Geometry(vertices, [0, 1, 2]);
+        scene.Place(shared, Transform3d.Translate(new(OffsetX, OffsetY, 0)));
+        scene.Place(shared, scaled);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var geometry = view.Geometries[0];
 
         Assert.Equal("f32", geometry.GetProperty("positions").GetProperty("t").GetString());
@@ -727,12 +975,12 @@ public class HtmlViewerExporterTests
         Vector3d[] vertices = [new(0.12345, 0.6789, 0.4321), new(1.111, 0.25, 0.5), new(0.5, 1.9, 0.98765)];
         var half = new Transform3d(Vector3d.UnitX * 0.5, Vector3d.UnitY * 0.5, Vector3d.UnitZ * 0.5, new Vector3d(OffsetX + 1.234567, OffsetY + 2.345678, 0.345678));
         var moved = Transform3d.Translate(new Vector3d(OffsetX + 3.210987, OffsetY + 0.123456, 1.987654));
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1, Transform = moved });
-        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 1, Transform = half });
+        var scene = TestScenes.Empty();
+        var shared = scene.Geometry(vertices, [0, 1, 2]);
+        scene.Place(shared, moved);
+        scene.Place(shared, half);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var geometry = view.Geometries[0];
 
         Assert.Equal("u16", geometry.GetProperty("positions").GetProperty("t").GetString());
@@ -750,15 +998,16 @@ public class HtmlViewerExporterTests
         var shift = new Vector3d(1.2345678, -2.3456789, 0.3456789);
         Vector3d[] local = [new(0.111, 0.222, 0.333), new(90.5, 1.25, 0.75), new(3.3, 70.7, 4.4)];
         var place = Transform3d.Translate(new Vector3d(OffsetX - 20.4321, OffsetY + 10.9876, 3.21));
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Id = 1, Vertices = own, Indices = [0, 1, 2] });
-        doc.Geometries.Add(new ViewerGeometry { Id = 7, Vertices = local, Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 7, Transform = place });
-        doc.Meshes.Add(new ViewerMesh { Id = 3, Vertices = [.. own.Select(v => v + shift)], Indices = [0, 1, 2] });
+        var scene = TestScenes.Empty();
+        scene.Mesh(own, [0, 1, 2]);
+        var shared = scene.Geometry(local, [0, 1, 2]);
+        scene.Place(shared, place);
+        scene.Mesh([.. own.Select(v => v + shift)], [0, 1, 2]);
+        scene.Place(shared, place);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
-        Assert.Equal([0, 1, 0], view.Instances("geometry"));
+        Assert.Equal([0, 1, 0, 1], view.Instances("geometry"));
         Assert.All(view.Geometries.EnumerateArray(), g => Assert.Equal("f32", g.GetProperty("positions").GetProperty("t").GetString()));
         const double tolerance = 2e-5; // float32 of RTC values up to ~100 m
         AssertPlaced(view, 0, own, tolerance);
@@ -783,12 +1032,12 @@ public class HtmlViewerExporterTests
         }
         var axes = new Transform3d(new Vector3d(Math.Cos(0.5), Math.Sin(0.5), 0), new Vector3d(-Math.Sin(0.5), Math.Cos(0.5), 0), Vector3d.UnitZ, Vector3d.Zero);
         var rotated = axes with { Translation = a - axes.Apply(a) };
-        var doc = new ViewerDocument();
-        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = indices });
-        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1, Transform = Transform3d.Identity });
-        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 1, Transform = rotated });
+        var scene = TestScenes.Empty();
+        var shared = scene.Geometry(vertices, indices);
+        scene.Place(shared, Transform3d.Identity);
+        scene.Place(shared, rotated);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
         var geometry = view.Geometries[0];
 
         Assert.Equal(f32 ? "f32" : "u16", geometry.GetProperty("positions").GetProperty("t").GetString());
@@ -812,11 +1061,11 @@ public class HtmlViewerExporterTests
         Vector3d[] triangle = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)];
         Vector3d[] up = [Vector3d.UnitZ, Vector3d.UnitZ, Vector3d.UnitZ];
         var mirror = new Transform3d(-Vector3d.UnitX, Vector3d.UnitY, Vector3d.UnitZ, new Vector3d(5, 0, 0));
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Id = 1, Vertices = triangle, Indices = [0, 1, 2], Normals = up, Transform = mirror });
-        doc.Meshes.Add(new ViewerMesh { Id = 2, Vertices = triangle, Indices = [0, 1, 2], Normals = up, Transform = Transform3d.Translate(new(-5, 0, 0)) });
+        var scene = TestScenes.Empty();
+        scene.Mesh(triangle, [0, 1, 2], mirror, up);
+        scene.Mesh(triangle, [0, 1, 2], Transform3d.Translate(new(-5, 0, 0)), up);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
         for (int instance = 0; instance < 2; instance++)
         {
@@ -837,11 +1086,11 @@ public class HtmlViewerExporterTests
         // must still get its own geometry with the reversed winding.
         Vector3d[] triangle = [new(0, 0, 0), new(0, 1, 0), new(0, 0, 1)];
         var mirror = new Transform3d(-Vector3d.UnitX, Vector3d.UnitY, Vector3d.UnitZ, new Vector3d(3, 0, 0));
-        var doc = new ViewerDocument();
-        doc.Meshes.Add(new ViewerMesh { Id = 1, Vertices = triangle, Indices = [0, 1, 2] });
-        doc.Meshes.Add(new ViewerMesh { Id = 2, Vertices = triangle, Indices = [0, 1, 2], Transform = mirror });
+        var scene = TestScenes.Empty();
+        scene.Mesh(triangle, [0, 1, 2]);
+        scene.Mesh(triangle, [0, 1, 2], mirror);
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
         Assert.Equal([0, 1], view.Instances("geometry"));
         Assert.Equal([0, 1, 2], view.Read(view.Geometries[0].GetProperty("indices")));
@@ -857,14 +1106,14 @@ public class HtmlViewerExporterTests
         var shape = Enumerable.Range(0, 100)
             .Select(_ => new Vector3d(random.Next(0, 3000) / 1000.0, random.Next(0, 3000) / 1000.0, random.Next(0, 3000) / 1000.0)).ToArray();
         int[] indices = [.. Enumerable.Range(0, 99)];
-        var doc = new ViewerDocument();
+        var scene = TestScenes.Empty();
         for (int i = 0; i < 1000; i++)
         {
             var shift = new Vector3d(OffsetX + random.Next(0, 10000) / 1000.0, OffsetY + random.Next(0, 10000) / 1000.0, random.Next(0, 10000) / 1000.0);
-            doc.Meshes.Add(new ViewerMesh { Id = i, Vertices = [.. shape.Select(p => p + shift)], Indices = indices });
+            scene.Mesh([.. shape.Select(p => p + shift)], indices);
         }
 
-        var view = ViewerHtml.Export(doc);
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
 
         Assert.Equal(1, view.Geometries.GetArrayLength());
         Assert.Equal(1000, view.InstanceCount);
@@ -873,7 +1122,7 @@ public class HtmlViewerExporterTests
         var matrix = view.Instances("matrix");
         for (int i = 0; i < 1000; i++)
         {
-            var vertices = doc.Meshes[i].Vertices;
+            var vertices = scene.Geometries[i].Vertices;
             for (int v = 0; v < vertices.Count; v++)
             {
                 double[] exact = [vertices[v].X - rtc[0], vertices[v].Y - rtc[1], vertices[v].Z - rtc[2]];

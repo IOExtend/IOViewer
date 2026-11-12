@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Text;
+using IOScene;
 using IOViewer.Importers;
 using IOViewer.Model;
 using Xunit;
@@ -60,23 +61,23 @@ public class GlbSharedGeometryTests
         Assert.True(Vector3d.Distance(expected, actual) < 1e-6, $"expected {expected}, got {actual}");
     }
 
-    private static Vector3d World(ViewerDocument doc, int meshIndex)
+    private static Vector3d World(ViewerDocument doc, int instanceIndex)
     {
-        var mesh = doc.Meshes[meshIndex];
-        var geometry = doc.Geometries[mesh.GeometryId!.Value];
-        return (mesh.Transform ?? Transform3d.Identity).Apply(geometry.Vertices[0]);
+        var instance = doc.Scene.Instances[instanceIndex];
+        var geometry = Assert.Single(doc.Scene.Geometries, g => g.Id == instance.GeometryId);
+        return (instance.Transform ?? Transform3d.Identity).Apply(geometry.Vertices[0]);
     }
 
     [Fact]
-    public void TwoNodesSharingMesh_ProduceOneGeometryTwoMeshes()
+    public void TwoNodesSharingMesh_ProduceOneGeometryTwoInstances()
     {
         var doc = Import("""{ "mesh": 0, "translation": [0,0,0] }, { "mesh": 0, "translation": [10,0,0] }""", "0, 1");
 
-        Assert.Single(doc.Geometries);
-        Assert.Equal(2, doc.Meshes.Count);
-        Assert.Equal(doc.Meshes[0].GeometryId, doc.Meshes[1].GeometryId);
-        Assert.Empty(doc.Meshes[0].Vertices);
+        Assert.Single(doc.Scene.Geometries);
+        Assert.Equal(2, doc.Scene.Instances.Count);
+        Assert.Equal(doc.Scene.Instances[0].GeometryId, doc.Scene.Instances[1].GeometryId);
         AssertNear(new Vector3d(10, 0, 0), World(doc, 1));
+        Assert.Empty(doc.Scene.Validate());
     }
 
     [Fact]
@@ -140,6 +141,6 @@ public class GlbSharedGeometryTests
 
         var doc = Import(nodes.ToString(), "0");
 
-        Assert.Single(doc.Meshes);
+        Assert.Single(doc.Scene.Instances);
     }
 }

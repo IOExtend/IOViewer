@@ -1,10 +1,13 @@
 using System.Globalization;
+using IOScene;
 using IOViewer.Model;
 
 namespace IOViewer.Importers;
 
 /// <summary>
-/// Imports Wavefront OBJ models (.obj) into a ViewerDocument.
+/// Imports Wavefront OBJ models (.obj) into a ViewerDocument whose scene has one model: each object or group
+/// (<c>o</c>/<c>g</c>) becomes one element drawn by one geometry with the vertices its faces use, without changing
+/// the up axis. Material (<c>.mtl</c>) files are not read.
 /// </summary>
 public static class ObjViewerImporter
 {
@@ -12,12 +15,17 @@ public static class ObjViewerImporter
     {
         ArgumentNullException.ThrowIfNull(filePath);
         using var fs = File.OpenRead(filePath);
-        return Load(fs, Path.GetFileNameWithoutExtension(filePath));
+        return Load(fs, Path.GetFileNameWithoutExtension(filePath), Path.GetFileName(filePath), filePath);
     }
 
     public static ViewerDocument Load(Stream stream, string documentTitle = "Imported OBJ Model")
     {
         ArgumentNullException.ThrowIfNull(stream);
+        return Load(stream, documentTitle, "model", null);
+    }
+
+    private static ViewerDocument Load(Stream stream, string documentTitle, string modelKey, string? path)
+    {
 
         using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
 
@@ -25,7 +33,8 @@ public static class ObjViewerImporter
         var normals = new List<Vector3d>();
         var meshIndices = new List<int>();
         var currentMeshName = "DefaultMesh";
-        var doc = new ViewerDocument(documentTitle);
+        var doc = new SceneDocument { Title = documentTitle };
+        doc.Models.Add(new SceneModel { Id = 1, Key = modelKey, Name = documentTitle, Path = path, SourceFormat = "obj" });
         int meshCounter = 0;
 
         string? line;
@@ -87,8 +96,7 @@ public static class ObjViewerImporter
 
         AddMesh();
 
-        doc.ComputeBoundingBox();
-        return doc;
+        return new ViewerDocument(doc);
 
         // One mesh and one element per OBJ object or group, so the viewer can list, select and hide it.
         void AddMesh()
@@ -118,18 +126,9 @@ public static class ObjViewerImporter
                 indices[i] = local;
             }
 
-            var element = new ViewerElement { Id = id, Name = currentMeshName, Category = "OBJ" };
-            element.MeshIndices.Add(doc.Meshes.Count);
-            doc.Elements.Add(element);
-            doc.Meshes.Add(new ViewerMesh
-            {
-                Id = id,
-                Name = currentMeshName,
-                ElementId = id,
-                Vertices = meshVertices,
-                Indices = indices,
-                Color = new RgbaColor(180, 180, 180)
-            });
+            doc.Elements.Add(new SceneElement { Id = id, ModelId = 1, Name = currentMeshName, Category = "OBJ" });
+            doc.Geometries.Add(new SceneGeometry { Id = id, Vertices = meshVertices, Indices = indices });
+            doc.Instances.Add(new SceneInstance { ElementId = id, GeometryId = id, Color = new RgbaColor(180, 180, 180), Name = currentMeshName });
             meshIndices.Clear();
         }
     }

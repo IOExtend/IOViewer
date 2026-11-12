@@ -1,6 +1,6 @@
-using System.Globalization;
-using System.Text;
+using IOScene;
 using IOViewer.Cli;
+using IOViewer.Exporters;
 using IOViewer.Model;
 using Xunit;
 
@@ -8,58 +8,6 @@ namespace IOViewer.Tests;
 
 public class ModelAndCliIntegrationTests
 {
-    [Fact]
-    public void MathTypes_VectorAndBoundingBox_WorkCorrectly()
-    {
-        var v1 = new Vector3d(1, 2, 3);
-        var v2 = new Vector3d(4, 5, 6);
-        var sum = v1 + v2;
-        Assert.Equal(new Vector3d(5, 7, 9), sum);
-
-        var cross = Vector3d.Cross(Vector3d.UnitX, Vector3d.UnitY);
-        Assert.Equal(Vector3d.UnitZ, cross);
-
-        var dot = Vector3d.Dot(Vector3d.UnitX, Vector3d.UnitY);
-        Assert.Equal(0, dot);
-
-        var box = new BoundingBox3d(new(0, 0, 0), new(10, 20, 30));
-        Assert.False(box.IsEmpty);
-        Assert.Equal(new Vector3d(5, 10, 15), box.Center);
-        Assert.Equal(new Vector3d(10, 20, 30), box.Size);
-
-        var enc = box.Encapsulate(new Vector3d(-5, 25, 10));
-        Assert.Equal(new Vector3d(-5, 0, 0), enc.Min);
-        Assert.Equal(new Vector3d(10, 25, 30), enc.Max);
-
-        var color = new RgbaColor(255, 128, 0, 200);
-        Assert.Equal("#ff8000", color.ToHex());
-        Assert.Equal(1.0, color.Rf, precision: 2);
-    }
-
-    [Fact]
-    public void ViewerTimeLinerSchedule_ComputesOverallDates()
-    {
-        var schedule = new ViewerTimeLinerSchedule("Project 4D");
-        var task1 = new ViewerTimeLinerTask("1", "Early Task",
-            DateTimeOffset.Parse("2026-01-10T08:00:00Z", CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse("2026-01-20T17:00:00Z", CultureInfo.InvariantCulture));
-
-        var parentTask = new ViewerTimeLinerTask("2", "Parent Task",
-            DateTimeOffset.Parse("2026-02-01T08:00:00Z", CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse("2026-03-01T17:00:00Z", CultureInfo.InvariantCulture));
-
-        var childTask = new ViewerTimeLinerTask("2.1", "Late Child Task",
-            DateTimeOffset.Parse("2026-02-15T08:00:00Z", CultureInfo.InvariantCulture),
-            DateTimeOffset.Parse("2026-05-30T17:00:00Z", CultureInfo.InvariantCulture));
-
-        parentTask.Children.Add(childTask);
-        schedule.Tasks.Add(task1);
-        schedule.Tasks.Add(parentTask);
-
-        Assert.Equal(DateTimeOffset.Parse("2026-01-10T08:00:00Z", CultureInfo.InvariantCulture), schedule.GetOverallStart());
-        Assert.Equal(DateTimeOffset.Parse("2026-05-30T17:00:00Z", CultureInfo.InvariantCulture), schedule.GetOverallEnd());
-    }
-
     [Fact]
     public void Cli_ConvertObjToHtml_CreatesValidViewerFile()
     {
@@ -172,14 +120,9 @@ public class ModelAndCliIntegrationTests
     public void Cli_InvalidGeometryInJson_FailsAtExportAndKeepsExistingOutput()
     {
         // The JSON importer does not validate indices, so the HTML writer is the one that rejects them.
-        var doc = new ViewerDocument("Bad indices");
-        doc.Meshes.Add(new ViewerMesh
-        {
-            Id = 1,
-            Name = "Broken",
-            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
-            Indices = [0, 1, 9]
-        });
+        var scene = TestScenes.Empty("Bad indices");
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 9]);
+        var doc = new ViewerDocument(scene);
 
         var tempJson = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.json");
         var tempHtml = Path.Combine(Path.GetTempPath(), $"test_viewer_{Guid.NewGuid():N}.html");
@@ -187,7 +130,7 @@ public class ModelAndCliIntegrationTests
         var origErr = Console.Error;
         try
         {
-            IOViewer.Exporters.JsonViewerExporter.Save(doc, tempJson);
+            JsonViewerExporter.Save(doc, tempJson);
             File.WriteAllText(tempHtml, "previous export");
             Console.SetError(errors);
 
@@ -198,6 +141,46 @@ public class ModelAndCliIntegrationTests
             string message = errors.ToString().TrimEnd();
             Assert.StartsWith("Error: Failed to export", message, StringComparison.Ordinal);
             Assert.Contains("outside the 3 vertices", message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            if (File.Exists(tempJson)) File.Delete(tempJson);
+            if (File.Exists(tempHtml)) File.Delete(tempHtml);
+        }
+    }
+
+    [Theory]
+    [InlineData("viewer")]
+    [InlineData("scene")]
+    [InlineData("legacy")]
+    public void Cli_ConvertsEveryJsonKindToHtml(string kind)
+    {
+        var scene = TestScenes.Empty("Json kinds");
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.Place(scene.Geometry([new(0, 0, 0), new(0, 0, 1)], [], topology: SceneTopology.Lines));
+
+        var tempJson = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.json");
+        var tempHtml = Path.Combine(Path.GetTempPath(), $"test_viewer_{Guid.NewGuid():N}.html");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            switch (kind)
+            {
+                case "viewer": JsonViewerExporter.Save(new ViewerDocument(scene), tempJson); break;
+                case "scene": SceneJson.Save(scene, tempJson); break;
+                default: File.Copy(Path.Combine(AppContext.BaseDirectory, "legacy-0.2", "escaping.json"), tempJson); break;
+            }
+            Console.SetError(errors);
+
+            int code = Program.Main([tempJson, "-o", tempHtml]);
+
+            Assert.Equal(0, code);
+            var view = ViewerHtml.Parse(File.ReadAllText(tempHtml));
+            Assert.Equal(kind == "legacy" ? 3 : 1, view.InstanceCount);
+            Assert.Equal(kind == "legacy" ? "" : "Warning: 1 meshes of lines, points or an unknown kind are not shown; the viewer draws triangles only.",
+                errors.ToString().Trim());
         }
         finally
         {

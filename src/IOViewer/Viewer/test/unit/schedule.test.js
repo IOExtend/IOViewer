@@ -65,7 +65,6 @@ test('prepareSchedule leaves out malformed tasks and spans the range of the good
         { ...good('invalid'), start: 'soon', end: '2026-03-12T08:00:00Z' },
         { ...good('reversed'), start: '2026-03-12T08:00:00Z', end: '2026-03-02T08:00:00Z' },
         { ...good('default year'), start: '0001-01-01T00:00:00Z', end: '2026-03-12T08:00:00Z' },
-        { ...good('unknown type'), type: 'build', start: '2026-03-02T08:00:00Z', end: '2026-03-12T08:00:00Z' },
         { id: 'no ids', name: 'n', type: 'demolish', start: '2026-04-01T00:00:00Z', end: '2026-04-02T00:00:00Z' },
         { ...good('unknown ids'), start: '2026-03-05T00:00:00Z', end: '2026-03-06T00:00:00Z', attachedElements: [99, 5, 'x'] },
         null,
@@ -80,6 +79,13 @@ test('prepareSchedule leaves out malformed tasks and spans the range of the good
   // The good tasks still drive the 4D state.
   assert.deepEqual([...scheduleState(schedule.tasks, Date.UTC(2026, 2, 1)).hidden], [0]);
   assert.deepEqual([...scheduleState(schedule.tasks, Date.UTC(2026, 2, 5, 12)).active], [[0, 'construct']]);
+});
+
+test('prepareSchedule treats a task type it does not know as construct', () => {
+  const dated = (type) => ({ name: String(type), type, start: '2026-03-02T08:00:00Z', end: '2026-03-12T08:00:00Z', attachedElements: [5] });
+  const schedule = prepareSchedule({ tasks: [dated('build'), dated(7), dated(undefined), dated('temporary')] }, [{ id: 5 }]);
+  assert.deepEqual(schedule.tasks.map((task) => [task.name, task.type]), [['build', 'construct'], ['7', 'construct'], ['undefined', 'construct'], ['temporary', 'temporary']]);
+  assert.deepEqual([...scheduleState(schedule.tasks.slice(0, 1), Date.UTC(2026, 2, 1)).hidden], [0]); // hidden before its start
 });
 
 test('prepareSchedule without a schedule or without good tasks has no tasks', () => {

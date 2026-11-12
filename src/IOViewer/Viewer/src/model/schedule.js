@@ -11,9 +11,10 @@ function time(text) {
 
 /**
  * META `timeliner` with dates as epoch ms and attached element Ids as indices in META `elements`:
- * { start, end, tasks: [{ name, type, start, end, elements }] }. A malformed task (missing or invalid dates, end before
- * start, an unknown type) is left out, and Ids not in the model are dropped, so a bad schedule never stops the viewer.
- * The range spans the tasks kept (start = Infinity, end = -Infinity without any).
+ * { start, end, tasks: [{ name, type, start, end, elements }] }. A task of a type not in TASK_TYPES is a construct task
+ * (the task type is an open enum). A malformed task (missing or invalid dates, end before start) is left out, and Ids
+ * not in the model are dropped, so a bad schedule never stops the viewer. The range spans the tasks kept
+ * (start = Infinity, end = -Infinity without any).
  */
 export function prepareSchedule(timeliner, elements) {
   // A per-mesh stand-in element (`mesh: true`) carries a mesh id, which no task refers to.
@@ -22,9 +23,10 @@ export function prepareSchedule(timeliner, elements) {
   for (const task of Array.isArray(timeliner?.tasks) ? timeliner.tasks : []) {
     const start = time(task?.start);
     const end = time(task?.end);
-    if (!TASK_TYPES.includes(task?.type) || !(start <= end)) continue;
+    if (!(start <= end)) continue;
+    const type = TASK_TYPES.includes(task.type) ? task.type : 'construct';
     const ids = Array.isArray(task.attachedElements) ? task.attachedElements : [];
-    tasks.push({ name: task.name, type: task.type, start, end, elements: ids.filter((id) => indexOf.has(id)).map((id) => indexOf.get(id)) });
+    tasks.push({ name: task.name, type, start, end, elements: ids.filter((id) => indexOf.has(id)).map((id) => indexOf.get(id)) });
   }
   const start = tasks.reduce((min, task) => Math.min(min, task.start), Infinity);
   const end = tasks.reduce((max, task) => Math.max(max, task.end), -Infinity);

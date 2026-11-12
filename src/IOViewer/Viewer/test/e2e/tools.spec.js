@@ -259,7 +259,7 @@ test('grid axes and a measurement stay drawn after Isolate and Hide shrink what 
   await page.keyboard.press('h');
   await page.evaluate(() => window.__ioviewer.selection.clear());
   await frame(page);
-  // Shown now: the twins and the survey marker (no element, so H cannot hide it), all in front of the building.
+  // Shown now: the twins, in front of the building; the survey marker is an element and is hidden with the rest.
   const shown = await page.evaluate(() => {
     const { scene } = window.__ioviewer;
     return [...Array(scene.elementCount).keys()].filter((i) => scene.isVisible(i));
