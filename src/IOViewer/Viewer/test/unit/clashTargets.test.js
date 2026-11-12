@@ -35,3 +35,9 @@ test('resolveClashElements lists an element once and accepts missing fields', ()
   assert.deepEqual(resolveClashElements({ element1Id: 10, element2Id: 10 }, elements), [0]);
   assert.deepEqual(resolveClashElements({}, elements), []);
 });
+
+test('resolveClashElements never matches a per-mesh stand-in element by Id', () => {
+  const withMesh = [{ id: 7, name: 'Mesh 7', mesh: true }, { id: 7, name: 'Pipe' }];
+  assert.deepEqual(resolveClashElements({ element1Id: 7, element2Id: null }, withMesh), [1]);
+  assert.deepEqual(resolveClashElements({ element1Id: 7, element2Id: null }, [withMesh[0]]), []);
+});

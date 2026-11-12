@@ -87,3 +87,9 @@ test('prepareSchedule without a schedule or without good tasks has no tasks', ()
     assert.deepEqual(prepareSchedule(timeliner, []).tasks, []);
   }
 });
+
+test('prepareSchedule never attaches a per-mesh stand-in element by Id', () => {
+  const timeliner = { tasks: [{ name: 'A', type: 'construct', start: '2026-01-01T00:00:00Z', end: '2026-01-02T00:00:00Z', attachedElements: [7, 8] }] };
+  const elements = [{ id: 7, mesh: true }, { id: 8 }, { id: 7 }];
+  assert.deepEqual(prepareSchedule(timeliner, elements).tasks[0].elements, [2, 1]);
+});

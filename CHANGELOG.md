@@ -18,6 +18,10 @@ API between minor releases.
   (category `GLB`) and per OBJ object or group (category `OBJ`), so converted models have a model tree and can be
   selected, hidden and isolated. Each OBJ mesh keeps only the vertices its faces use instead of every vertex read so
   far, and a face that references a vertex not yet read throws `InvalidDataException` on load.
+- A document without elements (built through the API or loaded from older JSON) can still be listed, selected, hidden
+  and isolated in the HTML viewer: meshes that share an `ElementId` appear as one element with that id, which 4D tasks
+  and clashes match, and each other mesh appears on its own with its mesh id and name, as in 0.1.0. The document itself
+  is not changed.
 
 ### Added
 - A new HTML viewer built on three.js 0.186.1, embedded in the page, which still works offline without network requests:

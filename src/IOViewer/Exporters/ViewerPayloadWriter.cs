@@ -29,6 +29,12 @@ internal sealed class ViewerPayloadWriter
     private readonly List<uint> _instanceMaterial = [];
     private readonly List<int> _instanceElement = [];
     private readonly List<float> _instanceMatrix = [];
+    // The META elements: the document's, or, when it has none, stand-ins for the written meshes (0.1.0 listed meshes),
+    // so documents built without elements can still be listed, selected, hidden and isolated: one per mesh ElementId,
+    // grouping its meshes as 4D tasks and clashes refer to them, and one per mesh without an ElementId (written with
+    // "mesh": true, as its id is a mesh id that tasks and clashes must not match).
+    private readonly List<ViewerElement> _elements = [];
+    private readonly HashSet<int> _meshStandIns = [];
     private BoundingBox3d _bounds;
     private Vector3d _rtcOffset;
     private int _writtenMeshes;
@@ -81,8 +87,10 @@ internal sealed class ViewerPayloadWriter
         }
 
         foreach (var material in _doc.Materials) _materialsById.TryAdd(material.Id, material);
+        bool meshElements = _doc.Elements.Count == 0;
+        _elements.AddRange(_doc.Elements);
         var elementIndex = new Dictionary<long, int>();
-        for (int i = 0; i < _doc.Elements.Count; i++) elementIndex.TryAdd(_doc.Elements[i].Id, i);
+        for (int i = 0; i < _elements.Count; i++) elementIndex.TryAdd(_elements[i].Id, i);
 
         _bounds = _doc.ComputeBoundingBox();
         _rtcOffset = _bounds.IsEmpty ? Vector3d.Zero : _bounds.Center;
@@ -126,7 +134,23 @@ internal sealed class ViewerPayloadWriter
 
             _instanceGeometry.Add((uint)geometryIndex);
             _instanceMaterial.Add((uint)MaterialIndex(mesh));
-            _instanceElement.Add(mesh.ElementId is long e && elementIndex.TryGetValue(e, out int index) ? index : -1);
+            if (meshElements)
+            {
+                long? standInId = mesh.ElementId;
+                if (standInId is not long known || !elementIndex.TryGetValue(known, out int index))
+                {
+                    index = _elements.Count;
+                    string fallback = standInId is long e ? $"Element {e}" : $"Mesh {mesh.Id}";
+                    _elements.Add(new ViewerElement { Id = standInId ?? mesh.Id, Name = string.IsNullOrEmpty(mesh.Name) ? fallback : mesh.Name });
+                    if (standInId is long grouped) elementIndex.Add(grouped, index);
+                    else _meshStandIns.Add(index);
+                }
+                _instanceElement.Add(index);
+            }
+            else
+            {
+                _instanceElement.Add(mesh.ElementId is long e && elementIndex.TryGetValue(e, out int index) ? index : -1);
+            }
             AddMatrix(transform, translation);
             _writtenMeshes++;
         }
@@ -503,10 +527,12 @@ internal sealed class ViewerPayloadWriter
         w.WriteEndObject();
 
         w.WriteStartArray("elements");
-        foreach (var el in _doc.Elements)
+        for (int i = 0; i < _elements.Count; i++)
         {
+            var el = _elements[i];
             w.WriteStartObject();
             w.WriteNumber("id", el.Id);
+            if (_meshStandIns.Contains(i)) w.WriteBoolean("mesh", true);
             w.WriteString("name", el.Name);
             w.WriteString("category", string.IsNullOrEmpty(el.Category) ? "General" : el.Category);
             w.WriteString("type", el.TypeName);

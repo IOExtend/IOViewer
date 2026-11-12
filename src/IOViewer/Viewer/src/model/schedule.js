@@ -16,7 +16,8 @@ function time(text) {
  * The range spans the tasks kept (start = Infinity, end = -Infinity without any).
  */
 export function prepareSchedule(timeliner, elements) {
-  const indexOf = new Map(elements.map((e, i) => [e.id, i]));
+  // A per-mesh stand-in element (`mesh: true`) carries a mesh id, which no task refers to.
+  const indexOf = new Map(elements.flatMap((e, i) => (e.mesh ? [] : [[e.id, i]])));
   const tasks = [];
   for (const task of Array.isArray(timeliner?.tasks) ? timeliner.tasks : []) {
     const start = time(task?.start);

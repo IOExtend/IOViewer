@@ -21,7 +21,7 @@
 
 ### Exporters (`IOViewer.Exporters`)
 
-- `HtmlViewerExporter`: Generates self-contained, offline-ready 3D HTML viewers using packed Base64 binary buffers. The page is written to the output stream as it is produced.
+- `HtmlViewerExporter`: Generates self-contained, offline-ready 3D HTML viewers using packed Base64 binary buffers. The page is written to the output stream as it is produced. A document without elements is listed by mesh `ElementId`, or per mesh without one, so its meshes can still be selected, hidden and isolated.
 - `HtmlViewerOptions`: Title, which data to include (properties, viewpoints, grids, 4D schedule, clashes), the initial display mode (`InitialWireframe`, `InitialWhiteMode`), and `MaxMeshVertices`, which is unlimited by default; when a lower limit leaves meshes out, the viewer shows how many were written.
 - `JsonViewerExporter`: Exports `ViewerDocument` snapshots into structured JSON.
 

@@ -409,6 +409,55 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void DocumentWithoutElements_WritesOneElementPerMesh()
+    {
+        var doc = new ViewerDocument();
+        var pipe = Cube(5, Vector3d.Zero); pipe.Name = "Pipe"; doc.Meshes.Add(pipe);
+        doc.Meshes.Add(Cube(7, new Vector3d(3, 0, 0)));
+
+        var view = ViewerHtml.Export(doc);
+
+        Assert.Equal([0, 1], view.Instances("element"));
+        var elements = view.Meta.GetProperty("elements").EnumerateArray().ToArray();
+        Assert.Equal([5L, 7L], elements.Select(e => e.GetProperty("id").GetInt64()));
+        Assert.Equal(["Pipe", "Mesh 7"], elements.Select(e => e.GetProperty("name").GetString()));
+        Assert.All(elements, e => Assert.True(e.GetProperty("mesh").GetBoolean())); // mesh ids: no task or clash matches them
+        Assert.Empty(doc.Elements); // the document itself is not changed
+    }
+
+    [Fact]
+    public void DocumentWithoutElements_GroupsMeshesByTheirElementId()
+    {
+        var doc = new ViewerDocument();
+        var a = Cube(1, Vector3d.Zero); a.ElementId = 2; a.Name = "Wall part"; doc.Meshes.Add(a);
+        var b = Cube(2, new Vector3d(3, 0, 0)); b.ElementId = 2; doc.Meshes.Add(b);
+        var c = Cube(3, new Vector3d(6, 0, 0)); c.ElementId = 1; doc.Meshes.Add(c);
+        doc.Meshes.Add(Cube(4, new Vector3d(9, 0, 0)));
+
+        var view = ViewerHtml.Export(doc);
+
+        // Element ids stay the ids 4D tasks and clashes refer to; only the mesh without one is a per-mesh stand-in.
+        Assert.Equal([0, 0, 1, 2], view.Instances("element"));
+        var elements = view.Meta.GetProperty("elements").EnumerateArray().ToArray();
+        Assert.Equal([2L, 1L, 4L], elements.Select(e => e.GetProperty("id").GetInt64()));
+        Assert.Equal(["Wall part", "Element 1", "Mesh 4"], elements.Select(e => e.GetProperty("name").GetString()));
+        Assert.Equal([false, false, true], elements.Select(e => e.TryGetProperty("mesh", out var m) && m.GetBoolean()));
+    }
+
+    [Fact]
+    public void DocumentWithoutElements_ListsOnlyWrittenMeshes()
+    {
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(Cube(1, Vector3d.Zero));
+        doc.Meshes.Add(Cube(2, new Vector3d(3, 0, 0)));
+
+        var view = ViewerHtml.Export(doc, new HtmlViewerOptions { MaxMeshVertices = CubeVertices.Length });
+
+        Assert.Equal([0], view.Instances("element"));
+        Assert.Equal(1, view.Meta.GetProperty("elements").GetArrayLength());
+    }
+
+    [Fact]
     public void EmptyDocument_WritesEmptyPayload()
     {
         var view = ViewerHtml.Export(new ViewerDocument());
