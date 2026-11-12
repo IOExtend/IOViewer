@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>IOViewer.IfcIO</PackageId>
+    <Description>Converts IFC models read by IfcIO into IOViewer documents for standalone interactive 3D HTML viewers, keeping GlobalIds, storeys, property sets and quantities.</Description>
+    <PackageTags>bim;ifc;ifcio;ioviewer;webgl;html-viewer;3d-viewer</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IOViewer\IOViewer.csproj" />
+    <PackageReference Include="IfcIO" />
+  </ItemGroup>
+
+</Project>

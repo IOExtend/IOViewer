@@ -1,5 +1,7 @@
 <Solution>
   <Project Path="src/IOViewer/IOViewer.csproj" />
   <Project Path="src/IOViewer.Cli/IOViewer.Cli.csproj" />
+  <Project Path="src/IOViewer.IfcIO/IOViewer.IfcIO.csproj" />
   <Project Path="tests/IOViewer.Tests/IOViewer.Tests.csproj" />
+  <Project Path="tests/IOViewer.IfcIO.Tests/IOViewer.IfcIO.Tests.csproj" />
 </Solution>

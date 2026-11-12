@@ -1,0 +1,9 @@
+<Project>
+  <!--
+    Versions of the engine packages the adapters build against. A local engine build is tested with, for example,
+    dotnet build -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local feed folder>
+  -->
+  <PropertyGroup>
+    <IfcIOVersion Condition="'$(IfcIOVersion)' == ''">0.11.0</IfcIOVersion>
+  </PropertyGroup>
+</Project>
