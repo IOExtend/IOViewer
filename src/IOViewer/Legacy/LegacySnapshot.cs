@@ -38,10 +38,11 @@ internal static class LegacySnapshot
     /// Every instance of a scene belongs to an element, so a mesh without one gets a stand-in element: meshes that
     /// share an <c>ElementId</c> that no element has get one element with that id, named after the first such mesh
     /// (else <c>Element {id}</c>); a mesh without an <c>ElementId</c> gets its own element with the mesh id, named
-    /// after the mesh (else <c>Mesh {id}</c>). Stand-ins follow the elements in mesh order. In 0.2.0 a 4D task or
-    /// clash id meant an element or an <c>ElementId</c>, never a mesh id, so those keep their ids and a mesh stand-in
-    /// whose id is taken is renumbered above every id in the snapshot; the task and clash references then still name
-    /// what they named in 0.2.0. References to an id that names nothing are dropped.
+    /// after the mesh (else <c>Mesh {id}</c>). Stand-ins follow the elements in mesh order. Elements and
+    /// <c>ElementId</c> groups keep their ids, and a mesh stand-in whose id is taken is renumbered above every id in the
+    /// snapshot. A 4D task or clash keeps only the references that 0.2.0 resolved: an element id, or in a snapshot
+    /// without elements a mesh <c>ElementId</c>. Any other reference, a mesh stand-in's id included, named nothing in
+    /// 0.2.0 and is dropped.
     /// </remarks>
     internal static Model.ViewerDocument ToViewerDocument(ViewerDocument old)
     {
@@ -261,7 +262,9 @@ internal static class LegacySnapshot
             });
         }
 
-        var ids = scene.Elements.Select(e => e.Id).ToHashSet();
+        // The ids 0.2.0 resolved: its viewer matched references to elements only, and to the ElementId groups it shows
+        // as elements when the snapshot has none; never to a per-mesh stand-in.
+        var ids = old.Elements.Count > 0 ? elementIds : [.. old.Meshes.Select(m => m.ElementId).OfType<long>()];
         long? Known(long? id) => id is long known && ids.Contains(known) ? known : null;
 
         if (old.Grids is { } grids)

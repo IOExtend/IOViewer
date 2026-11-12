@@ -77,7 +77,8 @@ public class LegacyFixtureTests
         Assert.Equal([100L, 200L, 4L], scene.Elements.Select(e => e.Id));
         Assert.Equal(["Pane A", "Slab", "Loose Mesh"], scene.Elements.Select(e => e.Name));
         Assert.Equal([100L, 100L, 200L, 4L], scene.Instances.Select(i => i.ElementId));
-        Assert.Equal([100L, 200L, 4L], scene.Schedules.Single().Tasks.Single().ElementIds);
+        // The task also names 4, the loose mesh's id, which 0.2.0 never matched to a mesh: it is dropped.
+        Assert.Equal([100L, 200L], scene.Schedules.Single().Tasks.Single().ElementIds);
         var clash = scene.ClashTests.Single().Clashes.Single();
         Assert.Equal((100L, 200L, SceneClashStatus.New), (clash.Element1Id, clash.Element2Id, clash.Status));
 
@@ -105,7 +106,7 @@ public class LegacyFixtureTests
     }
 
     [Fact]
-    public void MeshStandIn_WhoseIdIsTaken_IsRenumberedAndReferencesKeepTheirMeaning()
+    public void MeshStandIn_WhoseIdIsTaken_IsRenumberedAndOnlyElementReferencesAreKept()
     {
         var old = new Legacy.ViewerDocument();
         old.Elements.Add(new Legacy.ViewerElement { Id = 1, Name = "Real" });
@@ -128,10 +129,35 @@ public class LegacyFixtureTests
         Assert.Equal([1L, 8L, 9L, 7L, 3L, 10L], scene.Elements.Select(e => e.Id));
         Assert.Equal(["Real", "A", "C", "B", "D", "E"], scene.Elements.Select(e => e.Name));
         Assert.Equal([8L, 9L, 7L, 3L, 10L], scene.Instances.Select(i => i.ElementId));
-        // In 0.2.0 an id named an element or an ElementId, never a mesh: 7 is still mesh B; a dangling id is dropped.
-        Assert.Equal([1L, 7L, 3L], scene.Schedules.Single().Tasks.Single().ElementIds);
+        // The snapshot has elements, so 0.2.0 resolved references to element 1 only: 7 (an ElementId without element),
+        // 3 (mesh D's id) and 99 named nothing and are dropped.
+        Assert.Equal([1L], scene.Schedules.Single().Tasks.Single().ElementIds);
         var clash = scene.ClashTests.Single().Clashes.Single();
-        Assert.Equal((7L, (long?)null), (clash.Element1Id, clash.Element2Id));
+        Assert.Equal(((long?)null, (long?)null), (clash.Element1Id, clash.Element2Id));
+    }
+
+    [Fact]
+    public void SnapshotWithoutElements_KeepsElementIdReferencesAndDropsMeshIds()
+    {
+        // 0.2.0 matched references to ElementId groups here, never to a mesh's own id.
+        var old = new Legacy.ViewerDocument();
+        old.Meshes.Add(Triangle(id: 5, elementId: null, "loose"));
+        old.Meshes.Add(Triangle(id: 6, elementId: 8, "grouped"));
+        var task = new Legacy.ViewerTimeLinerTask { Id = "T" };
+        task.AttachedElementIds.AddRange([5, 8]);
+        old.TimeLiner = new Legacy.ViewerTimeLinerSchedule();
+        old.TimeLiner.Tasks.Add(task);
+        var test = new Legacy.ViewerClashTest();
+        test.Clashes.Add(new Legacy.ViewerClashResult { Id = "c", Element1Id = 5, Element2Id = 8 });
+        old.ClashTests.Add(test);
+
+        var scene = Map(old).Scene;
+
+        Assert.Empty(Errors(scene));
+        Assert.Equal([5L, 8L], scene.Elements.Select(e => e.Id));
+        Assert.Equal([8L], scene.Schedules.Single().Tasks.Single().ElementIds);
+        var clash = scene.ClashTests.Single().Clashes.Single();
+        Assert.Equal(((long?)null, (long?)8), (clash.Element1Id, clash.Element2Id));
     }
 
     private static Legacy.ViewerMesh Triangle(int id, long? elementId, string name) => new()
