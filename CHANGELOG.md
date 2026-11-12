@@ -6,6 +6,8 @@ API between minor releases.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
 ### Fixed
 - `JsonViewerImporter` keeps grid lines, 4D tasks with their attached element ids and child tasks, clash results,
   element properties and element mesh indices; they were silently dropped on load.
@@ -57,8 +59,8 @@ API between minor releases.
   `InvalidDataException`.
 - `HtmlViewerExporter` throws `InvalidDataException` for indices outside a mesh's or geometry's vertices, a
   `GeometryId` that is not in the document, a duplicate geometry id or a mesh with both a `GeometryId` and its own
-  vertices, instead of writing broken geometry. `Save` checks the data before it opens the file, so a failed export
-  leaves an existing file as it was, and the CLI reports such input with exit code 3.
+  vertices, instead of writing broken geometry. `Save` checks these references before it opens the file, so reference
+  validation failures leave an existing file as it was, and the CLI reports such input with exit code 3.
 - `HtmlViewerOptions.MaxMeshVertices` defaults to no limit (was 5,000,000) and no longer cuts the model silently: when a
   lower limit leaves meshes out, the viewer shows a banner with the number of meshes written.
 - The HTML payload uses format 3: one base64 binary block, positions quantized to 16-bit steps of 2⁻¹⁰ m (error at most
@@ -87,6 +89,10 @@ API between minor releases.
 ### Removed
 - The turntable (automatic 360° rotation) of the old viewer.
 - The previous hand-written WebGL viewer template, replaced by the three.js viewer.
+
+### Known limitations
+- `HtmlViewerExporter.Save` can truncate an existing output file before rejecting NaN or infinity in coordinates or
+  metadata. Output replacement is not atomic.
 
 ## [0.1.0] - 2026-11-11
 

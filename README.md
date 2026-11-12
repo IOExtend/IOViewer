@@ -148,7 +148,7 @@ The documentation site with API references and guides is at <https://ioextend.gi
 
 ## Limitations
 
-- Version 0.1.0 is an initial release. The API can evolve before 1.0.
+- The API can evolve before 1.0.
 - Standalone HTML export generates self-contained files with all geometry inlined. IOViewer does not simplify meshes, so models with millions of triangles produce large files; reduce them before export.
 - The binary geometry block is assembled in memory before it is written, so it must stay below 2 GB.
 - `HtmlViewerOptions.MaxMeshVertices` is unlimited by default. When a lower limit cuts the model, the viewer shows a banner with the number of meshes written.
