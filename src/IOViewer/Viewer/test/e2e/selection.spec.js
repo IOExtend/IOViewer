@@ -3,11 +3,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { viewerDir } from './global-setup.js';
 
-async function open(page) {
+async function open(page, name = 'building') {
   const errors = [];
   page.on('console', (message) => message.type() === 'error' && errors.push(message.text()));
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(pathToFileURL(path.join(viewerDir, 'test-results', 'building.html')).href);
+  await page.goto(pathToFileURL(path.join(viewerDir, 'test-results', `${name}.html`)).href);
   await page.evaluate(() => window.__ioviewer.ready);
   return errors;
 }
@@ -216,7 +216,8 @@ const screenOfWorld = (page, world) =>
   }, world);
 
 test('a mesh without an element is picked for navigation and measuring, but clicking it selects nothing', async ({ page }) => {
-  const errors = await open(page);
+  // The building with the survey marker's element removed (global-setup.js).
+  const errors = await open(page, 'orphan');
   const marker = await page.evaluate(() => {
     const { scene } = window.__ioviewer;
     for (let i = 0; i < scene.instanceCount; i++) if (scene.instance(i).element === -1) return i;

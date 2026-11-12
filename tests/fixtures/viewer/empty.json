@@ -1,50 +1,29 @@
 {
-  "Title": "Empty Model",
-  "SourcePath": null,
-  "Author": null,
-  "CreatedAt": null,
-  "Application": null,
-  "BoundingBox": {
-    "Min": {
-      "X": "Infinity",
-      "Y": "Infinity",
-      "Z": "Infinity",
-      "LengthSquared": "Infinity",
-      "Length": "Infinity"
-    },
-    "Max": {
-      "X": "-Infinity",
-      "Y": "-Infinity",
-      "Z": "-Infinity",
-      "LengthSquared": "Infinity",
-      "Length": "Infinity"
-    },
-    "IsEmpty": true,
-    "Center": {
-      "X": "NaN",
-      "Y": "NaN",
-      "Z": "NaN",
-      "LengthSquared": "NaN",
-      "Length": "NaN"
-    },
-    "Size": {
-      "X": "-Infinity",
-      "Y": "-Infinity",
-      "Z": "-Infinity",
-      "LengthSquared": "Infinity",
-      "Length": "Infinity"
-    }
+  "Kind": "ioviewer",
+  "Format": 2,
+  "Scene": {
+    "Kind": "ioscene",
+    "Format": 1,
+    "Title": "Empty Model",
+    "Models": [
+      {
+        "Id": 1,
+        "Key": "model",
+        "Name": "Empty Model"
+      }
+    ],
+    "Materials": [],
+    "Textures": [],
+    "PropertySets": [],
+    "Levels": [],
+    "Geometries": [],
+    "Elements": [],
+    "Instances": [],
+    "Grids": [],
+    "Viewpoints": [],
+    "Schedules": [],
+    "ClashTests": []
   },
-  "Elements": [],
-  "Meshes": [],
-  "Geometries": [],
-  "Materials": [],
-  "Textures": [],
-  "Grids": null,
-  "Viewpoints": [],
   "SectionPlanes": [],
-  "SectionBox": null,
-  "TimeLiner": null,
-  "ClashTests": [],
-  "LinkedFiles": []
+  "HiddenModelKeys": []
 }

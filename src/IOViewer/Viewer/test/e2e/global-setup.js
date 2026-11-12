@@ -49,8 +49,8 @@ function shearModel() {
 }
 
 // Exports every committed fixture, the building again opening in white mode, a generated large model for the
-// tree virtualization test, the sheared model and a copy of the building whose binary block is cut in half, as in a
-// truncated file.
+// tree virtualization test, the sheared model, the building without the survey marker's element and a copy of the
+// building whose binary block is cut in half, as in a truncated file.
 export default function globalSetup() {
   for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith('.json'))) {
     exportHtml(path.join(fixturesDir, file), path.basename(file, '.json'));
@@ -63,6 +63,12 @@ export default function globalSetup() {
   const shear = path.join(viewerDir, 'test-results', 'shear.json');
   writeFileSync(shear, JSON.stringify(shearModel()));
   exportHtml(shear, 'shear');
+  // Its instance then names no element: Validate() rejects such a scene, but the page still draws it, as element -1.
+  const orphan = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
+  orphan.Scene.Elements = orphan.Scene.Elements.filter((e) => e.Name !== 'Survey Marker');
+  const orphanPath = path.join(viewerDir, 'test-results', 'orphan.json');
+  writeFileSync(orphanPath, JSON.stringify(orphan));
+  exportHtml(orphanPath, 'orphan');
 
   const results = path.join(viewerDir, 'test-results');
   const html = readFileSync(path.join(results, 'building.html'), 'utf8');

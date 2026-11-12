@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fixturesDir, viewerDir } from './global-setup.js';
 
-const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
+const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8')).Scene;
 const INSTANCED = { mergedCap: 0, minRepeats: 1 };
 
 test.beforeEach(({ page }) => page.addInitScript((options) => (window.IOVIEWER_TEST = options), INSTANCED));
@@ -72,7 +72,7 @@ test('every shape is an instanced cell, and the building looks as on the merged 
   const memory = await page.evaluate(() => window.__ioviewer.scene.memory());
   expect(memory).toMatchObject({ chunks: 0, mergedInstances: 0, mergedBytes: 0 });
   expect(memory.cells).toBeGreaterThan(0);
-  expect(memory.instancedInstances).toBe(building.Meshes.length);
+  expect(memory.instancedInstances).toBe(building.Instances.length);
 
   const merged = await browser.newPage({ viewport: page.viewportSize(), locale: 'ru-RU' });
   await open(merged);

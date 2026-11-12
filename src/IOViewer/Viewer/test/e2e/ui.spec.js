@@ -237,7 +237,7 @@ test('tree: categories collapsed with counts; a row click selects and zooms; sel
   await rail(page, 'model').click();
   const columns = rows(page).filter({ hasText: 'Structural Columns' });
   await expect(columns.locator('.tree-count')).toHaveText('26');
-  await expect(rows(page)).toHaveCount(6); // only category headers
+  await expect(rows(page)).toHaveCount(7); // only category headers, the survey marker's empty category included
 
   await columns.click();
   const d2 = await indexOf(page, 'Column D2 Level 1');
@@ -341,7 +341,7 @@ test('status bar counts the selection; the truncation banner shows and closes', 
   const d2 = await indexOf(page, 'Column D2 Level 1');
   await expect(page.locator('.ioviewer-banner')).toHaveCount(0);
   await page.mouse.click(...(await screenAt(page, d2)));
-  await expect(page.locator('#ioviewer-status')).toHaveText('Выбрано: 1 · Элементов: 65');
+  await expect(page.locator('#ioviewer-status')).toHaveText('Выбрано: 1 · Элементов: 66');
 
   const html = readFileSync(path.join(viewerDir, 'test-results', 'building.html'), 'utf8');
   const truncated = html.replace('"truncated":null', '"truncated":{"meshes":40,"totalMeshes":67}');
@@ -428,7 +428,7 @@ test.describe('in English', () => {
   test('labels, menu and status are English', async ({ page }) => {
     await open(page);
     await expect(page.locator('.ioviewer-toolbar-label')).toHaveText(['Navigation', 'Sections', 'Measure', 'Display', 'View']);
-    await expect(page.locator('#ioviewer-status')).toHaveText('Selected: 0 · Elements: 65');
+    await expect(page.locator('#ioviewer-status')).toHaveText('Selected: 0 · Elements: 66');
     await expect(rail(page, 'links')).toHaveAttribute('title', 'Linked files');
     await page.mouse.click(...blank, { button: 'right' });
     await expect(menu(page).locator('.ioviewer-menu-item span')).toHaveText(['Show all', 'Fit all', 'Reset sections']);

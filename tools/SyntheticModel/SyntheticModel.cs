@@ -5,15 +5,16 @@
 // Writes a deterministic synthetic pipe network as an exported HTML viewer, for performance measurements:
 //   dotnet run tools/SyntheticModel/SyntheticModel.cs -- --elements 200000 --out synthetic-200k.html
 // Without --out it writes <temp>/ioviewer-perf/synthetic-<N>.html.
-// Pipes and joints share 20 geometries (about 100 triangles each) placed by rotated transforms; one element per mesh,
-// five systems (one of them transparent wells), a few properties per element and a 4D schedule over the network.
-// --unique gives every mesh its own copy of its geometry, already placed, as exporters without instancing write it.
+// Pipes and joints share 20 geometries (about 100 triangles each) placed by rotated transforms; one element per
+// instance, five systems (one material each; the wells are transparent), a few properties per element and a 4D
+// schedule over the network.
+// --unique gives every instance its own copy of its geometry, already placed, as exporters without instancing write it.
 // --textured gives every geometry cylindrical UVs (metres) and the first system a 64 x 64 checker texture.
 
 using System.Diagnostics;
 using System.Globalization;
+using IOScene;
 using IOViewer.Exporters;
-using IOViewer.Model;
 
 int elements = 0;
 string? output = null;
@@ -55,7 +56,7 @@ if (output is null)
 var watch = Stopwatch.StartNew();
 var doc = PipeNetwork.Build(elements, textured);
 if (unique) PipeNetwork.Unshare(doc);
-Console.WriteLine($"Built {doc.Elements.Count} elements, {doc.Meshes.Count} meshes, {doc.Geometries.Count} geometries, " +
+Console.WriteLine($"Built {doc.Elements.Count} elements, {doc.Instances.Count} instances, {doc.Geometries.Count} geometries, " +
     $"{PipeNetwork.Triangles(doc):N0} triangles in {watch.Elapsed.TotalSeconds:F1} s");
 watch.Restart();
 HtmlViewerExporter.Save(doc, output, new HtmlViewerOptions { Title = doc.Title });
@@ -67,26 +68,27 @@ static class PipeNetwork
     private const int Segments = 24; // pipe: 24 side quads + two 22-triangle caps = 92 triangles
     private static readonly double[] Diameters = [0.1, 0.15, 0.2, 0.3, 0.5];
     private static readonly double[] Lengths = [2, 4, 6];
-    private static readonly (string Name, RgbaColor Color, double Opacity)[] Systems =
+    private static readonly (string Name, RgbaColor Color)[] Systems =
     [
-        ("Water supply", new RgbaColor(40, 120, 220), 1),
-        ("Sewer", new RgbaColor(150, 100, 60), 1),
-        ("Storm water", new RgbaColor(60, 170, 90), 1),
-        ("Heating", new RgbaColor(210, 60, 50), 1),
-        ("Wells", new RgbaColor(170, 170, 180), 0.5),
+        ("Water supply", new RgbaColor(40, 120, 220)),
+        ("Sewer", new RgbaColor(150, 100, 60)),
+        ("Storm water", new RgbaColor(60, 170, 90)),
+        ("Heating", new RgbaColor(210, 60, 50)),
+        ("Wells", new RgbaColor(170, 170, 180, 128)), // half transparent
     ];
 
-    public static long Triangles(ViewerDocument doc)
+    public static long Triangles(SceneDocument doc)
     {
         var perGeometry = doc.Geometries.ToDictionary(g => g.Id, g => g.Indices.Count / 3);
-        return doc.Meshes.Sum(m => (long)perGeometry[m.GeometryId!.Value]);
+        return doc.Instances.Sum(m => (long)perGeometry[m.GeometryId]);
     }
 
     // Random walks of pipes with a joint after each one, mostly horizontal, sometimes a riser; seeded, so every run is equal.
-    public static ViewerDocument Build(int count, bool textured)
+    public static SceneDocument Build(int count, bool textured)
     {
         var random = new Random(20261111);
-        var doc = new ViewerDocument($"Synthetic pipe network ({count.ToString("N0", CultureInfo.InvariantCulture)} elements)");
+        var doc = new SceneDocument { Title = $"Synthetic pipe network ({count.ToString("N0", CultureInfo.InvariantCulture)} elements)" };
+        doc.Models.Add(new SceneModel { Id = 1, Key = "model", Name = doc.Title });
         for (int d = 0; d < Diameters.Length; d++)
         {
             for (int l = 0; l < Lengths.Length; l++) doc.Geometries.Add(Pipe(d * Lengths.Length + l, Diameters[d] / 2, Lengths[l]));
@@ -95,17 +97,22 @@ static class PipeNetwork
         for (int d = 0; d < Diameters.Length; d++) doc.Geometries.Add(Joint(jointBase + d, Diameters[d] * 0.7));
         if (textured) doc.Textures.Add(Checker());
         else foreach (var g in doc.Geometries) g.UVs = null; // the untextured page stays as it was
+        for (int s = 0; s < Systems.Length; s++)
+        {
+            doc.Materials.Add(new SceneMaterial { Id = s + 1, Name = Systems[s].Name, Color = Systems[s].Color, TextureId = textured && s == 0 ? 1 : null });
+        }
+        var levels = new Dictionary<int, int>(); // zone number -> level id
 
         double side = Math.Sqrt(count / 2.0) * 6; // metres; keeps the density about the same at any count
         Vector3d[] directions = [Vector3d.UnitX, -Vector3d.UnitX, Vector3d.UnitY, -Vector3d.UnitY];
-        var schedule = new ViewerTimeLinerSchedule("Construction");
+        var schedule = new SceneSchedule { Name = "Construction" };
         int tasks = Math.Clamp(count / 5000, 1, 40);
         var start = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
         for (int t = 0; t < tasks; t++)
         {
-            schedule.Tasks.Add(new ViewerTimeLinerTask($"T{t + 1}", $"Stage {t + 1}", start.AddDays(t * 10), start.AddDays(t * 10 + 14)));
+            schedule.Tasks.Add(new SceneTask { Id = $"T{t + 1}", Name = $"Stage {t + 1}", PlannedStart = start.AddDays(t * 10), PlannedEnd = start.AddDays(t * 10 + 14) });
         }
-        doc.TimeLiner = schedule;
+        doc.Schedules.Add(schedule);
 
         var point = Vector3d.Zero;
         var direction = Vector3d.UnitX;
@@ -146,38 +153,47 @@ static class PipeNetwork
                 point += direction * Lengths[length];
                 type = $"Pipe DN{Diameters[diameter] * 1000:F0}";
             }
-            var (systemName, color, opacity) = Systems[system];
             long id = 1_000_000 + i;
-            doc.Meshes.Add(new ViewerMesh
+            doc.Instances.Add(new SceneInstance { ElementId = id, GeometryId = geometry, Transform = transform, MaterialId = system + 1 });
+            int zone = (i / 10000) + 1;
+            if (!levels.TryGetValue(zone, out int level))
             {
-                Id = i, ElementId = id, GeometryId = geometry, Transform = transform, Color = color, Opacity = opacity,
-                TextureIndex = textured && system == 0 ? 0 : null,
-            });
-            var element = new ViewerElement
+                level = levels[zone] = doc.Levels.Count + 1;
+                doc.Levels.Add(new SceneLevel { Id = level, ModelId = 1, Name = $"Zone {zone}" });
+            }
+            var element = new SceneElement
             {
-                Id = id, Name = $"{type} {i}", Category = systemName, TypeName = type, Level = $"Zone {(i / 10000) + 1}",
+                Id = id, ModelId = 1, Name = $"{type} {i}", Category = Systems[system].Name, TypeName = type, LevelId = level,
             };
-            element.MeshIndices.Add(i);
-            element.AddProperty("Identity", "Mark", $"M-{i}");
-            element.AddProperty("Dimensions", "Diameter", $"{Diameters[diameter] * 1000:F0} mm");
+            element.PropertySetIds.Add(Set(doc, "Identity", "Mark", $"M-{i}"));
+            element.PropertySetIds.Add(Set(doc, "Dimensions", "Diameter", $"{Diameters[diameter] * 1000:F0} mm"));
             doc.Elements.Add(element);
-            schedule.Tasks[(int)((long)i * tasks / count)].AttachedElementIds.Add(id);
+            schedule.Tasks[(int)((long)i * tasks / count)].ElementIds.Add(id);
         }
         return doc;
     }
 
-    // Replaces each mesh's shared geometry by its own placed copy (positions and normals transformed, no Transform).
-    public static void Unshare(ViewerDocument doc)
+    private static int Set(SceneDocument doc, string name, string property, string value)
+    {
+        var set = new ScenePropertySet { Id = doc.PropertySets.Count + 1, Name = name };
+        set.Properties.Add(new SceneProperty { Name = property, Value = SceneValue.FromText(value) });
+        doc.PropertySets.Add(set);
+        return set.Id;
+    }
+
+    // Replaces each instance's shared geometry by its own placed copy (positions and normals transformed, no Transform).
+    public static void Unshare(SceneDocument doc)
     {
         var shared = doc.Geometries.ToDictionary(g => g.Id);
         doc.Geometries = [];
-        foreach (var mesh in doc.Meshes)
+        for (int i = 0; i < doc.Instances.Count; i++)
         {
-            var source = shared[mesh.GeometryId!.Value];
+            var mesh = doc.Instances[i];
+            var source = shared[mesh.GeometryId];
             var t = mesh.Transform!.Value;
-            doc.Geometries.Add(new ViewerGeometry
+            doc.Geometries.Add(new SceneGeometry
             {
-                Id = mesh.Id,
+                Id = i,
                 Vertices = source.Vertices.Select(t.Apply).ToList(),
                 Normals = source.Normals!.Select(n => (t.Apply(n) - t.Translation).Normalized()).ToList(),
                 UVs = source.UVs,
@@ -186,7 +202,7 @@ static class PipeNetwork
                     ? source.Indices.Chunk(3).SelectMany(f => new[] { f[0], f[2], f[1] }).ToList()
                     : source.Indices,
             });
-            mesh.GeometryId = mesh.Id;
+            mesh.GeometryId = i;
             mesh.Transform = null;
         }
     }
@@ -199,7 +215,7 @@ static class PipeNetwork
     }
 
     // Capped cylinder along +X from 0 to length; caps have their own vertices so their normals stay flat.
-    private static ViewerGeometry Pipe(int id, double radius, double length)
+    private static SceneGeometry Pipe(int id, double radius, double length)
     {
         var vertices = new List<Vector3d>();
         var normals = new List<Vector3d>();
@@ -234,11 +250,11 @@ static class PipeNetwork
             }
             for (int s = 1; s < Segments - 1; s++) indices.AddRange([first, first + s, first + s + 1]);
         }
-        return new ViewerGeometry { Id = id, Vertices = vertices, Normals = normals, Indices = indices, UVs = uvs };
+        return new SceneGeometry { Id = id, Vertices = vertices, Normals = normals, Indices = indices, UVs = uvs };
     }
 
     // UV sphere, 10 x 6 bands: 100 triangles.
-    private static ViewerGeometry Joint(int id, double radius)
+    private static SceneGeometry Joint(int id, double radius)
     {
         const int around = 10, bands = 6;
         var vertices = new List<Vector3d>();
@@ -261,7 +277,7 @@ static class PipeNetwork
                 if (b < bands - 1) indices.AddRange([p + 1, q, q + 1]);
             }
         }
-        return new ViewerGeometry
+        return new SceneGeometry
         {
             Id = id, Vertices = vertices.Select(v => v * radius).ToList(), Normals = vertices, Indices = indices,
             // Cylindrical about the local Z axis, in metres.
@@ -270,7 +286,7 @@ static class PipeNetwork
     }
 
     // 64 x 64 checker of 8 x 8 pixel squares as a 24-bit BMP, 0.5 m per repeat.
-    private static ViewerTexture Checker()
+    private static SceneTexture Checker()
     {
         const int size = 64, header = 54, pixels = size * size * 3;
         var bmp = new byte[header + pixels];
@@ -292,6 +308,6 @@ static class PipeNetwork
                 bmp.AsSpan(header + (y * size + x) * 3, 3).Fill(v); // rows of 192 bytes need no padding
             }
         }
-        return new ViewerTexture { MimeType = "image/bmp", Base64Data = Convert.ToBase64String(bmp), ScaleX = 0.5, ScaleY = 0.5 };
+        return new SceneTexture { Id = 1, MimeType = "image/bmp", Data = bmp, ScaleX = 0.5, ScaleY = 0.5 };
     }
 }
