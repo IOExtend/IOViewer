@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using IOScene;
 using IOViewer.Model;
 
 namespace IOViewer.Exporters;
@@ -9,9 +10,22 @@ namespace IOViewer.Exporters;
 /// </summary>
 public static class HtmlViewerExporter
 {
+    /// <summary>Writes the viewer page of a scene, with no section and every model shown, to a file.</summary>
+    public static void Save(SceneDocument scene, string filePath, HtmlViewerOptions? options = null) =>
+        Save(new ViewerDocument(scene), filePath, options);
+
+    /// <summary>Writes the viewer page of a scene, with no section and every model shown, to a stream.</summary>
+    public static void Export(SceneDocument scene, Stream stream, HtmlViewerOptions? options = null) =>
+        Export(new ViewerDocument(scene), stream, options);
+
+    /// <summary>Returns the viewer page of a scene, with no section and every model shown.</summary>
+    public static string ExportToString(SceneDocument scene, HtmlViewerOptions? options = null) =>
+        ExportToString(new ViewerDocument(scene), options);
+
     public static void Save(ViewerDocument doc, string filePath, HtmlViewerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(doc);
+        ArgumentNullException.ThrowIfNull(doc.Scene);
         ArgumentNullException.ThrowIfNull(filePath);
 
         // Validated before the file is opened, so invalid data never truncates an existing page.
@@ -23,6 +37,7 @@ public static class HtmlViewerExporter
     public static void Export(ViewerDocument doc, Stream stream, HtmlViewerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(doc);
+        ArgumentNullException.ThrowIfNull(doc.Scene);
         ArgumentNullException.ThrowIfNull(stream);
 
         Write(ViewerPayloadWriter.Create(doc, options ?? new HtmlViewerOptions()), stream);

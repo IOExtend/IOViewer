@@ -14,8 +14,9 @@ internal static class Program
                ioviewer --help | --version
 
         Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
-        from 3D models (glTF/GLB, Wavefront OBJ, JSON snapshots). The HTML file has
-        no external dependencies and works offline.
+        from 3D models (glTF/GLB, Wavefront OBJ, JSON). The HTML file has no
+        external dependencies and works offline. JSON input is viewer JSON, an
+        IOScene scene file or an IOViewer 0.1/0.2 snapshot.
 
         Arguments:
           <input>            Path to input 3D model (.glb, .obj, or .json).
@@ -30,7 +31,7 @@ internal static class Program
           --no-properties     Exclude element properties to reduce the file size.
           --no-grids          Exclude spatial grid lines.
           --no-timeliner      Exclude 4D TimeLiner schedule simulation.
-          --json <file.json>  Export structured model snapshot to JSON.
+          --json <file.json>  Export the document as viewer JSON.
           --serve [port]      Start local HTTP preview server and open in default browser.
           -h, --help          Show this help message and exit.
           -v, --version       Show version information and exit.
@@ -194,7 +195,7 @@ internal static class Program
         if (outputPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
         {
             JsonViewerExporter.Save(doc, outputPath);
-            Console.WriteLine($"Exported JSON snapshot to '{outputPath}' ({doc.Meshes.Count} meshes, {doc.Elements.Count} elements) in {sw.ElapsedMilliseconds} ms.");
+            Console.WriteLine($"Exported JSON snapshot to '{outputPath}' ({doc.Scene.Instances.Count} meshes, {doc.Scene.Elements.Count} elements) in {sw.ElapsedMilliseconds} ms.");
         }
         else
         {
@@ -208,7 +209,12 @@ internal static class Program
                 return 3;
             }
             var fi = new FileInfo(outputPath);
-            Console.WriteLine($"Exported standalone 3D HTML viewer to '{outputPath}' ({fi.Length / 1024:N0} KB, {doc.Meshes.Count} meshes) in {sw.ElapsedMilliseconds} ms.");
+            Console.WriteLine($"Exported standalone 3D HTML viewer to '{outputPath}' ({fi.Length / 1024:N0} KB, {doc.Scene.Instances.Count} meshes) in {sw.ElapsedMilliseconds} ms.");
+            int undrawn = ViewerPayloadWriter.UndrawnInstances(doc.Scene);
+            if (undrawn > 0)
+            {
+                Console.Error.WriteLine($"Warning: {undrawn} meshes of lines, points or an unknown kind are not shown; the viewer draws triangles only.");
+            }
         }
 
         if (!string.IsNullOrEmpty(explicitJsonPath))

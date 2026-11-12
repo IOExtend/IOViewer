@@ -1,12 +1,15 @@
 using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
+using IOScene;
 using IOViewer.Model;
 
 namespace IOViewer.Importers;
 
 /// <summary>
-/// Imports standard glTF 2.0 Binary (.glb) files into a ViewerDocument.
+/// Imports standard glTF 2.0 Binary (.glb) files into a ViewerDocument whose scene has one model: one geometry per
+/// mesh primitive, one element per node that draws a mesh, and one instance per primitive of that node, with the
+/// node's world transform converted from glTF's Y-up to the scene's Z-up.
 /// </summary>
 public static class GlbViewerImporter
 {
@@ -18,12 +21,17 @@ public static class GlbViewerImporter
     {
         ArgumentNullException.ThrowIfNull(filePath);
         using var fs = File.OpenRead(filePath);
-        return Load(fs, Path.GetFileNameWithoutExtension(filePath));
+        return Load(fs, Path.GetFileNameWithoutExtension(filePath), Path.GetFileName(filePath), filePath);
     }
 
     public static ViewerDocument Load(Stream stream, string documentTitle = "Imported GLB Model")
     {
         ArgumentNullException.ThrowIfNull(stream);
+        return Load(stream, documentTitle, "model", null);
+    }
+
+    private static ViewerDocument Load(Stream stream, string documentTitle, string modelKey, string? path)
+    {
 
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
 
@@ -65,7 +73,8 @@ public static class GlbViewerImporter
             }
         }
 
-        var doc = new ViewerDocument(documentTitle);
+        var doc = new SceneDocument { Title = documentTitle };
+        doc.Models.Add(new SceneModel { Id = 1, Key = modelKey, Name = documentTitle, Path = path, SourceFormat = "glb" });
 
         using var jsonDoc = JsonDocument.Parse(jsonText);
         var root = jsonDoc.RootElement;
@@ -75,20 +84,20 @@ public static class GlbViewerImporter
             !root.TryGetProperty("bufferViews", out var bufferViewsEl) ||
             binBuffer is null)
         {
-            return doc;
+            return new ViewerDocument(doc);
         }
 
         var bufferViews = bufferViewsEl.EnumerateArray().ToArray();
         var accessors = accessorsEl.EnumerateArray().ToArray();
 
         // Parse Materials
-        var materials = new List<ViewerMaterial>();
+        var materials = new List<SceneMaterial>();
         if (root.TryGetProperty("materials", out var materialsEl))
         {
             int matIdx = 0;
             foreach (var matEl in materialsEl.EnumerateArray())
             {
-                var mat = new ViewerMaterial
+                var mat = new SceneMaterial
                 {
                     Id = matIdx++,
                     Name = matEl.TryGetProperty("name", out var mn) ? mn.GetString() ?? "Material" : $"Material {matIdx}"
@@ -104,7 +113,6 @@ public static class GlbViewerImporter
                         byte b = (byte)Math.Clamp((int)(arr[2].GetDouble() * 255), 0, 255);
                         byte a = (byte)Math.Clamp((int)(arr[3].GetDouble() * 255), 0, 255);
                         mat.Color = new RgbaColor(r, g, b, a);
-                        mat.Opacity = arr[3].GetDouble();
                     }
                 }
                 materials.Add(mat);
@@ -112,7 +120,7 @@ public static class GlbViewerImporter
             }
         }
 
-        // Parse meshes lazily: one ViewerGeometry per (mesh, primitive), one ViewerMesh per node occurrence.
+        // Parse meshes lazily: one geometry per (mesh, primitive), one instance per primitive of a node occurrence.
         var meshElements = root.TryGetProperty("meshes", out var meshesEl) ? meshesEl.EnumerateArray().ToArray() : [];
         var geometryIds = new Dictionary<(int Mesh, int Primitive), int?>();
         int meshCounter = 0;
@@ -129,7 +137,7 @@ public static class GlbViewerImporter
             string meshName = meshEl.TryGetProperty("name", out var mn) ? mn.GetString() ?? $"Mesh {meshCounter + 1}" : $"Mesh {meshCounter + 1}";
             if (!meshEl.TryGetProperty("primitives", out var primsEl)) return;
 
-            ViewerElement? element = null;
+            SceneElement? element = null;
             int primIndex = -1;
             foreach (var prim in primsEl.EnumerateArray())
             {
@@ -167,7 +175,7 @@ public static class GlbViewerImporter
                         }
 
                         geometryId = doc.Geometries.Count;
-                        doc.Geometries.Add(new ViewerGeometry
+                        doc.Geometries.Add(new SceneGeometry
                         {
                             Id = geometryId.Value,
                             Vertices = positions,
@@ -182,33 +190,27 @@ public static class GlbViewerImporter
                 if (geometryId is null) continue;
 
                 int? matId = null;
-                RgbaColor? col = null;
                 if (prim.TryGetProperty("material", out var mProp))
                 {
                     int mid = mProp.GetInt32();
-                    if (mid >= 0 && mid < materials.Count)
-                    {
-                        matId = mid;
-                        col = materials[mid].Color;
-                    }
+                    if (mid >= 0 && mid < materials.Count) matId = mid;
                 }
 
                 if (element is null)
                 {
-                    element = new ViewerElement { Id = doc.Elements.Count + 1, Name = string.IsNullOrEmpty(nodeName) ? meshName : nodeName, Category = "GLB" };
+                    element = new SceneElement { Id = doc.Elements.Count + 1, ModelId = 1, Name = string.IsNullOrEmpty(nodeName) ? meshName : nodeName, Category = "GLB" };
                     doc.Elements.Add(element);
                 }
 
-                element.MeshIndices.Add(doc.Meshes.Count);
-                doc.Meshes.Add(new ViewerMesh
+                ++meshCounter;
+                doc.Instances.Add(new SceneInstance
                 {
-                    Id = ++meshCounter,
-                    Name = meshName,
                     ElementId = element.Id,
-                    GeometryId = geometryId,
+                    GeometryId = geometryId.Value,
                     Transform = world.Then(YupToZup),
                     MaterialId = matId,
-                    Color = col ?? new RgbaColor(200, 200, 200)
+                    Color = matId is null ? new RgbaColor(200, 200, 200) : null,
+                    Name = meshName,
                 });
             }
         }
@@ -259,8 +261,7 @@ public static class GlbViewerImporter
             for (int i = 0; i < meshElements.Length; i++) Instantiate(i, Transform3d.Identity, null);
         }
 
-        doc.ComputeBoundingBox();
-        return doc;
+        return new ViewerDocument(doc);
     }
 
     // glTF is Y-up; the viewer model is Z-up: (x, y, z) becomes (x, -z, y).
