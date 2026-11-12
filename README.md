@@ -140,26 +140,6 @@ var doc = GlbViewerImporter.Load("complex_building.glb");
 HtmlViewerExporter.Save(doc, "complex_building.html");
 ```
 
-### Engine adapters
-
-An adapter turns the model of an IOExtend engine into a `ViewerDocument`, keeping what a GLB loses: source ids,
-storeys and properties. Each adapter is its own package that depends on IOViewer and one engine; IOViewer itself
-depends on no engine.
-
-| Package | Engine | Input |
-| --- | --- | --- |
-| `IOViewer.IfcIO` | [IfcIO](https://github.com/IOExtend/IfcIO) 0.11.0 or later | `IfcModel` (IFC2x3, IFC4) |
-
-```csharp
-using IfcIO;
-using IOViewer.Exporters;
-using IOViewer.IfcIO;
-
-var model = IfcModel.Open("building.ifc");
-var doc = IfcViewerAdapter.ToViewerDocument(model);
-HtmlViewerExporter.Save(doc, "building.html");
-```
-
 See the [public API](docs/public-api.md) for the supported surface and [getting started guide](docs/getting-started.md) for detailed workflows.
 
 ## Documentation

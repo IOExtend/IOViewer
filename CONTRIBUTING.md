@@ -33,37 +33,9 @@ dotnet build IOViewer.slnx -c Release
 dotnet test IOViewer.slnx -c Release
 ```
 
-The library is in `src/IOViewer`, the CLI in `src/IOViewer.Cli`, engine adapters
-in `src/IOViewer.<Engine>` (for example `src/IOViewer.IfcIO`), and tests in
-`tests/IOViewer.Tests` and `tests/IOViewer.<Engine>.Tests`. Tests use small
-synthetic models built in code. The repository ships no customer models; set
-`IOVIEWER_IFC_FILE` to a private IFC file to run one more adapter test on it.
-
-### Engine adapters
-
-Engines (IfcIO, RvtIO and others) depend neither on IOViewer nor on each other;
-an adapter from an engine's model to `ViewerDocument` lives in this repository,
-depends on IOViewer and that one engine, and `src/IOViewer` takes no engine
-dependency. Engine package versions are set in `EngineVersions.props`.
-
-To build against an engine release that is not on nuget.org yet (IfcIO 0.11.0
-at the time of writing, so restoring the solution fails without it), pack the
-engine into a local folder and pass its version and the folder:
-
-```sh
-dotnet build IOViewer.slnx -c Release -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local-feed>
-dotnet test IOViewer.slnx -c Release --no-build
-dotnet pack IOViewer.slnx -c Release -p:Version=0.3.0-local.1 -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local-feed> -o <out>
-```
-
-Pack the whole solution with a prerelease of the next version: NuGet refuses a
-stable package that depends on a prerelease one, and the adapter package
-depends on the `IOViewer` package of the same version, so both must be in the
-output. Do not commit a `nuget.config` that points to a local feed.
-
-Until the IfcIO version in `EngineVersions.props` is on nuget.org, restoring
-the solution fails in the CI build job, the Docs workflow and `release.yml`
-(the CLI alone still restores), so do not tag a release before then.
+The library is in `src/IOViewer`, the CLI in `src/IOViewer.Cli`, and tests in
+`tests/IOViewer.Tests`. Tests use small synthetic models built in code.
+The repository ships no customer models.
 
 ### Viewer
 
@@ -133,7 +105,7 @@ Write commit messages in the imperative mood, for example,
 
 Push a tag matching the package version, such as `v0.2.0`, to run `release.yml`.
 The workflow builds and tests the solution, attaches packages, symbols, source and checksums to a GitHub release,
-and publishes the NuGet packages, including the engine adapters such as `IOViewer.IfcIO`, through Trusted Publishing. The release notes are the section of `CHANGELOG.md` for the version, so add that section before the tag.
+and publishes the NuGet packages through Trusted Publishing. The release notes are the section of `CHANGELOG.md` for the version, so add that section before the tag.
 The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
 
 ## Licensing contributions

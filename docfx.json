@@ -2,8 +2,7 @@
   "metadata": [
     {
       "src": [
-        { "src": "src/IOViewer", "files": ["IOViewer.csproj"] },
-        { "src": "src/IOViewer.IfcIO", "files": ["IOViewer.IfcIO.csproj"] }
+        { "src": "src/IOViewer", "files": ["IOViewer.csproj"] }
       ],
       "dest": "docs/api",
       "properties": { "TargetFramework": "net10.0" },

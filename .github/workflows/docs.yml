@@ -9,8 +9,6 @@ on:
       - 'templates/**'
       - '.config/dotnet-tools.json'
       - 'src/IOViewer/**'
-      - 'src/IOViewer.IfcIO/**'
-      - 'EngineVersions.props'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
@@ -19,8 +17,6 @@ on:
       - 'templates/**'
       - '.config/dotnet-tools.json'
       - 'src/IOViewer/**'
-      - 'src/IOViewer.IfcIO/**'
-      - 'EngineVersions.props'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
