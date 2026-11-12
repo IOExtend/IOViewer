@@ -12,12 +12,12 @@ export function visibleRange(scrollTop, rowHeight, viewportHeight, total, oversc
   return { start, end: Math.max(start, end) };
 }
 
-// search(query) -> indices of elements whose name, type or Id contains the query, case-insensitively.
+// search(query) -> indices of elements whose name, type, Id or source id contains the query, case-insensitively.
 export function createSearch(elements) {
   let texts = null; // lower-cased once, on the first search
   return (query) => {
     const q = query.trim().toLowerCase();
-    texts ??= elements.map((e) => `${e.name ?? ''}\n${e.type ?? ''}\n${e.id}`.toLowerCase());
+    texts ??= elements.map((e) => `${e.name ?? ''}\n${e.type ?? ''}\n${e.id}\n${e.sourceId ?? ''}`.toLowerCase());
     const found = [];
     for (let i = 0; i < texts.length; i++) if (texts[i].includes(q)) found.push(i);
     return found;

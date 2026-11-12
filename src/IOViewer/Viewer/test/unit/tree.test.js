@@ -21,7 +21,7 @@ test('visibleRange stays empty and in range when scrolled past the end (list shr
 const elements = [
   { id: 300001, name: 'Ground Slab', category: 'Floors', type: 'Concrete 300' },
   { id: 300002, name: 'Column A1', category: 'Structural Columns', type: 'Concrete 400x400' },
-  { id: 300063, name: 'Supply Duct SA-1', category: 'Ducts', type: 'Rectangular 600x400' },
+  { id: 300063, name: 'Supply Duct SA-1', category: 'Ducts', type: 'Rectangular 600x400', sourceId: '2xQ$n5SLP5MBLyL442paFx' },
   { id: 7, name: '', category: '', type: null },
 ];
 
@@ -38,6 +38,12 @@ test('search finds by type and name, ignoring case and surrounding spaces', () =
   assert.deepEqual(search('X400'), [1, 2]);
   assert.deepEqual(search('column a1'), [1]);
   assert.deepEqual(search('missing'), []);
+});
+
+test('search finds by source id, ignoring case; elements without one never match "undefined"', () => {
+  const search = createSearch(elements);
+  assert.deepEqual(search('2XQ$N5'), [2]);
+  assert.deepEqual(search('undefined'), []);
 });
 
 test('groupByCategory sorts categories by name and keeps element order inside', () => {

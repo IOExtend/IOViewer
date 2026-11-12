@@ -6,8 +6,8 @@
 
 ### Document & Model (`IOViewer.Model`)
 
-- `ViewerDocument`: The root container holding elements, meshes, shared geometries, materials, textures, viewpoints, grids, section planes and box, clash tests, linked files, and 4D schedules.
-- `ViewerElement`: Represents a BIM element (Revit element, IFC product, Navisworks node) with properties and associated mesh parts.
+- `ViewerDocument`: The root container holding elements, meshes, shared geometries, materials, textures, viewpoints, grids, section planes and box, clash tests, linked files, and 4D schedules. All coordinates and lengths are in metres, with Z up; importers and adapters convert to this on the way in.
+- `ViewerElement`: Represents a BIM element (Revit element, IFC product, Navisworks node) with properties and associated mesh parts. `SourceId` optionally holds the element's id in its source format (for example a Revit UniqueId or an IFC GlobalId); the viewer shows it in the properties panel and finds it in the model tree search. The numeric `Id` stays the key that meshes, 4D tasks and clashes use.
 - `ViewerMesh`: Triangulated 3D mesh geometry with vertex coordinates, triangle indices, normals, colors, and bounding box. A mesh can instead draw a shared `ViewerGeometry` (`GeometryId`) and place it with `Transform`.
 - `ViewerGeometry`: Triangle geometry stored once in `ViewerDocument.Geometries` and drawn by every mesh that references its `Id`.
 - `Transform3d`: Affine transform stored by columns (`XAxis`, `YAxis`, `ZAxis`, `Translation`), with `Identity`, `Translate`, `Apply` and `Then`.

@@ -6,6 +6,16 @@ API between minor releases.
 
 ## [Unreleased]
 
+### Added
+- `ViewerElement.SourceId`: the element's id in its source format, such as a Revit UniqueId or an IFC GlobalId. The
+  HTML viewer shows it as its own row in the properties panel ("Source ID" / "ID источника") and the model tree search
+  finds it. It is written to the page's element list and to JSON only when set, so the element data of documents
+  without it is written as before.
+
+### Changed
+- The documentation states the model's units and axes: all coordinates and lengths in a `ViewerDocument` are in
+  metres, with Z up.
+
 ## [0.2.0] - 2026-11-12
 
 ### Fixed

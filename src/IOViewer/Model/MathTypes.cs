@@ -106,6 +106,7 @@ public readonly record struct BoundingBox3d(Vector3d Min, Vector3d Max)
 /// Affine 3D transform stored by columns: the result of <see cref="Apply"/> is
 /// <c>XAxis * p.X + YAxis * p.Y + ZAxis * p.Z + Translation</c>.
 /// </summary>
+/// <remarks>The translation is in metres, in the document's Z-up coordinates.</remarks>
 /// <param name="XAxis">Image of the unit X vector (first matrix column).</param>
 /// <param name="YAxis">Image of the unit Y vector (second matrix column).</param>
 /// <param name="ZAxis">Image of the unit Z vector (third matrix column).</param>

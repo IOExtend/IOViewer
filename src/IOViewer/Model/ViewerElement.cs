@@ -15,6 +15,14 @@ public sealed class ViewerElement
     public string? LinkName { get; set; }
 
     /// <summary>
+    /// The element's id in its source format, e.g. a Revit UniqueId or an IFC GlobalId; null when there is none.
+    /// <see cref="Id"/> stays the key the viewer, meshes, 4D tasks and clashes use.
+    /// </summary>
+    // Left out of JSON when null, so snapshots of documents without source ids stay as they were.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceId { get; set; }
+
+    /// <summary>
     /// Parameters grouped by property category (e.g. "Identity Data", "Dimensions", "Phasing").
     /// </summary>
     [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]

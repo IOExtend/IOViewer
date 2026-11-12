@@ -8,7 +8,7 @@ public sealed class ViewerGeometry
     /// <summary>Identifier referenced by <see cref="ViewerMesh.GeometryId"/>.</summary>
     public int Id { get; set; }
 
-    /// <summary>Vertex positions in the geometry's local coordinates.</summary>
+    /// <summary>Vertex positions in the geometry's local coordinates, in metres with Z up.</summary>
     public IReadOnlyList<Vector3d> Vertices { get; set; } = [];
 
     /// <summary>Triangle vertex indices (three per triangle).</summary>

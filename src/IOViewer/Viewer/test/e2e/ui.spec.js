@@ -269,6 +269,8 @@ test('tree: search by Id, type and name flattens the matches', async ({ page }) 
   await expect(search).toHaveAttribute('placeholder', 'Поиск по имени, типу, Id…');
   await search.fill('300063');
   await expect(rows(page)).toHaveText(['Supply Duct SA-1Rectangular 600x400']);
+  await search.fill('2XQ$N5SLP');
+  await expect(rows(page)).toHaveText(['Supply Duct SA-1Rectangular 600x400']);
   await search.fill('steel i');
   await expect(rows(page)).toHaveCount(34);
   await search.fill('column d2');
@@ -402,6 +404,7 @@ test('hostile names and properties are shown as text and never run (Review Focus
   const errors = await open(page, 'escaping');
   const name = '<img src=x onerror="window.__xss=1">';
   const script = '</script><script>window.__xss=2</script>';
+  const sourceId = '"><svg onload="window.__xss=3">';
   await rail(page, 'model').click();
   await rows(page).filter({ hasText: 'Walls' }).click();
   const row = rows(page).filter({ hasText: name });
@@ -413,6 +416,7 @@ test('hostile names and properties are shown as text and never run (Review Focus
   await expect(panel.locator('h3').nth(1)).toHaveText(script);
   await expect(panel.locator('th', { hasText: 'window.__xss=2' })).toHaveText(script);
   await expect(panel.locator('td', { hasText: 'window.__xss=2' })).toHaveText(script);
+  await expect(panel.locator('tr', { hasText: 'ID источника' }).locator('td')).toHaveText(sourceId);
   expect(await page.evaluate(() => window.__xss)).toBeUndefined();
   expect(await page.locator('#ioviewer-ui img').count()).toBe(0);
   expect(errors).toEqual([]);
@@ -428,5 +432,15 @@ test.describe('in English', () => {
     await expect(rail(page, 'links')).toHaveAttribute('title', 'Linked files');
     await page.mouse.click(...blank, { button: 'right' });
     await expect(menu(page).locator('.ioviewer-menu-item span')).toHaveText(['Show all', 'Fit all', 'Reset sections']);
+  });
+
+  test('properties show the source id as its own row, only for elements that have one', async ({ page }) => {
+    await open(page);
+    const panel = page.locator('#ioviewer-properties');
+    await page.evaluate((i) => window.__ioviewer.selection.set([i]), await indexOf(page, 'Supply Duct SA-1'));
+    await expect(panel.locator('table').first().locator('th')).toHaveText(['Id', 'Category', 'Type', 'Level', 'Source ID', 'Link']);
+    await expect(panel.locator('tr', { hasText: 'Source ID' }).locator('td')).toHaveText('2xQ$n5SLP5MBLyL442paFx');
+    await page.evaluate((i) => window.__ioviewer.selection.set([i]), await indexOf(page, 'Column D2 Level 1'));
+    await expect(panel.locator('table').first().locator('th')).toHaveText(['Id', 'Category', 'Type', 'Level', 'Link']);
   });
 });

@@ -112,6 +112,7 @@ AddBox(curtain, new(0, -0.75, 0), new(18, -0.65, 0.1), mullion);
 AddBox(curtain, new(0, -0.72, 0.1), new(18, -0.68, 2 * storey), glass, 0.35);
 
 var duct = Element("Supply Duct SA-1", "Ducts", "Rectangular 600x400", "Level 2", "MEP.rvt");
+duct.SourceId = "2xQ$n5SLP5MBLyL442paFx"; // IFC GlobalId style
 duct.AddProperty("Mechanical", "System", "Supply Air");
 AddBox(duct, new(8.7, -1, storey - slab - 0.4), new(9.3, 13, storey - slab), ductColor);
 
@@ -198,17 +199,22 @@ void AddBox(ViewerElement e, Vector3d min, Vector3d max, RgbaColor color, double
     AddMesh(e, new ViewerMesh { Name = e.Name, Vertices = v, Indices = i, Normals = n, Color = color, Opacity = opacity });
 }
 
-// Hostile markup in an element name and in a property group, name and value: the viewer must show it as text.
+// Hostile markup in an element name, source id and in a property group, name and value: the viewer must show it as text.
 // No clashes, 4D, links or viewpoints, so the panels for them stay hidden.
 ViewerDocument Escaping()
 {
     const string script = "</script><script>window.__xss=2</script>";
+    const string sourceId = "\"><svg onload=\"window.__xss=3\">";
     var hostile = new ViewerDocument("Escaping");
     string[] names = ["<img src=x onerror=\"window.__xss=1\">", "Plain Wall", "Plain Slab"];
     for (int k = 0; k < names.Length; k++)
     {
         var e = new ViewerElement { Id = 500001 + k, Name = names[k], Category = "Walls", TypeName = "Generic 200", Level = "Level 1" };
-        if (k == 0) e.AddProperty(script, script, script);
+        if (k == 0)
+        {
+            e.AddProperty(script, script, script);
+            e.SourceId = sourceId;
+        }
         else e.AddProperty("Identity Data", "Mark", names[k]);
         var (v, i, n) = Box(new(k * 3, 0, 0), new(k * 3 + 2, 0.3, 3));
         e.MeshIndices.Add(k);

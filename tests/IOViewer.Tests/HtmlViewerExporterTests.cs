@@ -144,6 +144,27 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void Meta_WritesSourceIdOnlyWhenSet()
+    {
+        const string hostile = "\"></script><script>window.__xss=1</script>";
+        var doc = new ViewerDocument("Source ids");
+        doc.Elements.Add(new ViewerElement { Id = 1, Name = "Wall", SourceId = "2xQ$n5SLP5MBLyL442paFx" });
+        doc.Elements.Add(new ViewerElement { Id = 2, Name = "Door" });
+        doc.Elements.Add(new ViewerElement { Id = 3, Name = "Empty", SourceId = "" });
+        doc.Elements.Add(new ViewerElement { Id = 4, Name = "Hostile", SourceId = hostile });
+
+        var view = ViewerHtml.Export(doc);
+        var elements = view.Meta.GetProperty("elements");
+
+        Assert.Equal("2xQ$n5SLP5MBLyL442paFx", elements[0].GetProperty("sourceId").GetString());
+        Assert.False(elements[1].TryGetProperty("sourceId", out _));
+        Assert.False(elements[2].TryGetProperty("sourceId", out _));
+        Assert.Equal(hostile, elements[3].GetProperty("sourceId").GetString());
+        // The value is escaped inside the META block: the markup never reaches the page as is.
+        Assert.DoesNotContain(hostile, view.Html);
+    }
+
+    [Fact]
     public void Save_WritesSameHtmlAsExportToString()
     {
         var doc = GeoreferencedModel();

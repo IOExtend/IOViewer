@@ -41,6 +41,7 @@ export function mountProperties(container, selection, data) {
     const element = data.meta.elements[index];
     title.textContent = element.name || `#${element.id}`;
     const fields = [[t('id'), element.id], [t('category'), element.category], [t('type'), element.type], [t('level'), element.level]];
+    if (element.sourceId) fields.push([t('sourceId'), element.sourceId]);
     if (element.link) fields.push([t('link'), element.link]);
     body.append(group(t('elementGroup'), fields));
     for (const [name, values] of Object.entries(data.props(element.id) ?? {})) body.append(group(name, Object.entries(values)));

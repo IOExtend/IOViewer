@@ -73,6 +73,22 @@ public class JsonAndImportTests
     }
 
     [Fact]
+    public void JsonRoundtrip_KeepsSourceIdAndOmitsItWhenNull()
+    {
+        var doc = new ViewerDocument("Source ids");
+        doc.Elements.Add(new ViewerElement { Id = 1, Name = "Wall", SourceId = "2xQ$n5SLP5MBLyL442paFx" });
+        doc.Elements.Add(new ViewerElement { Id = 2, Name = "Door" });
+
+        string json = JsonViewerExporter.ExportToString(doc);
+        Assert.Equal(1, json.Split("\"SourceId\"").Length - 1);
+
+        using var ms = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var imported = JsonViewerImporter.Load(ms);
+        Assert.Equal("2xQ$n5SLP5MBLyL442paFx", imported.Elements[0].SourceId);
+        Assert.Null(imported.Elements[1].SourceId);
+    }
+
+    [Fact]
     public void ObjViewerImporter_ParsesWavefrontObj()
     {
         const string objData = """

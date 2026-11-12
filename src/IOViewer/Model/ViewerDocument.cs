@@ -5,6 +5,11 @@ namespace IOViewer.Model;
 /// <summary>
 /// Root container representing a 3D BIM/CAD model scene graph ready for interactive 3D WebGL viewing.
 /// </summary>
+/// <remarks>
+/// All coordinates and lengths in the document are in metres, in a right-handed system with Z up: vertices,
+/// transforms, bounding boxes, cameras, grids, sections and clash points. Producers convert to this on the way in
+/// (for example, <see cref="Importers.GlbViewerImporter"/> converts glTF's Y-up).
+/// </remarks>
 public sealed class ViewerDocument
 {
     public string Title { get; set; } = "3D BIM Model";

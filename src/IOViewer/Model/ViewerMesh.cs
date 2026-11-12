@@ -9,6 +9,7 @@ public sealed class ViewerMesh
     public string Name { get; set; } = string.Empty;
     public long? ElementId { get; set; }
 
+    /// <summary>Vertex positions in metres with Z up, placed by <see cref="Transform"/>.</summary>
     public IReadOnlyList<Vector3d> Vertices { get; set; } = [];
     public IReadOnlyList<int> Indices { get; set; } = [];
     public IReadOnlyList<Vector3d>? Normals { get; set; }

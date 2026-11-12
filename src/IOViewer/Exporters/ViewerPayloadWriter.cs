@@ -539,6 +539,7 @@ internal sealed class ViewerPayloadWriter
             w.WriteString("level", el.Level);
             if (string.IsNullOrEmpty(el.LinkName)) w.WriteNull("link");
             else w.WriteString("link", el.LinkName);
+            if (!string.IsNullOrEmpty(el.SourceId)) w.WriteString("sourceId", el.SourceId);
             w.WriteEndObject();
             FlushIfLarge(w);
         }
