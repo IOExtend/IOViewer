@@ -47,11 +47,11 @@ references none of them.
 | [IfcIO](https://github.com/IOExtend/IfcIO) 0.11.0 and IfcIO.Scene 0.11.0 | read IFC files into a scene | MIT, copyright (c) 2026 IfcIO contributors |
 | [RvtIO](https://github.com/IOExtend/RvtIO) 0.4.0 and RvtIO.Scene 0.4.0 | read Revit files into a scene | MIT, copyright (c) 2026 mahach666 |
 | .NET runtime libraries (DeflateManaged sources, compiled into RvtIO) | managed inflate implementation adapted for tolerant decoding | MIT, copyright (c) .NET Foundation and Contributors |
-| [OpenMcdf](https://github.com/ironfede/openmcdf) 3.4.0, used by RvtIO | reads the compound file container of Revit files | MPL-2.0, copyright (c) 2010-2026 Federico Blaseotto, Jeremy Powell |
+| [OpenMcdf](https://github.com/openmcdf/openmcdf) 3.4.0, used by RvtIO | reads the compound file container of Revit files | MPL-2.0, copyright (c) 2010-2026 Federico Blaseotto, Jeremy Powell |
 | [SharpZipLib](https://github.com/icsharpcode/SharpZipLib) 1.4.2, used by RvtIO | stream decompression | MIT, copyright (c) 2000-2022 SharpZipLib Contributors |
 
 OpenMcdf is distributed unmodified under the Mozilla Public License 2.0 (<https://mozilla.org/MPL/2.0/>); its source
-code is available at <https://github.com/ironfede/openmcdf>.
+code is available at <https://github.com/openmcdf/openmcdf>.
 
 The MIT-licensed components above are distributed under the following terms, each with the copyright line given in the
 table:
