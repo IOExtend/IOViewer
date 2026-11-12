@@ -43,6 +43,36 @@ public class JsonAndImportTests
     }
 
     [Fact]
+    public void JsonRoundtrip_KeepsGetterOnlyCollections()
+    {
+        var doc = new ViewerDocument("Collections");
+        var element = new ViewerElement { Id = 7, Name = "Wall" };
+        element.AddProperty("Dimensions", "Width", "200 mm");
+        element.MeshIndices.Add(3);
+        doc.Elements.Add(element);
+        var grids = new ViewerGridSystem();
+        grids.Lines.Add(new ViewerGridLine("A", new(0, 0, 0), new(0, 10, 0)));
+        doc.Grids = grids;
+        var schedule = new ViewerTimeLinerSchedule("4D");
+        var task = new ViewerTimeLinerTask("T1", "Build", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch.AddDays(1));
+        task.AttachedElementIds.Add(7);
+        task.Children.Add(new ViewerTimeLinerTask("T1.1", "Sub", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        schedule.Tasks.Add(task);
+        doc.TimeLiner = schedule;
+
+        using var ms = new MemoryStream(Encoding.UTF8.GetBytes(JsonViewerExporter.ExportToString(doc)));
+        var imported = JsonViewerImporter.Load(ms);
+
+        var importedElement = Assert.Single(imported.Elements);
+        Assert.Equal("200 mm", importedElement.Properties["dimensions"]["Width"]);
+        Assert.Equal([3], importedElement.MeshIndices);
+        Assert.Equal("A", Assert.Single(imported.Grids!.Lines).Name);
+        var importedTask = Assert.Single(imported.TimeLiner!.Tasks);
+        Assert.Equal([7L], importedTask.AttachedElementIds);
+        Assert.Equal("T1.1", Assert.Single(importedTask.Children).Id);
+    }
+
+    [Fact]
     public void ObjViewerImporter_ParsesWavefrontObj()
     {
         const string objData = """
@@ -69,6 +99,109 @@ public class JsonAndImportTests
         Assert.Equal(new Vector3d(2, 0, 0), mesh.Vertices[1]);
         Assert.Equal(new Vector3d(2, 3, 0), mesh.Vertices[2]);
         Assert.Equal(new Vector3d(0, 3, 0), mesh.Vertices[3]);
+        var element = Assert.Single(doc.Elements);
+        Assert.Equal(("TestBox", "OBJ", (long?)element.Id), (element.Name, element.Category, mesh.ElementId));
+        Assert.Equal([0], element.MeshIndices);
+    }
+
+    private const string TwoBoxesObj = """
+        o Box1
+        v 0 0 0
+        v 1 0 0
+        v 0 1 0
+        f 1 2 3
+        o Box2
+        v 10 0 0
+        v 11 0 0
+        v 10 1 0
+        f 4 5 6
+        f -3 -2 -1
+        """;
+
+    [Fact]
+    public void ObjViewerImporter_CreatesOneElementPerObject()
+    {
+        using var ms = new MemoryStream(Encoding.UTF8.GetBytes(TwoBoxesObj));
+        var doc = ObjViewerImporter.Load(ms);
+
+        Assert.Equal(["Box1", "Box2"], doc.Elements.Select(e => e.Name));
+        Assert.All(doc.Elements, e => Assert.Equal("OBJ", e.Category));
+        Assert.Equal(2, doc.Elements.Select(e => e.Id).Distinct().Count());
+        for (int i = 0; i < doc.Meshes.Count; i++)
+        {
+            var element = Assert.Single(doc.Elements, e => e.Id == doc.Meshes[i].ElementId);
+            Assert.Equal([i], element.MeshIndices);
+        }
+
+        // Box2 carries only its own three vertices, reindexed; negative (relative) indices resolve to the same ones.
+        var box2 = doc.Meshes[1];
+        Assert.Equal([new Vector3d(10, 0, 0), new Vector3d(11, 0, 0), new Vector3d(10, 1, 0)], box2.Vertices);
+        Assert.Equal([0, 1, 2, 0, 1, 2], box2.Indices);
+        Assert.Equal(new Vector3d(10, 0, 0), box2.ComputeBoundingBox().Min);
+    }
+
+    [Fact]
+    public void ObjViewerImporter_FacesBeforeAnyObjectGetDefaultElement()
+    {
+        const string objData = """
+            v 0 0 0
+            v 1 0 0
+            v 0 1 0
+            f 1 2 3
+            """;
+
+        using var ms = new MemoryStream(Encoding.UTF8.GetBytes(objData));
+        var doc = ObjViewerImporter.Load(ms);
+
+        Assert.Equal("DefaultMesh", Assert.Single(doc.Elements).Name);
+    }
+
+    [Fact]
+    public void ObjViewerImporter_FaceVertexNotYetRead_Throws()
+    {
+        const string objData = """
+            o A
+            v 0 0 0
+            v 1 0 0
+            f 1 2 3
+            o B
+            v 0 1 0
+            """;
+
+        using var ms = new MemoryStream(Encoding.UTF8.GetBytes(objData));
+        var ex = Assert.Throws<InvalidDataException>(() => ObjViewerImporter.Load(ms));
+        Assert.Contains("face vertex 3 is outside the 2 vertices", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ObjImport_ExportedInstancesReferenceElements()
+    {
+        using var ms = new MemoryStream(Encoding.UTF8.GetBytes(TwoBoxesObj));
+        var view = ViewerHtml.Export(ObjViewerImporter.Load(ms));
+
+        var elements = view.Instances("element");
+        Assert.Equal(2, elements.Length);
+        Assert.All(elements, e => Assert.True(e >= 0));
+        Assert.Equal(2, elements.Distinct().Count());
+        Assert.Equal(2, view.Meta.GetProperty("elements").GetArrayLength());
+    }
+
+    [Fact]
+    public void GlbViewerImporter_CreatesOneElementPerNode()
+    {
+        var doc = GlbSharedGeometryTests.Import(
+            """{ "name": "Left", "mesh": 0 }, { "name": "Right", "mesh": 0, "translation": [10,0,0] }, { "mesh": 0 }""", "0, 1, 2");
+
+        // Two named nodes share one mesh and still select separately; an unnamed node takes the mesh name.
+        Assert.Equal(["Left", "Right", "Tri"], doc.Elements.Select(e => e.Name));
+        Assert.All(doc.Elements, e => Assert.Equal("GLB", e.Category));
+        Assert.Equal(3, doc.Elements.Select(e => e.Id).Distinct().Count());
+        Assert.Equal(3, doc.Meshes.Count);
+        for (int i = 0; i < doc.Meshes.Count; i++)
+        {
+            var element = Assert.Single(doc.Elements, e => e.Id == doc.Meshes[i].ElementId);
+            Assert.Equal([i], element.MeshIndices);
+        }
     }
 
     [Fact]
@@ -152,8 +285,14 @@ public class JsonAndImportTests
         Assert.Single(doc.Meshes);
         var mesh = doc.Meshes[0];
         Assert.Equal("GlbTriangle", mesh.Name);
-        Assert.Equal(3, mesh.Vertices.Count);
-        Assert.Equal(3, mesh.Indices.Count);
-        Assert.Equal(new Vector3d(1, 0, 0), mesh.Vertices[1]);
+        var geometry = Assert.Single(doc.Geometries);
+        Assert.Equal(geometry.Id, mesh.GeometryId);
+        Assert.Equal(3, geometry.Vertices.Count);
+        Assert.Equal(3, geometry.Indices.Count);
+        Assert.Equal(new Vector3d(1, 0, 0), geometry.Vertices[1]);
+
+        // Without a scene graph the element is named after the mesh.
+        var element = Assert.Single(doc.Elements);
+        Assert.Equal(("GlbTriangle", "GLB", (long?)element.Id), (element.Name, element.Category, mesh.ElementId));
     }
 }

@@ -14,6 +14,12 @@ public sealed class ViewerMesh
     public IReadOnlyList<Vector3d>? Normals { get; set; }
     public IReadOnlyList<Vector2d>? UVs { get; set; }
 
+    /// <summary>Id of a <see cref="ViewerGeometry"/> in <see cref="ViewerDocument.Geometries"/> drawn by this mesh, if any.</summary>
+    public int? GeometryId { get; set; }
+
+    /// <summary>Placement of this mesh's own <see cref="Vertices"/> and of the shared geometry; null means identity.</summary>
+    public Transform3d? Transform { get; set; }
+
     public int? MaterialId { get; set; }
     public RgbaColor? Color { get; set; }
     public double Opacity { get; set; } = 1.0;

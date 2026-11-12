@@ -103,6 +103,36 @@ public readonly record struct BoundingBox3d(Vector3d Min, Vector3d Max)
 }
 
 /// <summary>
+/// Affine 3D transform stored by columns: the result of <see cref="Apply"/> is
+/// <c>XAxis * p.X + YAxis * p.Y + ZAxis * p.Z + Translation</c>.
+/// </summary>
+/// <param name="XAxis">Image of the unit X vector (first matrix column).</param>
+/// <param name="YAxis">Image of the unit Y vector (second matrix column).</param>
+/// <param name="ZAxis">Image of the unit Z vector (third matrix column).</param>
+/// <param name="Translation">Translation applied after the linear part.</param>
+public readonly record struct Transform3d(Vector3d XAxis, Vector3d YAxis, Vector3d ZAxis, Vector3d Translation)
+{
+    /// <summary>The transform that leaves every point unchanged.</summary>
+    public static readonly Transform3d Identity = new(Vector3d.UnitX, Vector3d.UnitY, Vector3d.UnitZ, Vector3d.Zero);
+
+    /// <summary>Creates a pure translation.</summary>
+    /// <param name="t">Translation vector.</param>
+    public static Transform3d Translate(Vector3d t) => new(Vector3d.UnitX, Vector3d.UnitY, Vector3d.UnitZ, t);
+
+    /// <summary>Transforms a point.</summary>
+    /// <param name="p">Point in local coordinates.</param>
+    public Vector3d Apply(Vector3d p) => XAxis * p.X + YAxis * p.Y + ZAxis * p.Z + Translation;
+
+    /// <summary>Composes two transforms: this one is applied first, then <paramref name="next"/>.</summary>
+    /// <param name="next">Transform applied after this one.</param>
+    public Transform3d Then(Transform3d next) => new(
+        next.Apply(XAxis) - next.Translation,
+        next.Apply(YAxis) - next.Translation,
+        next.Apply(ZAxis) - next.Translation,
+        next.Apply(Translation));
+}
+
+/// <summary>
 /// 8-bit per channel RGBA color with double precision conversion.
 /// </summary>
 public readonly record struct RgbaColor(byte R, byte G, byte B, byte A = 255)

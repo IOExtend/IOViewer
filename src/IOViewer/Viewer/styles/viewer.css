@@ -1,0 +1,901 @@
+:root {
+  color-scheme: dark;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --panel: rgba(28, 31, 37, 0.95);
+  --border: #323843;
+  --button: #2a2f38;
+  --button-hover: #353b46;
+  --accent: #2563eb;
+  --accent-text: #93c5fd;
+  --text: #cbd5e1;
+  --text-dim: #a8b3c3;
+  --muted: #6b7686;
+  /* Space kept clear above the bottom edge for the toolbar, so panels never cover it. */
+  --toolbar-space: 104px;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #1f2228;
+  color: var(--text);
+}
+
+#ioviewer-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Overlay for UI; children opt back into pointer events. */
+#ioviewer-ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.ioviewer-floating {
+  position: absolute;
+  box-sizing: border-box;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+#ioviewer-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #94a3b8;
+}
+
+#ioviewer-status {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* Rail of panel icons and the floating panels it opens */
+.ioviewer-rail {
+  left: 12px;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+}
+
+.ioviewer-rail-button,
+.ioviewer-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--button);
+  cursor: pointer;
+}
+
+.ioviewer-rail-button:hover,
+.ioviewer-tool:hover {
+  background: var(--button-hover);
+}
+
+.ioviewer-rail-button.active,
+.ioviewer-tool.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ioviewer-tool[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ioviewer-tool[aria-disabled="true"]:hover {
+  background: var(--button);
+}
+
+.ioviewer-side-panel {
+  left: 62px;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-width: calc(100% - 74px);
+  max-height: calc(100% - 12px - var(--toolbar-space));
+  padding: 8px;
+}
+
+.ioviewer-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.ioviewer-panel-header h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+.ioviewer-panel-close {
+  display: flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.ioviewer-panel-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ioviewer-panel-close:hover {
+  background: var(--button-hover);
+  color: #fff;
+}
+
+.ioviewer-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Model tree */
+.ioviewer-tree-search {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #1b1e24;
+  color: var(--text);
+  font: inherit;
+}
+
+.ioviewer-tree {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ioviewer-tree-spacer {
+  position: relative;
+}
+
+.ioviewer-tree-empty {
+  padding: 6px 4px;
+  color: var(--muted);
+}
+
+.tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  border-radius: 3px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: #262b33;
+}
+
+.tree-child {
+  padding-left: 26px;
+}
+
+.tree-chevron {
+  display: flex;
+  color: var(--muted);
+}
+
+.tree-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tree-category[aria-expanded="true"] .tree-chevron {
+  transform: rotate(90deg);
+}
+
+.tree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-type,
+.tree-count {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.tree-element.selected {
+  background: #1e3a8a;
+  color: #bfdbfe;
+}
+
+.tree-hidden {
+  opacity: 0.45;
+}
+
+/* View cube, top right: a 96 px cube with an arrow on each side and "home" in the corner. Only the cube canvas
+   and the buttons take pointer events. */
+.ioviewer-viewcube {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 132px;
+  height: 132px;
+  pointer-events: none;
+}
+
+.ioviewer-viewcube-canvas {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ioviewer-viewcube-arrow,
+.ioviewer-viewcube-home {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text-dim);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.ioviewer-viewcube-arrow:hover,
+.ioviewer-viewcube-home:hover {
+  background: var(--button-hover);
+  color: #fff;
+}
+
+.ioviewer-viewcube-arrow svg,
+.ioviewer-viewcube-home svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="up"] {
+  left: 57px;
+  top: 0;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="up"] svg {
+  transform: rotate(-90deg);
+}
+
+.ioviewer-viewcube-arrow[data-arrow="down"] {
+  left: 57px;
+  bottom: 0;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="down"] svg {
+  transform: rotate(90deg);
+}
+
+.ioviewer-viewcube-arrow[data-arrow="left"] {
+  left: 0;
+  top: 57px;
+}
+
+.ioviewer-viewcube-arrow[data-arrow="left"] svg {
+  transform: rotate(180deg);
+}
+
+.ioviewer-viewcube-arrow[data-arrow="right"] {
+  right: 0;
+  top: 57px;
+}
+
+.ioviewer-viewcube-home {
+  left: 0;
+  top: 0;
+}
+
+/* Properties of the selection, right, below the view cube. */
+#ioviewer-properties {
+  right: 12px;
+  top: 152px;
+  width: 300px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 152px - var(--toolbar-space));
+  overflow: auto;
+  padding: 8px 12px 12px;
+}
+
+#ioviewer-properties header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ioviewer-properties-title {
+  flex: 1;
+  margin: 2px 0;
+  font-size: 14px;
+  color: #e2e8f0;
+  overflow-wrap: anywhere;
+}
+
+.ioviewer-properties-close {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.ioviewer-properties-close:hover {
+  background: var(--button-hover);
+  color: #fff;
+}
+
+#ioviewer-properties h3 {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+#ioviewer-properties table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#ioviewer-properties th,
+#ioviewer-properties td {
+  padding: 2px 0;
+  border-bottom: 1px solid #262b33;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+#ioviewer-properties th {
+  width: 40%;
+  padding-right: 8px;
+  font-weight: normal;
+  color: #7c8797;
+}
+
+/* Bottom toolbar: groups of tools with a label under each */
+.ioviewer-toolbar {
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  padding: 6px 0;
+}
+
+.ioviewer-toolbar-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 8px;
+  border-right: 1px solid #39404c;
+}
+
+.ioviewer-toolbar-group:last-child {
+  border-right: 0;
+}
+
+.ioviewer-toolbar-row {
+  display: flex;
+  gap: 3px;
+}
+
+.ioviewer-toolbar-label {
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Context menu */
+.ioviewer-context-menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 220px;
+  padding: 4px 0;
+  background: #262a31;
+  border: 1px solid #3a404b;
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}
+
+.ioviewer-menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 5px 12px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ioviewer-menu-item:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ioviewer-menu-item:disabled {
+  color: #5b6575;
+  cursor: default;
+}
+
+.ioviewer-menu-item kbd {
+  font: inherit;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ioviewer-menu-item:hover:not(:disabled) kbd {
+  color: #dbeafe;
+}
+
+.ioviewer-menu-separator {
+  margin: 4px 0;
+  border-top: 1px solid #3a404b;
+}
+
+/* Truncation banner, toast, off-screen copy buffer */
+.ioviewer-banner {
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 260px);
+  padding: 6px 8px 6px 12px;
+  border-color: #a16207;
+  color: #fde68a;
+}
+
+.ioviewer-toast {
+  position: absolute;
+  left: 50%;
+  bottom: var(--toolbar-space);
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #262a31;
+  border: 1px solid #3a404b;
+  color: #e2e8f0;
+}
+
+.ioviewer-offscreen {
+  position: fixed;
+  top: 0;
+  left: -9999px;
+  opacity: 0;
+}
+
+/* Sections panel */
+.ioviewer-segmented {
+  display: flex;
+  gap: 2px;
+}
+
+.ioviewer-segmented button,
+.ioviewer-text-button {
+  flex: 1 1 auto;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--button);
+  cursor: pointer;
+}
+
+.ioviewer-segmented button:hover,
+.ioviewer-text-button:hover:not(:disabled) {
+  background: var(--button-hover);
+}
+
+.ioviewer-segmented button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ioviewer-text-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ioviewer-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ioviewer-section-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ioviewer-section-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ioviewer-section-plane {
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.ioviewer-section-plane.active {
+  border-color: var(--accent);
+}
+
+.ioviewer-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ioviewer-section-name {
+  flex: 1 1 auto;
+  color: var(--text-dim);
+}
+
+.ioviewer-section-slider {
+  width: 100%;
+  accent-color: var(--accent-text);
+}
+
+.ioviewer-section-empty {
+  color: var(--muted);
+}
+
+.ioviewer-icon-button {
+  display: flex;
+  padding: 3px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.ioviewer-icon-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ioviewer-icon-button:hover,
+.ioviewer-icon-button[aria-pressed="true"] {
+  background: var(--button-hover);
+  color: #fff;
+}
+
+.ioviewer-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.ioviewer-panel-body > .ioviewer-check {
+  margin-top: 10px;
+}
+
+/* Display popovers above their toolbar buttons */
+.ioviewer-popover {
+  position: fixed;
+  z-index: 10;
+  padding: 4px 0;
+}
+
+.ioviewer-display-modes {
+  min-width: 160px;
+}
+
+.ioviewer-display-modes .ioviewer-menu-item[aria-checked="true"] {
+  color: var(--accent-text);
+}
+
+.ioviewer-display-modes .ioviewer-menu-item[aria-checked="true"]::after {
+  content: "\2713";
+}
+
+.ioviewer-opacity {
+  width: 200px;
+  padding: 8px 12px;
+}
+
+.ioviewer-opacity-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+}
+
+.ioviewer-opacity-slider {
+  width: 100%;
+  accent-color: var(--accent-text);
+}
+
+/* Screen-space labels over the scene: measured distance, grid axis names */
+.ioviewer-measure-label,
+.ioviewer-grid-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.ioviewer-measure-label {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(17, 19, 23, 0.85);
+  border: 1px solid #facc15;
+  color: #fde68a;
+  font-variant-numeric: tabular-nums;
+}
+
+.ioviewer-grid-label {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border: 1px solid #93c5fd;
+  border-radius: 11px;
+  background: rgba(17, 19, 23, 0.8);
+  color: #dbeafe;
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* Rows of the views, clashes, 4D and links panels: one line each, a long name ends in an ellipsis */
+.ioviewer-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ioviewer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  text-align: left;
+}
+
+button.ioviewer-row,
+label.ioviewer-row {
+  cursor: pointer;
+}
+
+button.ioviewer-row:hover,
+label.ioviewer-row:hover {
+  background: #262b33;
+}
+
+.ioviewer-row[aria-current="true"],
+.ioviewer-row[aria-current="true"]:hover {
+  background: #1e3a8a;
+  color: #bfdbfe;
+}
+
+.ioviewer-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ioviewer-row-count,
+.ioviewer-task-dates,
+.ioviewer-clash-distance {
+  flex: none;
+  font-size: 11px;
+  color: #7c8797;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ioviewer-tour,
+.ioviewer-player-open {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.ioviewer-tour svg,
+.ioviewer-player-open svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ioviewer-tour[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Clashes: test headers fold their clashes; the status is a coloured chip */
+.ioviewer-clash-header {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ioviewer-clash-header svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.ioviewer-clash-header[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.ioviewer-clash {
+  padding-left: 26px;
+}
+
+.ioviewer-clash-status {
+  flex: none;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: #475569;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.ioviewer-clash-status[data-status="New"] {
+  background: #dc2626;
+}
+
+.ioviewer-clash-status[data-status="Active"] {
+  background: #c2410c;
+}
+
+.ioviewer-clash-status[data-status="Reviewed"] {
+  background: #2563eb;
+}
+
+.ioviewer-clash-status[data-status="Approved"] {
+  background: #15803d;
+}
+
+/* 4D: task rows with a dot in the colour their elements get while active, and the player above the toolbar */
+.ioviewer-task::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.ioviewer-task[data-type="demolish"]::before {
+  background: #ef4444;
+}
+
+.ioviewer-task[data-type="temporary"]::before {
+  background: #a855f7;
+}
+
+.ioviewer-player {
+  left: 50%;
+  bottom: 102px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(720px, calc(100% - 24px));
+  padding: 6px 10px;
+}
+
+.ioviewer-player-date {
+  flex: none;
+  min-width: 110px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ioviewer-player-slider {
+  flex: 1 1 auto;
+  min-width: 60px;
+  accent-color: var(--accent-text);
+}
+
+.ioviewer-player .ioviewer-segmented {
+  flex: none;
+}

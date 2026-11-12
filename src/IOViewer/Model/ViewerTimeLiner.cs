@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace IOViewer.Model;
 
 public enum ViewerTimeLinerTaskType
@@ -26,7 +28,9 @@ public sealed class ViewerTimeLinerTask
     public double Progress { get; set; }
 
     public string? AttachedSetName { get; set; }
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public List<long> AttachedElementIds { get; } = [];
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public List<ViewerTimeLinerTask> Children { get; } = [];
 
     public ViewerTimeLinerTask() { }
@@ -47,6 +51,7 @@ public sealed class ViewerTimeLinerTask
 public sealed class ViewerTimeLinerSchedule
 {
     public string Name { get; set; } = "TimeLiner Schedule";
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public List<ViewerTimeLinerTask> Tasks { get; } = [];
 
     public ViewerTimeLinerSchedule() { }

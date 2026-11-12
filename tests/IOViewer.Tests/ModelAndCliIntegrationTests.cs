@@ -85,10 +85,12 @@ public class ModelAndCliIntegrationTests
             Assert.Equal(0, code);
 
             Assert.True(File.Exists(tempHtml));
-            string html = File.ReadAllText(tempHtml);
-            Assert.Contains("Pyramid Test", html);
-            Assert.Contains("TriangularPyramid", html);
-            Assert.Contains("initialWireframe\":true", html);
+            var view = ViewerHtml.Parse(File.ReadAllText(tempHtml));
+            Assert.Equal("Pyramid Test", view.Meta.GetProperty("title").GetString());
+            Assert.True(view.Meta.GetProperty("options").GetProperty("initialWireframe").GetBoolean());
+            Assert.Equal(1, view.InstanceCount);
+            Assert.Equal(12, view.Positions(view.Geometries[0]).Length);
+            Assert.Equal(12, view.Read(view.Geometries[0].GetProperty("indices")).Length);
         }
         finally
         {
@@ -126,6 +128,82 @@ public class ModelAndCliIntegrationTests
         {
             if (File.Exists(tempObj)) File.Delete(tempObj);
             if (File.Exists(tempJson)) File.Delete(tempJson);
+        }
+    }
+
+    [Fact]
+    public void Cli_InvalidObjFace_FailsAtLoadAndKeepsExistingOutput()
+    {
+        // The OBJ importer rejects the face itself, so this covers the load-time failure path.
+        const string objData = """
+            v 0 0 0
+            v 1 0 0
+            v 0 1 0
+            f 1 2 9
+            """;
+
+        var tempObj = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.obj");
+        var tempHtml = Path.Combine(Path.GetTempPath(), $"test_viewer_{Guid.NewGuid():N}.html");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            File.WriteAllText(tempObj, objData);
+            File.WriteAllText(tempHtml, "previous export");
+            Console.SetError(errors);
+
+            int code = Program.Main(new[] { tempObj, "-o", tempHtml });
+
+            Assert.Equal(3, code);
+            Assert.Equal("previous export", File.ReadAllText(tempHtml));
+            string message = errors.ToString().TrimEnd();
+            Assert.Contains("outside the 3 vertices", message, StringComparison.Ordinal);
+            Assert.DoesNotContain(Environment.NewLine, message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            if (File.Exists(tempObj)) File.Delete(tempObj);
+            if (File.Exists(tempHtml)) File.Delete(tempHtml);
+        }
+    }
+
+    [Fact]
+    public void Cli_InvalidGeometryInJson_FailsAtExportAndKeepsExistingOutput()
+    {
+        // The JSON importer does not validate indices, so the HTML writer is the one that rejects them.
+        var doc = new ViewerDocument("Bad indices");
+        doc.Meshes.Add(new ViewerMesh
+        {
+            Id = 1,
+            Name = "Broken",
+            Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
+            Indices = [0, 1, 9]
+        });
+
+        var tempJson = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.json");
+        var tempHtml = Path.Combine(Path.GetTempPath(), $"test_viewer_{Guid.NewGuid():N}.html");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            IOViewer.Exporters.JsonViewerExporter.Save(doc, tempJson);
+            File.WriteAllText(tempHtml, "previous export");
+            Console.SetError(errors);
+
+            int code = Program.Main(new[] { tempJson, "-o", tempHtml });
+
+            Assert.Equal(3, code);
+            Assert.Equal("previous export", File.ReadAllText(tempHtml));
+            string message = errors.ToString().TrimEnd();
+            Assert.StartsWith("Error: Failed to export", message, StringComparison.Ordinal);
+            Assert.Contains("outside the 3 vertices", message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            if (File.Exists(tempJson)) File.Delete(tempJson);
+            if (File.Exists(tempHtml)) File.Delete(tempHtml);
         }
     }
 }

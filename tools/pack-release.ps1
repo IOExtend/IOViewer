@@ -43,6 +43,7 @@ Invoke-DotNet publish (Join-Path $root 'src\IOViewer\IOViewer.csproj') -c Releas
 Invoke-DotNet publish (Join-Path $root 'src\IOViewer\IOViewer.csproj') -c Release -f net10.0 -o $libNet10
 Copy-Item (Join-Path $root 'README.md') $libStage
 Copy-Item (Join-Path $root 'LICENSE') $libStage
+Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $libStage
 New-Zip $libStage (Join-Path $Output "IOViewer-$version.zip")
 
 # 2. CLI (.NET 8 Runtime)
@@ -51,6 +52,7 @@ $cliNet8 = Join-Path $stage 'cli-net8.0'
 Invoke-DotNet publish (Join-Path $root 'src\IOViewer.Cli\IOViewer.Cli.csproj') -c Release -f net8.0 -o $cliNet8
 Copy-Item (Join-Path $root 'README.md') $cliNet8
 Copy-Item (Join-Path $root 'LICENSE') $cliNet8
+Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $cliNet8
 New-Zip $cliNet8 (Join-Path $Output "IOViewer-Cli-$version.zip")
 
 # 3. CLI (.NET 10 Runtime)
@@ -59,6 +61,7 @@ $cliNet10 = Join-Path $stage 'cli-net10.0'
 Invoke-DotNet publish (Join-Path $root 'src\IOViewer.Cli\IOViewer.Cli.csproj') -c Release -f net10.0 -o $cliNet10
 Copy-Item (Join-Path $root 'README.md') $cliNet10
 Copy-Item (Join-Path $root 'LICENSE') $cliNet10
+Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.md') $cliNet10
 New-Zip $cliNet10 (Join-Path $Output "IOViewer-Cli-$version-net10.0.zip")
 
 # 4. Source ZIP

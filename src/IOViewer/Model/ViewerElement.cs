@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace IOViewer.Model;
 
 /// <summary>
@@ -15,11 +17,13 @@ public sealed class ViewerElement
     /// <summary>
     /// Parameters grouped by property category (e.g. "Identity Data", "Dimensions", "Phasing").
     /// </summary>
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public Dictionary<string, Dictionary<string, string>> Properties { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Indices of associated meshes in ViewerDocument.Meshes.
     /// </summary>
+    [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
     public List<int> MeshIndices { get; } = [];
 
     public BoundingBox3d BoundingBox { get; set; } = BoundingBox3d.Empty;

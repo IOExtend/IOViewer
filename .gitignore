@@ -17,3 +17,8 @@ __pycache__/
 # Documentation site (DocFX output and generated API pages)
 _site/
 docs/api/
+
+# Viewer toolchain (npm, Playwright)
+node_modules/
+test-results/
+playwright-report/

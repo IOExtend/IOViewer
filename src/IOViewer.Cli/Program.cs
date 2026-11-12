@@ -13,8 +13,9 @@ internal static class Program
         Usage: ioviewer <input.glb|input.obj|input.json> [output.html] [options]
                ioviewer --help | --version
 
-        Generates standalone, zero-dependency interactive 3D WebGL / HTML BIM & CAD
-        model viewers from 3D models (glTF/GLB, Wavefront OBJ, JSON snapshots).
+        Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
+        from 3D models (glTF/GLB, Wavefront OBJ, JSON snapshots). The HTML file has
+        no external dependencies and works offline.
 
         Arguments:
           <input>            Path to input 3D model (.glb, .obj, or .json).
@@ -23,10 +24,10 @@ internal static class Program
 
         Options:
           -o, --output <file> Destination path for exported HTML or JSON file.
-          --title <title>     Title displayed in viewer header and HUD.
+          --title <title>     Page title shown in the browser tab.
           --wireframe         Enable wireframe display mode by default.
           --white-mode        Enable white/clay architectural rendering mode by default.
-          --no-properties     Exclude BIM metadata and element properties to minimize payload.
+          --no-properties     Exclude element properties to reduce the file size.
           --no-grids          Exclude spatial grid lines.
           --no-timeliner      Exclude 4D TimeLiner schedule simulation.
           --json <file.json>  Export structured model snapshot to JSON.
@@ -197,7 +198,15 @@ internal static class Program
         }
         else
         {
-            HtmlViewerExporter.Save(doc, outputPath, options);
+            try
+            {
+                HtmlViewerExporter.Save(doc, outputPath, options);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
+            {
+                Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {ex.Message}");
+                return 3;
+            }
             var fi = new FileInfo(outputPath);
             Console.WriteLine($"Exported standalone 3D HTML viewer to '{outputPath}' ({fi.Length / 1024:N0} KB, {doc.Meshes.Count} meshes) in {sw.ElapsedMilliseconds} ms.");
         }
