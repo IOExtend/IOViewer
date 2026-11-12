@@ -37,6 +37,30 @@ The library is in `src/IOViewer`, the CLI in `src/IOViewer.Cli`, and tests in
 `tests/IOViewer.Tests`. Tests use small synthetic models built in code.
 The repository ships no customer models.
 
+### Local feed for unpublished packages
+
+The model data comes from the `IOScene` package. `Directory.Packages.props`
+references it with a range such as `[0.1.0-preview.1, 0.2.0-0)`: a patch of
+IOScene is additive and a minor is breaking. NuGet restores the lowest version
+in the range that it finds.
+
+To build against an IOScene version that is not on nuget.org yet (an IOScene
+preview, or the lower bound itself before it is published), pack IOScene into
+a local folder and pass that folder:
+
+```sh
+dotnet build IOViewer.slnx -c Release -p:RestoreAdditionalProjectSources=<local-feed>
+dotnet test IOViewer.slnx -c Release --no-build
+```
+
+For a newer preview, also raise the lower bound of the range to it. Once a
+restore has put the package in the NuGet global packages folder, later
+restores, `dotnet run` of the tools and `npm run e2e` find it there. Do not
+commit a `nuget.config` that points to a local feed, and commit a lower bound
+only when that version is on nuget.org: until then, restoring the solution
+fails in the CI build job, the Docs workflow and `release.yml`, so do not tag
+a release before then.
+
 ### Viewer
 
 The HTML viewer is a JavaScript project in `src/IOViewer/Viewer` (three.js,
@@ -104,8 +128,10 @@ Write commit messages in the imperative mood, for example,
 ## Releases
 
 Push a tag matching the package version, such as `v0.2.0`, to run `release.yml`.
-The workflow builds and tests the solution, attaches packages, symbols, source and checksums to a GitHub release,
-and publishes the NuGet packages through Trusted Publishing. The release notes are the section of `CHANGELOG.md` for the version, so add that section before the tag.
+The workflow builds and tests the solution, publishes the NuGet packages through Trusted Publishing, and then attaches
+packages, symbols, source and checksums to a GitHub release, marked as a prerelease when the version has a hyphen
+(`v0.3.0-preview.1`). The release notes are the section of `CHANGELOG.md` for the version, so add that section before
+the tag; the workflow stops before publishing when it is missing.
 The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
 
 ## Licensing contributions
