@@ -479,6 +479,39 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void Props_NameTakenAfterItsSuffixWasGiven_IsSkipped()
+    {
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "a"), ("Height", "b"), ("Height (3)", "c"), ("Height", "d"), ("Height", "e")));
+        scene.Elements[0].PropertySetIds.Add(1);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        Assert.Equal(
+            [("Height", "a"), ("Height (2)", "b"), ("Height (3)", "c"), ("Height (4)", "d"), ("Height (5)", "e")],
+            Members(view.Props.GetProperty("1").GetProperty("Dimensions")));
+    }
+
+    [Fact]
+    public void Props_ManyEqualNames_AreAllKept()
+    {
+        const int count = 20_000;
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", Enumerable.Range(0, count).Select(i => ("X", i.ToString(CultureInfo.InvariantCulture))).ToArray()));
+        scene.Elements[0].PropertySetIds.Add(1);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        var members = Members(view.Props.GetProperty("1").GetProperty("Dimensions"));
+        Assert.Equal(count, members.Length);
+        Assert.Equal(("X", "0"), members[0]);
+        Assert.Equal(($"X ({count})", (count - 1).ToString(CultureInfo.InvariantCulture)), members[^1]);
+    }
+
+    [Fact]
     public void Props_NamesWrittenAlike_AreMerged()
     {
         // Each lone surrogate is written as U+FFFD, so these names differ in the scene but not in the page.
