@@ -174,7 +174,8 @@ for (int k = 0; k < clashBeams.Count; k++)
     clashTest.Clashes.Add(new SceneClashResult
     {
         Id = $"CL{k + 1}", Name = $"Clash {k + 1}", Element1Name = duct.Name, Element2Name = beam.Name,
-        Point = new(9, ys[k], storey - slab - 0.15), Distance = -0.15, Element1Id = duct.Id, Element2Id = beam.Id, Status = SceneClashStatus.New,
+        // Clash 3 does not report a distance.
+        Point = new(9, ys[k], storey - slab - 0.15), Distance = k == 2 ? null : -0.15, Element1Id = duct.Id, Element2Id = beam.Id, Status = SceneClashStatus.New,
     });
 }
 scene.ClashTests.Add(clashTest);

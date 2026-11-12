@@ -401,7 +401,8 @@ public class JsonAndImportTests
         Assert.Equal(new Vector3d(1, 0, 0), geometry.Vertices[1]);
         var material = Assert.Single(scene.Materials);
         Assert.Equal((material.Id, (RgbaColor?)null), (mesh.MaterialId, mesh.Color));
-        Assert.Equal(new RgbaColor(255, 127, 0, 127), material.Color); // the base colour factor, alpha once
+        // The base colour factor, alpha once: linear 0.5 is sRGB 188, and the alpha stays linear (0.5 is 128).
+        Assert.Equal(new RgbaColor(255, 188, 0, 128), material.Color);
 
         // Without a scene graph the element is named after the mesh.
         var element = Assert.Single(scene.Elements);

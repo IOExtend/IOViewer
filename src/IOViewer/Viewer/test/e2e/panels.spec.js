@@ -50,6 +50,7 @@ test.describe('clashes', () => {
     await expect(rows.first().locator('.ioviewer-clash-status')).toHaveText('Новая');
     await expect(rows.first().locator('.ioviewer-clash-status')).toHaveAttribute('data-status', 'New');
     await expect(rows.first().locator('.ioviewer-clash-distance')).toHaveText('-0,15 м');
+    await expect(rows.nth(2).locator('.ioviewer-clash-distance')).toHaveText(''); // Clash 3 reports no distance
     await expect(rows.first()).toHaveAttribute('title', 'Clash 1: Supply Duct SA-1 — Beam B-C/1 Level 2');
     expect(await rows.first().locator('.ioviewer-row-name').evaluate((n) => getComputedStyle(n).textOverflow)).toBe('ellipsis');
 

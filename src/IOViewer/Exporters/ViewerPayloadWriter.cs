@@ -583,6 +583,7 @@ internal sealed class ViewerPayloadWriter
                 w.WriteStartObject("camera");
                 WriteVector(w, "position", vp.Camera.Position - _rtcOffset);
                 WriteVector(w, "target", vp.Camera.Target - _rtcOffset);
+                // A projection this version does not know is perspective (the enum is open).
                 w.WriteString("projection", vp.Camera.Projection == SceneProjection.Orthographic ? "orthographic" : "perspective");
                 w.WriteEndObject();
                 w.WriteEndObject();
@@ -645,7 +646,8 @@ internal sealed class ViewerPayloadWriter
             w.WriteStartObject();
             w.WriteString("id", t.Id);
             w.WriteString("name", t.Name);
-            w.WriteString("type", t.TaskType.ToString().ToLowerInvariant());
+            // A task type this version does not know is a construct task (the enum is open).
+            w.WriteString("type", (Enum.IsDefined(t.TaskType) ? t.TaskType : SceneTaskType.Construct).ToString().ToLowerInvariant());
             w.WriteString("start", t.PlannedStart.ToString(dateFormat, CultureInfo.InvariantCulture));
             w.WriteString("end", t.PlannedEnd.ToString(dateFormat, CultureInfo.InvariantCulture));
             if (t.PlannedCost.HasValue) w.WriteNumber("cost", t.PlannedCost.Value);
@@ -695,7 +697,9 @@ internal sealed class ViewerPayloadWriter
                     WriteNullableNumber(w, "element1Id", clash.Element1Id);
                     WriteNullableNumber(w, "element2Id", clash.Element2Id);
                     WriteVector(w, "point", clash.Point - _rtcOffset);
-                    w.WriteNumber("distance", clash.Distance);
+                    // Null when the source does not report it.
+                    if (clash.Distance is double distance) w.WriteNumber("distance", distance);
+                    else w.WriteNull("distance");
                     // A status this version does not know is shown as Active.
                     w.WriteString("status", Enum.IsDefined(clash.Status) ? clash.Status.ToString() : nameof(SceneClashStatus.Active));
                     w.WriteEndObject();

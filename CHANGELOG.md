@@ -7,7 +7,7 @@ API between minor releases.
 ## [Unreleased]
 
 Version 0.3.0 builds the viewer on the scene model of the [IOScene](https://github.com/IOExtend/IOScene) package
-(`IOScene` `[0.1.0-preview.1, 0.2.0-0)`, a new dependency of the `IOViewer` package). This is a breaking change of the
+(`IOScene` `[0.1.0-preview.2, 0.2.0-0)`, a new dependency of the `IOViewer` package). This is a breaking change of the
 library API. What breaks for existing users:
 
 1. The model types move to namespace `IOScene` with `Scene*` names, `ViewerClash*` included; `doc.Elements` becomes
@@ -59,6 +59,7 @@ the `IOViewer` package). The `IOViewer.Cli` tool only gains inputs.
 | `ViewerTimeLinerTask.AttachedElementIds` | `SceneTask.ElementIds` |
 | `ViewerTimeLinerTask.AttachedSetName` | removed |
 | `ViewerClashTest`, `ViewerClashResult`, `ViewerClashStatus` | `SceneClashTest`, `SceneClashResult`, `SceneClashStatus` |
+| `ViewerClashResult.Distance` (`double`) | `SceneClashResult.Distance` (`double?`, null when the source does not report it) |
 | constructors with parameters (`new ViewerViewpoint(name, camera)` and others) | object initializers |
 
 ### Added
@@ -82,6 +83,12 @@ the `IOViewer` package). The `IOViewer.Cli` tool only gains inputs.
 - In an IOViewer 0.1/0.2 snapshot, an element `LinkName` that matches no linked file becomes a model of the scene, so
   a page made from the snapshot lists it in the linked files panel, where its elements can be hidden.
 - The documentation states the model's units and axes: all coordinates and lengths are in metres, with Z up.
+- A clash distance is nullable. The page writes `null` for a distance the source does not report and the clash list
+  shows no distance for it, where it showed 0. A 0.1/0.2 snapshot keeps the distance it has (0 when it has none).
+- `GlbViewerImporter` converts a material's base colour factor from glTF's linear values to sRGB. Imported GLB colours
+  look lighter than in 0.2.0, which is now correct. The alpha stays linear; every channel is now rounded to the nearest
+  byte, where it was truncated.
+- A 4D task of a type this version does not know is shown as a construct task; it was left out of the schedule.
 
 ## [0.2.0] - 2026-11-12
 

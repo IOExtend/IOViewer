@@ -80,7 +80,7 @@ public class LegacyFixtureTests
         // The task also names 4, the loose mesh's id, which 0.2.0 never matched to a mesh: it is dropped.
         Assert.Equal([100L, 200L], scene.Schedules.Single().Tasks.Single().ElementIds);
         var clash = scene.ClashTests.Single().Clashes.Single();
-        Assert.Equal((100L, 200L, SceneClashStatus.New), (clash.Element1Id, clash.Element2Id, clash.Status));
+        Assert.Equal((100L, 200L, SceneClashStatus.New, (double?)0.02), (clash.Element1Id, clash.Element2Id, clash.Status, clash.Distance));
 
         // Opacity: material 1 has opacity 0.5, mesh 1 opacity 0.8; their product is the instance alpha.
         var glass = scene.Materials.Single(m => m.Id == 1);
@@ -203,7 +203,8 @@ public class LegacyFixtureTests
         var instance = Assert.Single(scene.Instances);
         Assert.Equal((geometry.Id, (Transform3d?)null, "m"), (instance.GeometryId, instance.Transform, instance.Name));
         var clash = Assert.Single(Assert.Single(scene.ClashTests).Clashes);
-        Assert.Equal(((long?)null, (long?)null, SceneClashStatus.Active), (clash.Element1Id, clash.Element2Id, clash.Status));
+        // A missing distance was 0 in 0.2.0 and stays 0.
+        Assert.Equal(((long?)null, (long?)null, SceneClashStatus.Active, (double?)0), (clash.Element1Id, clash.Element2Id, clash.Status, clash.Distance));
     }
 
     [Fact]

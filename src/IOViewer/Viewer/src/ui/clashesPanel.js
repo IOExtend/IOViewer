@@ -68,7 +68,9 @@ export function mountClashes({ shell, tests, elements, scene, controls, selectio
     const known = STATUSES.includes(clash.status);
     const status = el('span', 'ioviewer-clash-status', known ? t(`clash.${clash.status}`) : String(clash.status ?? ''));
     if (known) status.dataset.status = clash.status;
-    row.append(status, el('span', 'ioviewer-clash-distance', formatDistance(clash.distance)));
+    // A distance the source does not report is null: nothing is shown.
+    const distance = typeof clash.distance === 'number' ? formatDistance(clash.distance) : '';
+    row.append(status, el('span', 'ioviewer-clash-distance', distance));
     row.addEventListener('click', () => show(clash, row));
     return row;
   }

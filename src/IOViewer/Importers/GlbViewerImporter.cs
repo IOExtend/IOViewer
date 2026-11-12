@@ -107,12 +107,9 @@ public static class GlbViewerImporter
                 {
                     if (pbr.TryGetProperty("baseColorFactor", out var bcf) && bcf.GetArrayLength() >= 4)
                     {
+                        // glTF's factor is linear; a scene colour has sRGB channels and a straight linear alpha.
                         var arr = bcf.EnumerateArray().ToArray();
-                        byte r = (byte)Math.Clamp((int)(arr[0].GetDouble() * 255), 0, 255);
-                        byte g = (byte)Math.Clamp((int)(arr[1].GetDouble() * 255), 0, 255);
-                        byte b = (byte)Math.Clamp((int)(arr[2].GetDouble() * 255), 0, 255);
-                        byte a = (byte)Math.Clamp((int)(arr[3].GetDouble() * 255), 0, 255);
-                        mat.Color = new RgbaColor(r, g, b, a);
+                        mat.Color = new RgbaColor(Srgb(arr[0].GetDouble()), Srgb(arr[1].GetDouble()), Srgb(arr[2].GetDouble()), Byte(arr[3].GetDouble()));
                     }
                 }
                 materials.Add(mat);
@@ -263,6 +260,15 @@ public static class GlbViewerImporter
 
         return new ViewerDocument(doc);
     }
+
+    // The sRGB byte of a linear channel: the standard sRGB transfer function, then the nearest byte.
+    private static byte Srgb(double linear)
+    {
+        double c = Math.Clamp(linear, 0, 1);
+        return Byte(c <= 0.0031308 ? 12.92 * c : 1.055 * Math.Pow(c, 1 / 2.4) - 0.055);
+    }
+
+    private static byte Byte(double value) => (byte)Math.Round(Math.Clamp(value, 0, 1) * 255, MidpointRounding.AwayFromZero);
 
     // glTF is Y-up; the viewer model is Z-up: (x, y, z) becomes (x, -z, y).
     private static readonly Transform3d YupToZup = new(new Vector3d(1, 0, 0), new Vector3d(0, 0, 1), new Vector3d(0, -1, 0), Vector3d.Zero);

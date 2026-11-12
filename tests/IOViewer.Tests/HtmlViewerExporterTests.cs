@@ -555,7 +555,7 @@ public class HtmlViewerExporterTests
         Assert.Equal("2025-12-01T08:00:00Z", timeliner.GetProperty("start").GetString());
         Assert.Equal("2026-05-30T17:00:00Z", timeliner.GetProperty("end").GetString());
         Assert.Equal(["1", "2", "2.1", "3"], timeliner.GetProperty("tasks").EnumerateArray().Select(t => t.GetProperty("id").GetString()));
-        Assert.Equal("9", timeliner.GetProperty("tasks")[2].GetProperty("type").GetString());
+        Assert.Equal("construct", timeliner.GetProperty("tasks")[2].GetProperty("type").GetString()); // a type this version does not know
         Assert.Equal(System.Text.Json.JsonValueKind.Null,
             ViewerHtml.Export(new ViewerDocument(scene), new HtmlViewerOptions { IncludeTimeLiner = false }).Meta.GetProperty("timeliner").ValueKind);
     }
@@ -626,6 +626,17 @@ public class HtmlViewerExporterTests
         Assert.Equal("Active", StatusOf(doc));
     }
 
+    [Fact]
+    public void ClashDistance_IsNullWhenNotReported()
+    {
+        var doc = GeoreferencedModel();
+        System.Text.Json.JsonElement Distance() => ViewerHtml.Export(doc).Meta.GetProperty("clashTests")[0].GetProperty("clashes")[0].GetProperty("distance");
+
+        Assert.Equal(-0.02, Distance().GetDouble());
+        doc.Scene.ClashTests[0].Clashes[0].Distance = null;
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, Distance().ValueKind);
+    }
+
     private static string? StatusOf(ViewerDocument doc) =>
         ViewerHtml.Export(doc).Meta.GetProperty("clashTests")[0].GetProperty("clashes")[0].GetProperty("status").GetString();
 
@@ -643,11 +654,13 @@ public class HtmlViewerExporterTests
                 Projection = SceneProjection.Orthographic
             },
         });
+        doc.Scene.Viewpoints.Add(new SceneViewpoint { Name = "Later", Camera = new SceneCamera { Projection = (SceneProjection)4 } });
 
         var viewpoints = ViewerHtml.Export(doc).Meta.GetProperty("viewpoints");
 
         Assert.Equal("perspective", viewpoints[0].GetProperty("camera").GetProperty("projection").GetString());
         Assert.Equal("orthographic", viewpoints[1].GetProperty("camera").GetProperty("projection").GetString());
+        Assert.Equal("perspective", viewpoints[2].GetProperty("camera").GetProperty("projection").GetString()); // a projection this version does not know
     }
 
     [Fact]
