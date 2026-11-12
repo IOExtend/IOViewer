@@ -11,6 +11,12 @@ API between minor releases.
   HTML viewer shows it as its own row in the properties panel ("Source ID" / "ID источника") and the model tree search
   finds it. It is written to the page's element list and to JSON only when set, so the element data of documents
   without it is written as before.
+- `IOViewer.IfcIO` package: `IfcViewerAdapter` converts an IfcIO `IfcModel` into a `ViewerDocument` in metres with
+  Z up, without reading the file again. Elements keep their STEP id, GlobalId (`SourceId`), IFC class, storey, property
+  sets and quantities; colours come from IfcIO materials, and work schedules become the TimeLiner. `Convert` also
+  reports the length unit, elements without geometry by reason and skipped 4D tasks. IfcIO bakes mapped items into
+  world meshes, so each element gets its own mesh. It needs IfcIO 0.11.0, which reads world placements; the `IOViewer`
+  package itself still has no dependencies.
 
 ### Changed
 - The documentation states the model's units and axes: all coordinates and lengths in a `ViewerDocument` are in

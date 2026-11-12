@@ -33,9 +33,32 @@ dotnet build IOViewer.slnx -c Release
 dotnet test IOViewer.slnx -c Release
 ```
 
-The library is in `src/IOViewer`, the CLI in `src/IOViewer.Cli`, and tests in
-`tests/IOViewer.Tests`. Tests use small synthetic models built in code.
-The repository ships no customer models.
+The library is in `src/IOViewer`, the CLI in `src/IOViewer.Cli`, engine adapters
+in `src/IOViewer.<Engine>` (for example `src/IOViewer.IfcIO`), and tests in
+`tests/IOViewer.Tests` and `tests/IOViewer.<Engine>.Tests`. Tests use small
+synthetic models built in code. The repository ships no customer models; set
+`IOVIEWER_IFC_FILE` to a private IFC file to run one more adapter test on it.
+
+### Engine adapters
+
+Engines (IfcIO, RvtIO and others) depend neither on IOViewer nor on each other;
+an adapter from an engine's model to `ViewerDocument` lives in this repository,
+depends on IOViewer and that one engine, and `src/IOViewer` takes no engine
+dependency. Engine package versions are set in `EngineVersions.props`.
+
+To build against an engine release that is not on nuget.org yet (IfcIO 0.11.0
+at the time of writing, so restoring the solution fails without it), pack the
+engine into a local folder and pass its version and the folder:
+
+```sh
+dotnet build IOViewer.slnx -c Release -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local-feed>
+dotnet test IOViewer.slnx -c Release --no-build
+dotnet pack src/IOViewer.IfcIO/IOViewer.IfcIO.csproj -c Release -p:Version=0.2.0-local.1 -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local-feed> -o <out>
+```
+
+Packing needs a prerelease `Version` as well, because NuGet refuses a stable
+package that depends on a prerelease one. Do not commit a `nuget.config` that
+points to a local feed.
 
 ### Viewer
 

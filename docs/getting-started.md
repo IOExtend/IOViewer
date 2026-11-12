@@ -84,6 +84,56 @@ for (int i = 0; i < 100; i++)
 `GlbViewerImporter` fills these properties from glTF nodes and meshes. Meshes with their own `Vertices` keep working as
 before; the exporter also writes exact translated copies of such meshes once.
 
+## From an IFC file
+
+The `IOViewer.IfcIO` package converts a model read by [IfcIO](https://github.com/IOExtend/IfcIO) (0.11.0 or later)
+into a `ViewerDocument`. Unlike an IFC to GLB to HTML route, it keeps GlobalIds, storeys, property sets and quantities.
+
+```sh
+dotnet add package IOViewer.IfcIO
+```
+
+```csharp
+using IfcIO;
+using IOViewer.Exporters;
+using IOViewer.IfcIO;
+
+var model = IfcModel.Open("building.ifc");
+var conversion = IfcViewerAdapter.Convert(model);
+
+foreach (var skipped in conversion.ElementsWithoutGeometry)
+{
+    Console.Error.WriteLine($"#{skipped.ElementId} ({skipped.GlobalId}): {skipped.Reason}");
+}
+
+HtmlViewerExporter.Save(conversion.Document, "building.html");
+```
+
+`IfcViewerAdapter.ToViewerDocument(model)` returns the document alone. The adapter works on the model in memory and
+does not read the file again. It maps the model as follows:
+
+- Geometry: IfcIO's world mesh of each element, converted from `IfcModel.LengthUnit` to metres by an exact factor
+  (`conversion.MetresPerUnit`). IFC is Z up like the viewer, so axes are not swapped. Coordinates stay doubles until the
+  HTML exporter makes them relative to the model centre, so georeferenced models keep their precision.
+- Elements: one per element of `IfcModel.AllElements`. `Id` is the STEP entity id (`#123` gives 123), `SourceId` the
+  GlobalId, `Category` the IFC class as IfcIO reports it (for example `IFCWALL`), `Level` the storey name.
+  `IfcViewerOptions.IncludeSpaces` adds spaces, drawn translucent. Openings are not converted.
+- Properties: each property set and quantity set becomes a property group with its name. Quantity values are written as
+  IfcIO reads them, in the file's units.
+- Colours: the element's IfcIO material (surface style colour and its alpha as opacity), otherwise a default colour for
+  the IFC class.
+- 4D: IfcIO work schedules become the TimeLiner, with each task's elements attached; tasks without planned dates are
+  counted in `conversion.SkippedTasks`.
+
+Current limits, all from what IfcIO exposes:
+
+- IfcIO bakes mapped items (`IfcMappedItem`) into each element's mesh and does not expose the shared representation,
+  so every element gets its own mesh (`conversion.OwnMeshes`) and repeated shapes are not stored once.
+- IfcIO does not read type objects (`TypeName` stays empty), grids, transparency from files or task times from IFC2x3.
+- Clash results from `IfcModel.DetectClashes` are not converted.
+- Element ids must be unique. They are for a model read with `IfcModel.Open`; a model built in memory numbers its
+  elements per storey, so save and reopen it before converting.
+
 ## Using the viewer
 
 The model's up axis is +Z. The interface is in Russian when the browser language is Russian and in English otherwise.
