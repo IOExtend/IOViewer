@@ -1,25 +1,30 @@
 using System.Diagnostics;
 using System.Net;
 using System.Reflection;
+using IfcIO.Scene;
+using IOScene;
 using IOViewer.Exporters;
 using IOViewer.Importers;
 using IOViewer.Model;
+using RvtIO.Scene;
 
 namespace IOViewer.Cli;
 
 internal static class Program
 {
     private const string UsageText = """
-        Usage: ioviewer <input.glb|input.obj|input.json> [output.html] [options]
+        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.rvt> [output.html] [options]
                ioviewer --help | --version
 
         Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
-        from 3D models (glTF/GLB, Wavefront OBJ, JSON). The HTML file has no
-        external dependencies and works offline. JSON input is viewer JSON, an
-        IOScene scene file or an IOViewer 0.1/0.2 snapshot.
+        from 3D models (glTF/GLB, Wavefront OBJ, JSON, IFC, Revit). The HTML file
+        has no external dependencies and works offline. JSON input is viewer JSON,
+        an IOScene scene file or an IOViewer 0.1/0.2 snapshot. IFC (.ifc, .ifczip)
+        is read with IfcIO and Revit (.rvt) with RvtIO; what they could not convert
+        is reported as warnings.
 
         Arguments:
-          <input>            Path to input 3D model (.glb, .obj, or .json).
+          <input>            Path to input 3D model (.glb, .obj, .json, .ifc, .ifczip or .rvt).
           [output]           Destination path for exported file (.html or .json).
                              Default: <input-without-ext>.html.
 
@@ -167,7 +172,9 @@ internal static class Program
                 ".glb" => GlbViewerImporter.Load(inputPath),
                 ".obj" => ObjViewerImporter.Load(inputPath),
                 ".json" => JsonViewerImporter.Load(inputPath),
-                _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json.")
+                ".ifc" or ".ifczip" => FromIfc(inputPath),
+                ".rvt" => FromRvt(inputPath),
+                _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt.")
             };
         }
         catch (Exception ex)
@@ -230,6 +237,31 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static ViewerDocument FromIfc(string path)
+    {
+        var result = IfcSceneReader.Read(path);
+        return FromScene(path, result.Document, result.Diagnostics);
+    }
+
+    private static ViewerDocument FromRvt(string path)
+    {
+        var result = RvtSceneReader.Read(path);
+        return FromScene(path, result.Document, result.Diagnostics);
+    }
+
+    // The engine adapters key the model by its file name, as the other importers do; the title falls back to it too.
+    private static ViewerDocument FromScene(string path, SceneDocument scene, IReadOnlyList<SceneDiagnostic> diagnostics)
+    {
+        if (string.IsNullOrEmpty(scene.Title)) scene.Title = Path.GetFileNameWithoutExtension(path);
+        // Information entries (such as an element that has no geometry by design) are not warnings; one line per kind.
+        foreach (var kind in diagnostics.Where(d => d.Severity != SceneSeverity.Info).GroupBy(d => d.Code))
+        {
+            int more = kind.Count() - 1;
+            Console.Error.WriteLine($"Warning: {kind.Key}: {kind.First().Message}{(more > 0 ? $" ({more} more)" : "")}");
+        }
+        return new ViewerDocument(scene);
     }
 
     private static void StartServe(string htmlPath, int port)

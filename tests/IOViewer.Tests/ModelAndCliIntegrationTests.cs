@@ -1,6 +1,7 @@
 using IOScene;
 using IOViewer.Cli;
 using IOViewer.Exporters;
+using IOViewer.Importers;
 using IOViewer.Model;
 using Xunit;
 
@@ -187,6 +188,176 @@ public class ModelAndCliIntegrationTests
             Console.SetError(origErr);
             if (File.Exists(tempJson)) File.Delete(tempJson);
             if (File.Exists(tempHtml)) File.Delete(tempHtml);
+        }
+    }
+
+    private const string Hostile = "\"></script><script>window.__xss=1</script>";
+
+    // Project, site, building and storey; a wall box with Pset_WallCommon, a window without a style (drawn
+    // translucent by its IFC class) and a proxy whose name and property set are hostile strings. Lengths in mm.
+    private const string SmokeIfc = $"""
+        ISO-10303-21;
+        HEADER;
+        FILE_DESCRIPTION((''),'2;1');
+        FILE_NAME('smoke.ifc','2026-01-01T00:00:00',(''),(''),'','','');
+        FILE_SCHEMA(('IFC2X3'));
+        ENDSEC;
+        DATA;
+        #1=IFCPROJECT('0SmokeProject000000001',$,'Smoke',$,$,$,$,(#20),#10);
+        #10=IFCUNITASSIGNMENT((#11));
+        #11=IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.);
+        #20=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#21,$);
+        #21=IFCAXIS2PLACEMENT3D(#22,$,$);
+        #22=IFCCARTESIANPOINT((0.,0.,0.));
+        #30=IFCSITE('0SmokeSite000000000001',$,'Site',$,$,#31,$,$,.ELEMENT.,$,$,$,$,$);
+        #31=IFCLOCALPLACEMENT($,#21);
+        #32=IFCBUILDING('0SmokeBuilding00000001',$,'Building',$,$,#33,$,$,.ELEMENT.,$,$,$);
+        #33=IFCLOCALPLACEMENT(#31,#21);
+        #40=IFCBUILDINGSTOREY('0SmokeStorey0000000001',$,'Level 1',$,$,#41,$,$,.ELEMENT.,0.);
+        #41=IFCLOCALPLACEMENT(#33,#21);
+        #50=IFCRELAGGREGATES('0SmokeAggregates000001',$,$,$,#1,(#30));
+        #51=IFCRELAGGREGATES('0SmokeAggregates000002',$,$,$,#30,(#32));
+        #52=IFCRELAGGREGATES('0SmokeAggregates000003',$,$,$,#32,(#40));
+        #100=IFCWALL('1SmokeWall000000000001',$,'Wall',$,$,#101,#102,$);
+        #101=IFCLOCALPLACEMENT(#41,#21);
+        #102=IFCPRODUCTDEFINITIONSHAPE($,$,(#103));
+        #103=IFCSHAPEREPRESENTATION(#20,'Body','Brep',(#104));
+        #104=IFCFACETEDBREP(#105);
+        #105=IFCCLOSEDSHELL((#110,#111,#112,#113,#114,#115));
+        #110=IFCFACE((#120));
+        #111=IFCFACE((#121));
+        #112=IFCFACE((#122));
+        #113=IFCFACE((#123));
+        #114=IFCFACE((#124));
+        #115=IFCFACE((#125));
+        #120=IFCFACEOUTERBOUND(#130,.T.);
+        #121=IFCFACEOUTERBOUND(#131,.T.);
+        #122=IFCFACEOUTERBOUND(#132,.T.);
+        #123=IFCFACEOUTERBOUND(#133,.T.);
+        #124=IFCFACEOUTERBOUND(#134,.T.);
+        #125=IFCFACEOUTERBOUND(#135,.T.);
+        #130=IFCPOLYLOOP((#200,#203,#202,#201));
+        #131=IFCPOLYLOOP((#204,#205,#206,#207));
+        #132=IFCPOLYLOOP((#200,#201,#205,#204));
+        #133=IFCPOLYLOOP((#201,#202,#206,#205));
+        #134=IFCPOLYLOOP((#202,#203,#207,#206));
+        #135=IFCPOLYLOOP((#203,#200,#204,#207));
+        #200=IFCCARTESIANPOINT((0.,0.,0.));
+        #201=IFCCARTESIANPOINT((4000.,0.,0.));
+        #202=IFCCARTESIANPOINT((4000.,200.,0.));
+        #203=IFCCARTESIANPOINT((0.,200.,0.));
+        #204=IFCCARTESIANPOINT((0.,0.,3000.));
+        #205=IFCCARTESIANPOINT((4000.,0.,3000.));
+        #206=IFCCARTESIANPOINT((4000.,200.,3000.));
+        #207=IFCCARTESIANPOINT((0.,200.,3000.));
+        #300=IFCPROPERTYSINGLEVALUE('FireRating',$,IFCLABEL('EI 60'),$);
+        #301=IFCPROPERTYSET('2SmokePsetWall00000001',$,'Pset_WallCommon',$,(#300));
+        #302=IFCRELDEFINESBYPROPERTIES('2SmokeDefinesWall00001',$,$,$,(#100),#301);
+        #400=IFCWINDOW('1SmokeWindow0000000001',$,'Window',$,$,#401,#402,$,1000.,1000.);
+        #401=IFCLOCALPLACEMENT(#41,#403);
+        #403=IFCAXIS2PLACEMENT3D(#404,$,$);
+        #404=IFCCARTESIANPOINT((0.,-1000.,0.));
+        #402=IFCPRODUCTDEFINITIONSHAPE($,$,(#405));
+        #405=IFCSHAPEREPRESENTATION(#20,'Body','Brep',(#406));
+        #406=IFCFACETEDBREP(#105);
+        #500=IFCBUILDINGELEMENTPROXY('1SmokeHostile000000001',$,'{Hostile}',$,$,#501,#502,$,$);
+        #501=IFCLOCALPLACEMENT(#41,#503);
+        #503=IFCAXIS2PLACEMENT3D(#504,$,$);
+        #504=IFCCARTESIANPOINT((0.,1000.,0.));
+        #502=IFCPRODUCTDEFINITIONSHAPE($,$,(#505));
+        #505=IFCSHAPEREPRESENTATION(#20,'Body','Brep',(#506));
+        #506=IFCFACETEDBREP(#105);
+        #510=IFCPROPERTYSINGLEVALUE('{Hostile}',$,IFCLABEL('{Hostile}'),$);
+        #511=IFCPROPERTYSET('2SmokePsetHostile00001',$,'{Hostile}',$,(#510));
+        #512=IFCRELDEFINESBYPROPERTIES('2SmokeDefinesHostile01',$,$,$,(#500),#511);
+        #600=IFCRELCONTAINEDINSPATIALSTRUCTURE('2SmokeContainment00001',$,$,$,(#100,#400,#500),#40);
+        ENDSEC;
+        END-ISO-10303-21;
+        """;
+
+    [Fact]
+    public void Cli_ConvertIfcToHtml_ReadsTheModelThroughIfcIO()
+    {
+        var tempIfc = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.ifc");
+        var tempHtml = Path.ChangeExtension(tempIfc, ".html");
+        var tempJson = Path.ChangeExtension(tempIfc, ".json");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            File.WriteAllText(tempIfc, SmokeIfc);
+            Console.SetError(errors);
+
+            int code = Program.Main([tempIfc, "--json", tempJson]);
+
+            Assert.Equal(0, code);
+            Assert.Equal("", errors.ToString());
+            var scene = JsonViewerImporter.Load(tempJson).Scene;
+            Assert.Empty(scene.Validate());
+            Assert.Equal(Path.GetFileName(tempIfc), Assert.Single(scene.Models).Key);
+
+            var view = ViewerHtml.Parse(File.ReadAllText(tempHtml));
+            Assert.Equal("Smoke", view.Meta.GetProperty("title").GetString());
+            Assert.Equal(3, view.InstanceCount);
+            var elements = view.Meta.GetProperty("elements").EnumerateArray().ToList();
+
+            // The wall's property set and GlobalId reach the page.
+            Assert.Equal("EI 60", view.Props.GetProperty("100").GetProperty("Pset_WallCommon").GetProperty("FireRating").GetString());
+            var wall = Assert.Single(elements, e => e.GetProperty("id").GetInt64() == 100);
+            Assert.Equal("1SmokeWall000000000001", wall.GetProperty("sourceId").GetString());
+
+            // Hostile names and values are kept as data and escaped in the page.
+            Assert.Equal(Hostile, view.Props.GetProperty("500").GetProperty(Hostile).GetProperty(Hostile).GetString());
+            Assert.Equal(Hostile, Assert.Single(elements, e => e.GetProperty("id").GetInt64() == 500).GetProperty("name").GetString());
+            Assert.DoesNotContain(Hostile, view.Html, StringComparison.Ordinal);
+
+            // The window has no style, so it is drawn in its class colour at half opacity (alpha 128 of 255).
+            Assert.Contains(
+                view.Meta.GetProperty("materials").EnumerateArray(),
+                m => Math.Abs(m.GetProperty("opacity").GetDouble() - 128 / 255.0) < 1e-6);
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            foreach (var file in new[] { tempIfc, tempHtml, tempJson })
+            {
+                if (File.Exists(file)) File.Delete(file);
+            }
+        }
+    }
+
+    // A real Revit file cannot be committed; run with IOVIEWER_RVT_FILE set to one before a release.
+    [RvtFileFact]
+    public void Cli_ConvertRvtToHtml_ReadsTheModelThroughRvtIO()
+    {
+        var rvt = Environment.GetEnvironmentVariable(RvtFileFactAttribute.Variable)!;
+        var tempHtml = Path.Combine(Path.GetTempPath(), $"test_viewer_{Guid.NewGuid():N}.html");
+        var tempJson = Path.ChangeExtension(tempHtml, ".json");
+        try
+        {
+            int code = Program.Main([rvt, "-o", tempHtml, "--json", tempJson]);
+
+            Assert.Equal(0, code);
+            Assert.Empty(JsonViewerImporter.Load(tempJson).Scene.Validate());
+            Assert.True(ViewerHtml.Parse(File.ReadAllText(tempHtml)).InstanceCount > 0);
+        }
+        finally
+        {
+            if (File.Exists(tempHtml)) File.Delete(tempHtml);
+            if (File.Exists(tempJson)) File.Delete(tempJson);
+        }
+    }
+
+    private sealed class RvtFileFactAttribute : FactAttribute
+    {
+        public const string Variable = "IOVIEWER_RVT_FILE";
+
+        public RvtFileFactAttribute()
+        {
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(Variable)))
+            {
+                Skip = $"Set {Variable} to the path of a Revit 2022 file to run this test.";
+            }
         }
     }
 }

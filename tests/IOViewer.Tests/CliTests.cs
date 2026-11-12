@@ -19,7 +19,7 @@ public class CliTests
             int code = Program.Main(HelpArgs);
             Assert.Equal(0, code);
             string output = sw.ToString();
-            Assert.Contains("ioviewer <input.glb|input.obj|input.json>", output);
+            Assert.Contains("ioviewer <input.glb|input.obj|input.json|input.ifc|input.rvt>", output);
             Assert.Contains("--wireframe", output);
             Assert.Contains("--white-mode", output);
             Assert.Contains("--serve", output);
