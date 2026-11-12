@@ -38,10 +38,28 @@ export const HIDE_BRANCH = /* glsl */ `
 if ( state.a < 0.5 ) gl_Position = vec4( 0.0, 0.0, 2.0, 1.0 );
 #endif`;
 
+// three's defaultnormal_vertex divides an instance normal by the squared column lengths, which is wrong under shear.
+// Instanced cells (USE_INSTANCING; merged chunks are plain meshes) use the cofactor matrix times sign(det) instead, the
+// inverse transpose up to scale, as chunks.js bakes merged normals: right for scale, mirroring and shear. As there,
+// det == 0 counts as positive (GLSL sign(0.0) is 0 and would zero a flattened instance's normal into NaN). three's
+// USE_TANGENT (needs a normal map) and USE_BATCHING (BatchedMesh) branches never apply to these materials.
+export const DEFAULT_NORMAL = /* glsl */ `
+vec3 transformedNormal = objectNormal;
+#ifdef USE_INSTANCING
+mat3 im = mat3( instanceMatrix );
+transformedNormal = mat3( cross( im[ 1 ], im[ 2 ] ), cross( im[ 2 ], im[ 0 ] ), cross( im[ 0 ], im[ 1 ] ) ) * transformedNormal
+  * ( dot( im[ 0 ], cross( im[ 1 ], im[ 2 ] ) ) < 0.0 ? -1.0 : 1.0 );
+#endif
+transformedNormal = normalMatrix * transformedNormal;
+#ifdef FLIP_SIDED
+transformedNormal = - transformedNormal;
+#endif`;
+
 // The MeshLambertMaterial includes replaced (each must occur exactly once; three is pinned, a change fails loudly).
 export const REPLACED_INCLUDES = [
   '#include <color_vertex>',
   '#include <beginnormal_vertex>',
+  '#include <defaultnormal_vertex>',
   '#include <begin_vertex>',
   '#include <clipping_planes_vertex>',
   '#include <color_fragment>',
@@ -61,6 +79,7 @@ function compileSlots(shader) {
   vertex = swap(vertex, '#include <color_vertex>', `${SLOT_DECODE}\nvTint = state.rgb;`);
   // Merged chunks are in world space (identity model matrix), so the normal matrix is the view rotation.
   vertex = swap(vertex, '#include <beginnormal_vertex>', 'vec3 objectNormal = ioOct( normal.xy );');
+  vertex = swap(vertex, '#include <defaultnormal_vertex>', DEFAULT_NORMAL);
   vertex = swap(vertex, '#include <begin_vertex>', 'vec3 transformed = slotPosition;');
   vertex = swap(vertex, '#include <clipping_planes_vertex>', `#include <clipping_planes_vertex>\n${HIDE_BRANCH}`);
   shader.vertexShader = vertex;

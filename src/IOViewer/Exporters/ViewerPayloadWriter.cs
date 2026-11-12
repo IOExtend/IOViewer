@@ -96,7 +96,7 @@ internal sealed class ViewerPayloadWriter
             maxScale[id] = Math.Max(maxScale.GetValueOrDefault(id), scale);
         }
 
-        var sharedOutput = new Dictionary<int, int>();
+        var sharedOutput = new Dictionary<int, (int Index, Vector3d Origin)>();
         long totalVertices = 0;
         foreach (var mesh in _doc.Meshes)
         {
@@ -110,12 +110,13 @@ internal sealed class ViewerPayloadWriter
             Vector3d translation; // in RTC
             if (geometry is not null)
             {
-                if (!sharedOutput.TryGetValue(geometry.Id, out geometryIndex))
+                if (!sharedOutput.TryGetValue(geometry.Id, out var written))
                 {
-                    geometryIndex = AddSharedGeometry(geometry, maxScale.GetValueOrDefault(geometry.Id) <= 1 + 1e-6);
-                    sharedOutput.Add(geometry.Id, geometryIndex);
+                    written = AddSharedGeometry(geometry, maxScale.GetValueOrDefault(geometry.Id) <= 1 + 1e-6);
+                    sharedOutput.Add(geometry.Id, written);
                 }
-                translation = transform.Translation - _rtcOffset;
+                geometryIndex = written.Index;
+                translation = transform.Apply(written.Origin) - _rtcOffset; // the written geometry starts at Origin
             }
             else
             {
@@ -149,17 +150,23 @@ internal sealed class ViewerPayloadWriter
         }
     }
 
-    // Quantized with the origin Snap(local minimum) (META q.o) when it fits and no instance scales it up (which would
-    // scale the Step/2 error with it), else f32 as written.
-    private int AddSharedGeometry(ViewerGeometry geometry, bool quantize)
+    // Written relative to Origin = Snap(local minimum), which each instance's double translation absorbs: quantized
+    // (with q.o = 0) when it fits and no instance scales it up (which would scale the Step/2 error with it), else f32.
+    // Geometry in world coordinates thus never reaches f32 or the viewer's GPU decode as large numbers.
+    private (int Index, Vector3d Origin) AddSharedGeometry(ViewerGeometry geometry, bool quantize)
     {
         var vertices = geometry.Vertices.ToArray();
         var normals = geometry.Normals is { } n && n.Count == vertices.Length ? GeometryQuantizer.OctEncode(n) : null;
         var uvs = Uvs(geometry.UVs, vertices.Length);
         var bounds = geometry.ComputeBoundingBox();
-        return quantize && GeometryQuantizer.TryQuantize(vertices, out var origin, out var q)
-            ? AddGeometry(q, null, origin, geometry.Indices, normals, uvs, bounds)
-            : AddGeometry(null, Floats(vertices, Vector3d.Zero), null, geometry.Indices, normals, uvs, bounds);
+        BoundingBox3d Local(Vector3d origin) => bounds.IsEmpty ? bounds : new BoundingBox3d(bounds.Min - origin, bounds.Max - origin);
+        if (quantize && GeometryQuantizer.TryQuantize(vertices, out var origin, out var q))
+        {
+            return (AddGeometry(q, null, Vector3d.Zero, geometry.Indices, normals, uvs, Local(origin)), origin);
+        }
+        var min = bounds.IsEmpty ? Vector3d.Zero : bounds.Min;
+        origin = new Vector3d(GeometryQuantizer.Snap(min.X), GeometryQuantizer.Snap(min.Y), GeometryQuantizer.Snap(min.Z));
+        return (AddGeometry(null, Floats(vertices, origin), null, geometry.Indices, normals, uvs, Local(origin)), origin);
     }
 
     // Returns the geometry of a mesh with its own vertices and the instance translation (RTC).
@@ -174,7 +181,7 @@ internal sealed class ViewerPayloadWriter
         var shape = Bake(mesh);
         var hasher = new HashCode();
         hasher.AddBytes(Bytes(shape.Relative));
-        foreach (int index in mesh.Indices) hasher.Add(index);
+        foreach (int index in shape.Indices) hasher.Add(index);
         hasher.AddBytes(Bytes(shape.Normals));
         hasher.AddBytes(Bytes(shape.Uvs));
         int hash = hasher.ToHashCode();
@@ -186,7 +193,7 @@ internal sealed class ViewerPayloadWriter
         foreach (var twin in twins)
         {
             var other = Bake(twin.Mesh); // rebaked on a hash match instead of keeping every mesh's floats in memory
-            if (SameBytes(shape.Relative, other.Relative) && mesh.Indices.SequenceEqual(twin.Mesh.Indices)
+            if (SameBytes(shape.Relative, other.Relative) && shape.Indices.SequenceEqual(other.Indices)
                 && SameBytes(shape.Normals, other.Normals) && SameBytes(shape.Uvs, other.Uvs))
             {
                 return (twin.Geometry, twin.Translation + (shape.Min - other.Min));
@@ -199,18 +206,18 @@ internal sealed class ViewerPayloadWriter
         if (GeometryQuantizer.TryQuantize(shape.Rtc, out var origin, out var q))
         {
             var local = box.IsEmpty ? box : new BoundingBox3d(box.Min - origin, box.Max - origin);
-            (geometry, translation) = (AddGeometry(q, null, Vector3d.Zero, mesh.Indices, shape.Normals, shape.Uvs, local), origin);
+            (geometry, translation) = (AddGeometry(q, null, Vector3d.Zero, shape.Indices, shape.Normals, shape.Uvs, local), origin);
         }
         else
         {
             var bounds = new BoundingBox3d(Vector3d.Zero, box.Max - shape.Min); // not empty: no vertices always quantize
-            (geometry, translation) = (AddGeometry(null, shape.Relative, null, mesh.Indices, shape.Normals, shape.Uvs, bounds), shape.Min);
+            (geometry, translation) = (AddGeometry(null, shape.Relative, null, shape.Indices, shape.Normals, shape.Uvs, bounds), shape.Min);
         }
         twins.Add(new OwnTwin(mesh, geometry, translation));
         return (geometry, translation);
     }
 
-    // Bakes the mesh transform into its vertices (in RTC) and normals.
+    // Bakes the mesh transform into its vertices (in RTC), normals and, for a mirroring transform, the winding.
     private OwnShape Bake(ViewerMesh mesh)
     {
         var transform = mesh.Transform ?? Transform3d.Identity;
@@ -229,7 +236,17 @@ internal sealed class ViewerPayloadWriter
         {
             normals = GeometryQuantizer.OctEncode(mesh.Transform is null ? n : [.. n.Select(v => TransformNormal(transform, v))]);
         }
-        return new OwnShape(rtc, box, min, Floats(rtc, min), normals, Uvs(mesh.UVs, vertices.Count));
+
+        // A mirroring transform (det < 0, as in TransformNormal) turns the triangles inside out unless their winding is
+        // reversed too; the viewer only does that for shared geometry, from the instance matrix.
+        var indices = mesh.Indices;
+        if (Vector3d.Dot(transform.XAxis, Vector3d.Cross(transform.YAxis, transform.ZAxis)) < 0)
+        {
+            int[] flipped = [.. indices];
+            for (int i = 0; i + 2 < flipped.Length; i += 3) (flipped[i + 1], flipped[i + 2]) = (flipped[i + 2], flipped[i + 1]);
+            indices = flipped;
+        }
+        return new OwnShape(rtc, box, min, Floats(rtc, min), indices, normals, Uvs(mesh.UVs, vertices.Count));
     }
 
     // Multiplies by the inverse transpose of the linear part, so normals stay perpendicular under any affine map.
@@ -670,8 +687,9 @@ internal sealed class ViewerPayloadWriter
     // Origin is META q.o: set for u16 grid-step positions, null for f32.
     private sealed record GeometryEntry(BlobView Positions, Vector3d? Origin, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds);
 
-    // An own-vertex mesh baked into RTC: Relative = float32 positions relative to Min, the exact minimum corner.
-    private sealed record OwnShape(Vector3d[] Rtc, BoundingBox3d Box, Vector3d Min, float[] Relative, short[]? Normals, float[]? Uvs);
+    // An own-vertex mesh baked into RTC: Relative = float32 positions relative to Min, the exact minimum corner; Indices
+    // with the winding reversed under a mirroring transform.
+    private sealed record OwnShape(Vector3d[] Rtc, BoundingBox3d Box, Vector3d Min, float[] Relative, IReadOnlyList<int> Indices, short[]? Normals, float[]? Uvs);
 
     // The first own mesh of a shape, the geometry written for it and its instance translation (RTC).
     private readonly record struct OwnTwin(ViewerMesh Mesh, int Geometry, Vector3d Translation);

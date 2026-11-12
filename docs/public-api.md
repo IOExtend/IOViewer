@@ -27,6 +27,6 @@
 
 ### Importers (`IOViewer.Importers`)
 
-- `GlbViewerImporter`: Reads binary glTF 2.0 (`.glb`) files into `ViewerDocument`. Each glTF mesh primitive becomes one `ViewerGeometry` and each node that uses it a `ViewerMesh` with the node's world transform, converted from glTF's Y-up to the viewer's Z-up. A node hierarchy that is not a tree (a node referenced twice or a cycle) is rejected with `InvalidDataException`.
-- `ObjViewerImporter`: Reads Wavefront OBJ geometry into `ViewerDocument` as is, without changing the up axis. Material (`.mtl`) files are not read.
+- `GlbViewerImporter`: Reads binary glTF 2.0 (`.glb`) files into `ViewerDocument`. Each glTF mesh primitive becomes one `ViewerGeometry` and each node that uses it a `ViewerMesh` with the node's world transform, converted from glTF's Y-up to the viewer's Z-up. Each such node also becomes a `ViewerElement` (category `GLB`, named after the node, else the mesh) that all its primitives belong to. A node hierarchy that is not a tree (a node referenced twice or a cycle) is rejected with `InvalidDataException`.
+- `ObjViewerImporter`: Reads Wavefront OBJ geometry into `ViewerDocument` as is, without changing the up axis. Each object or group (`o`/`g`) becomes one `ViewerMesh` holding only the vertices its faces use and one `ViewerElement` (category `OBJ`) with its name. Material (`.mtl`) files are not read.
 - `JsonViewerImporter`: Reads JSON document snapshots into `ViewerDocument`.

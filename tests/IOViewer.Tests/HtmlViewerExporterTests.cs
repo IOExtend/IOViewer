@@ -543,13 +543,8 @@ public class HtmlViewerExporterTests
         Assert.Equal(3, view.Meta.GetProperty("format").GetInt32());
         Assert.Equal("u16", geometry.GetProperty("positions").GetProperty("t").GetString());
         Assert.Equal(Step, geometry.GetProperty("q").GetProperty("s").GetDouble());
-        var decoded = view.Positions(geometry);
-        for (int i = 0; i < vertices.Length; i++)
-        {
-            Assert.InRange(Math.Abs(decoded[i * 3] - vertices[i].X), 0, Step / 2);
-            Assert.InRange(Math.Abs(decoded[i * 3 + 1] - vertices[i].Y), 0, Step / 2);
-            Assert.InRange(Math.Abs(decoded[i * 3 + 2] - vertices[i].Z), 0, Step / 2);
-        }
+        Assert.Equal([0, 0, 0], Vec(geometry.GetProperty("q").GetProperty("o"))); // the instance translation holds the origin
+        AssertPlaced(view, 0, vertices, Step / 2 + 1e-6); // plus float32 rounding of the translation
     }
 
     [Fact]
@@ -720,6 +715,88 @@ public class HtmlViewerExporterTests
         AssertPlaced(view, 0, own, tolerance);
         AssertPlaced(view, 1, local.Select(place.Apply), tolerance);
         AssertPlaced(view, 2, own.Select(v => v + shift), tolerance);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Format3_SharedGeometryInWorldCoordinates_KeepsPrecision(bool f32)
+    {
+        // A 1 cm x 2 mm triangle stored in georeferenced coordinates, placed as is and rotated about a nearby point; the
+        // f32 variant has one more vertex 100 m away, over the 64 m that u16 steps cover.
+        var a = new Vector3d(500_000.123, 6_000_000.456, 100.789);
+        List<Vector3d> vertices = [a, a + new Vector3d(0.01, 0, 0), a + new Vector3d(0, 0.002, 0)];
+        List<int> indices = [0, 1, 2];
+        if (f32)
+        {
+            vertices.Add(a + new Vector3d(100, 0, 0));
+            indices.AddRange([1, 3, 2]);
+        }
+        var axes = new Transform3d(new Vector3d(Math.Cos(0.5), Math.Sin(0.5), 0), new Vector3d(-Math.Sin(0.5), Math.Cos(0.5), 0), Vector3d.UnitZ, Vector3d.Zero);
+        var rotated = axes with { Translation = a - axes.Apply(a) };
+        var doc = new ViewerDocument();
+        doc.Geometries.Add(new ViewerGeometry { Id = 1, Vertices = vertices, Indices = indices });
+        doc.Meshes.Add(new ViewerMesh { Id = 1, GeometryId = 1, Transform = Transform3d.Identity });
+        doc.Meshes.Add(new ViewerMesh { Id = 2, GeometryId = 1, Transform = rotated });
+
+        var view = ViewerHtml.Export(doc);
+        var geometry = view.Geometries[0];
+
+        Assert.Equal(f32 ? "f32" : "u16", geometry.GetProperty("positions").GetProperty("t").GetString());
+        if (geometry.TryGetProperty("q", out var q)) Assert.All(Vec(q.GetProperty("o")), o => Assert.InRange(Math.Abs(o), 0, 1e5));
+        var matrix = view.Instances("matrix");
+        foreach (var (instance, transform) in new[] { (0, Transform3d.Identity), (1, rotated) })
+        {
+            for (int k = 0; k < 3; k++) Assert.InRange(Math.Abs(matrix[instance * 12 + 9 + k]), 0, 1e5);
+            AssertPlaced(view, instance, vertices.Select(transform.Apply), Step / 2 + 1e-4);
+            var world = DecodedWorld(view, instance);
+            double Edge(int v) => Math.Sqrt(Enumerable.Range(0, 3).Sum(k => Math.Pow(world[v * 3 + k] - world[k], 2)));
+            Assert.True(Edge(1) > 0 && Edge(2) > 0, $"instance {instance}: thin edges {Edge(1)}, {Edge(2)}");
+        }
+    }
+
+    [Fact]
+    public void OwnVertices_MirroredTransform_KeepsWindingWithNormals()
+    {
+        // Triangles of own vertices with +Z normals, once mirrored in X and once only translated: the face normal from
+        // the decoded winding must agree with the decoded vertex normal in both.
+        Vector3d[] triangle = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)];
+        Vector3d[] up = [Vector3d.UnitZ, Vector3d.UnitZ, Vector3d.UnitZ];
+        var mirror = new Transform3d(-Vector3d.UnitX, Vector3d.UnitY, Vector3d.UnitZ, new Vector3d(5, 0, 0));
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(new ViewerMesh { Id = 1, Vertices = triangle, Indices = [0, 1, 2], Normals = up, Transform = mirror });
+        doc.Meshes.Add(new ViewerMesh { Id = 2, Vertices = triangle, Indices = [0, 1, 2], Normals = up, Transform = Transform3d.Translate(new(-5, 0, 0)) });
+
+        var view = ViewerHtml.Export(doc);
+
+        for (int instance = 0; instance < 2; instance++)
+        {
+            var geometry = view.Geometries[(int)view.Instances("geometry")[instance]];
+            var p = DecodedWorld(view, instance);
+            var normals = view.Normals(geometry)!;
+            var index = view.Read(geometry.GetProperty("indices")).Select(i => (int)i).ToArray();
+            Vector3d At(double[] values, int v) => new(values[v * 3], values[v * 3 + 1], values[v * 3 + 2]);
+            var face = Vector3d.Cross(At(p, index[1]) - At(p, index[0]), At(p, index[2]) - At(p, index[0]));
+            Assert.True(Vector3d.Dot(face, At(normals, index[0])) > 0, $"instance {instance}: winding against the normal");
+        }
+    }
+
+    [Fact]
+    public void OwnVertices_MirroredTwin_DoesNotReuseUnmirroredWinding()
+    {
+        // In the YZ plane a mirror in X only moves the triangle, so both bake to the same positions; the mirrored one
+        // must still get its own geometry with the reversed winding.
+        Vector3d[] triangle = [new(0, 0, 0), new(0, 1, 0), new(0, 0, 1)];
+        var mirror = new Transform3d(-Vector3d.UnitX, Vector3d.UnitY, Vector3d.UnitZ, new Vector3d(3, 0, 0));
+        var doc = new ViewerDocument();
+        doc.Meshes.Add(new ViewerMesh { Id = 1, Vertices = triangle, Indices = [0, 1, 2] });
+        doc.Meshes.Add(new ViewerMesh { Id = 2, Vertices = triangle, Indices = [0, 1, 2], Transform = mirror });
+
+        var view = ViewerHtml.Export(doc);
+
+        Assert.Equal([0, 1], view.Instances("geometry"));
+        Assert.Equal([0, 1, 2], view.Read(view.Geometries[0].GetProperty("indices")));
+        Assert.Equal([0, 2, 1], view.Read(view.Geometries[1].GetProperty("indices")));
     }
 
     [Fact]

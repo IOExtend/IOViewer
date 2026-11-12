@@ -117,7 +117,8 @@ public static class GlbViewerImporter
         var geometryIds = new Dictionary<(int Mesh, int Primitive), int?>();
         int meshCounter = 0;
 
-        void Instantiate(int meshIndex, Transform3d world)
+        // One element per node occurrence: all primitives of its mesh select, hide and list as one object.
+        void Instantiate(int meshIndex, Transform3d world, string? nodeName)
         {
             if (meshIndex < 0 || meshIndex >= meshElements.Length)
             {
@@ -128,6 +129,7 @@ public static class GlbViewerImporter
             string meshName = meshEl.TryGetProperty("name", out var mn) ? mn.GetString() ?? $"Mesh {meshCounter + 1}" : $"Mesh {meshCounter + 1}";
             if (!meshEl.TryGetProperty("primitives", out var primsEl)) return;
 
+            ViewerElement? element = null;
             int primIndex = -1;
             foreach (var prim in primsEl.EnumerateArray())
             {
@@ -191,10 +193,18 @@ public static class GlbViewerImporter
                     }
                 }
 
+                if (element is null)
+                {
+                    element = new ViewerElement { Id = doc.Elements.Count + 1, Name = string.IsNullOrEmpty(nodeName) ? meshName : nodeName, Category = "GLB" };
+                    doc.Elements.Add(element);
+                }
+
+                element.MeshIndices.Add(doc.Meshes.Count);
                 doc.Meshes.Add(new ViewerMesh
                 {
                     Id = ++meshCounter,
                     Name = meshName,
+                    ElementId = element.Id,
                     GeometryId = geometryId,
                     Transform = world.Then(YupToZup),
                     MaterialId = matId,
@@ -233,7 +243,7 @@ public static class GlbViewerImporter
                     var world = ReadNodeTransform(node).Then(parentWorld);
                     if (node.TryGetProperty("mesh", out var meshProp))
                     {
-                        Instantiate(meshProp.GetInt32(), world);
+                        Instantiate(meshProp.GetInt32(), world, node.TryGetProperty("name", out var nodeName) ? nodeName.GetString() : null);
                     }
 
                     if (node.TryGetProperty("children", out var children))
@@ -246,7 +256,7 @@ public static class GlbViewerImporter
         else
         {
             // No scene graph: import every mesh once without a node transform.
-            for (int i = 0; i < meshElements.Length; i++) Instantiate(i, Transform3d.Identity);
+            for (int i = 0; i < meshElements.Length; i++) Instantiate(i, Transform3d.Identity, null);
         }
 
         doc.ComputeBoundingBox();

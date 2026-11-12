@@ -80,36 +80,58 @@ public static class ObjViewerImporter
             }
             else if (span.StartsWith("o ") || span.StartsWith("g "))
             {
-                if (meshIndices.Count > 0)
-                {
-                    doc.Meshes.Add(new ViewerMesh
-                    {
-                        Id = ++meshCounter,
-                        Name = currentMeshName,
-                        Vertices = [.. vertices],
-                        Indices = [.. meshIndices],
-                        Color = new RgbaColor(180, 180, 180)
-                    });
-                    meshIndices.Clear();
-                }
+                AddMesh();
                 currentMeshName = line.Substring(2).Trim();
             }
         }
 
-        if (meshIndices.Count > 0)
-        {
-            doc.Meshes.Add(new ViewerMesh
-            {
-                Id = ++meshCounter,
-                Name = currentMeshName,
-                Vertices = [.. vertices],
-                Indices = [.. meshIndices],
-                Color = new RgbaColor(180, 180, 180)
-            });
-        }
+        AddMesh();
 
         doc.ComputeBoundingBox();
         return doc;
+
+        // One mesh and one element per OBJ object or group, so the viewer can list, select and hide it.
+        void AddMesh()
+        {
+            if (meshIndices.Count == 0) return;
+
+            int id = ++meshCounter;
+
+            // Keep only the vertices this object's faces use, so its bounds cover the object and not the file so far.
+            var meshVertices = new List<Vector3d>();
+            var localIndex = new Dictionary<int, int>();
+            var indices = new int[meshIndices.Count];
+            for (int i = 0; i < indices.Length; i++)
+            {
+                int v = meshIndices[i];
+                if (v >= vertices.Count)
+                {
+                    throw new InvalidDataException($"OBJ object '{currentMeshName}': face vertex {v + 1} is outside the {vertices.Count} vertices read so far.");
+                }
+
+                if (!localIndex.TryGetValue(v, out int local))
+                {
+                    local = meshVertices.Count;
+                    localIndex.Add(v, local);
+                    meshVertices.Add(vertices[v]);
+                }
+                indices[i] = local;
+            }
+
+            var element = new ViewerElement { Id = id, Name = currentMeshName, Category = "OBJ" };
+            element.MeshIndices.Add(doc.Meshes.Count);
+            doc.Elements.Add(element);
+            doc.Meshes.Add(new ViewerMesh
+            {
+                Id = id,
+                Name = currentMeshName,
+                ElementId = id,
+                Vertices = meshVertices,
+                Indices = indices,
+                Color = new RgbaColor(180, 180, 180)
+            });
+            meshIndices.Clear();
+        }
     }
 
     private static int ParseFaceVertex(string token, int totalVerts)

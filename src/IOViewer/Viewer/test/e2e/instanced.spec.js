@@ -284,6 +284,24 @@ test('a mirrored instance is shaded like its unmirrored twin', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
+test('a sheared instance is shaded as on the merged path', async ({ page, browser }) => {
+  const errors = await open(page, 'shear');
+  expect(await page.evaluate(() => window.__ioviewer.scene.memory())).toMatchObject({ chunks: 0, instancedInstances: 2 });
+  const merged = await browser.newPage({ viewport: page.viewportSize(), locale: 'ru-RU' });
+  await open(merged, 'shear');
+  expect(await merged.evaluate(() => window.__ioviewer.scene.memory().cells)).toBe(0);
+  // Points on four faces of the sheared box (element 0). three's own instance normal ignores shear: before the fix
+  // these differed by 15-42 on three of them. Silhouette pixels differ by position rounding, so faces only.
+  for (const f of [[0.25, 0, 0.5], [0.75, 0.5, 0.5], [0.25, 0.5, 0.5], [0.75, 1, 0.5]]) {
+    const at = await screenAt(page, 0, f);
+    const [instanced, reference] = [await rgb(page, at), await rgb(merged, at)];
+    expect(distance(reference, BACKGROUND), `${f}`).toBeGreaterThan(30);
+    expect(distance(instanced, reference), `${f}`).toBeLessThanOrEqual(3);
+  }
+  await merged.close();
+  expect(errors).toEqual([]);
+});
+
 test('wireframe: lines without black pixels, and a click selects the face\'s element', async ({ page }) => {
   const errors = await open(page);
   const materials = await page.screenshot({ clip: VIEW });

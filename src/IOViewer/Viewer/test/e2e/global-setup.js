@@ -38,8 +38,19 @@ function largeModel(count) {
   return { Title: 'Large Model', Elements: elements, Meshes: meshes, Geometries: [{ Id: 1, Vertices: corners, Indices: faces }] };
 }
 
+// Two boxes on one shared geometry, the first sheared (YAxis (1, 1, 0), as a non-uniform glTF parent scale over a
+// rotated child gives), for the instanced-normal check.
+function shearModel() {
+  const model = largeModel(2);
+  model.Title = 'Shear';
+  model.Meshes[0].Transform.YAxis = { X: 1, Y: 1, Z: 0 };
+  model.Meshes[1].Transform.Translation = { X: 1, Y: 0, Z: 0 };
+  return model;
+}
+
 // Exports every committed fixture, the building again opening in white mode, a generated large model for the
-// tree virtualization test and a copy of the building whose binary block is cut in half, as in a truncated file.
+// tree virtualization test, the sheared model and a copy of the building whose binary block is cut in half, as in a
+// truncated file.
 export default function globalSetup() {
   for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith('.json'))) {
     exportHtml(path.join(fixturesDir, file), path.basename(file, '.json'));
@@ -49,6 +60,9 @@ export default function globalSetup() {
   const large = path.join(viewerDir, 'test-results', 'large.json');
   writeFileSync(large, JSON.stringify(largeModel(LARGE_ELEMENTS)));
   exportHtml(large, 'large');
+  const shear = path.join(viewerDir, 'test-results', 'shear.json');
+  writeFileSync(shear, JSON.stringify(shearModel()));
+  exportHtml(shear, 'shear');
 
   const results = path.join(viewerDir, 'test-results');
   const html = readFileSync(path.join(results, 'building.html'), 'utf8');

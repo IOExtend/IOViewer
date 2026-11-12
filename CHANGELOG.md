@@ -14,6 +14,10 @@ API between minor releases.
 - `tools/pack-release.ps1` fails when creating the source archive fails.
 - Documentation no longer claims `.mtl` material support or mesh simplification, neither of which exists.
 - The logo on the documentation site no longer covers half of the page; it is sized to the navigation bar.
+- `GlbViewerImporter` and `ObjViewerImporter` create elements: one `ViewerElement` per GLB node that draws a mesh
+  (category `GLB`) and per OBJ object or group (category `OBJ`), so converted models have a model tree and can be
+  selected, hidden and isolated. Each OBJ mesh keeps only the vertices its faces use instead of every vertex read so
+  far, and a face that references a vertex not yet read throws `InvalidDataException` on load.
 
 ### Added
 - A new HTML viewer built on three.js 0.186.1, embedded in the page, which still works offline without network requests:
