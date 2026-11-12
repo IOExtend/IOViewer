@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using IOScene;
 using IOViewer.Model;
@@ -416,16 +417,34 @@ internal sealed class ViewerPayloadWriter
         {
             var sets = new Dictionary<int, ScenePropertySet>();
             foreach (var set in _scene.PropertySets) sets.TryAdd(set.Id, set);
+            // JSON.parse keeps only the last of equal member names, so no object here may repeat one. The page finds
+            // properties by element id, so elements that share an id (which Validate rejects) are one entry.
+            var setIds = new Dictionary<long, IEnumerable<int>>();
             foreach (var el in _scene.Elements)
             {
-                if (el.PropertySetIds.Count == 0) continue;
+                setIds[el.Id] = setIds.TryGetValue(el.Id, out var ids) ? ids.Concat(el.PropertySetIds) : el.PropertySetIds;
+            }
+            var referenced = new HashSet<int>();
+            var names = new HashSet<string>();
+            foreach (var el in _scene.Elements)
+            {
+                if (!setIds.Remove(el.Id, out var ids) || !ids.Any()) continue;
                 w.WriteStartObject(el.Id.ToString(CultureInfo.InvariantCulture));
-                foreach (int id in el.PropertySetIds)
+                // Sets with the same name are one group, in the order the element first references them; a property
+                // name used before in the group gets the first free suffix " (2)", " (3)", ...
+                referenced.Clear();
+                var groups = ids.Where(referenced.Add).Select(id => sets.GetValueOrDefault(id)).OfType<ScenePropertySet>().GroupBy(s => Written(s.Name));
+                foreach (var group in groups)
                 {
-                    if (!sets.TryGetValue(id, out var set)) continue;
-                    w.WriteStartObject(set.Name);
-                    // The display string: a value of a kind this version does not know is shown as text.
-                    foreach (var prop in set.Properties) w.WriteString(prop.Name, prop.Value.Text);
+                    w.WriteStartObject(group.Key);
+                    names.Clear();
+                    foreach (var prop in group.SelectMany(s => s.Properties))
+                    {
+                        string written = Written(prop.Name), name = written;
+                        for (int n = 2; !names.Add(name); n++) name = string.Create(CultureInfo.InvariantCulture, $"{written} ({n})");
+                        // The display string: a value of a kind this version does not know is shown as text.
+                        w.WriteString(name, prop.Value.Text);
+                    }
                     w.WriteEndObject();
                 }
                 w.WriteEndObject();
@@ -434,6 +453,10 @@ internal sealed class ViewerPayloadWriter
         }
         w.WriteEndObject();
     }
+
+    // The writer writes each lone surrogate as U+FFFD, so names that differ only there are equal in the page.
+    private static string Written(string name) =>
+        name.AsSpan().ContainsAnyInRange('\uD800', '\uDFFF') ? Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(name)) : name;
 
     public void WriteMeta(Stream output)
     {

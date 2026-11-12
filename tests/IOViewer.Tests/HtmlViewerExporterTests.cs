@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using IOScene;
 using IOViewer.Exporters;
 using IOViewer.Model;
@@ -413,6 +415,102 @@ public class HtmlViewerExporterTests
         Assert.Equal("{}", without.Props.GetRawText());
         Assert.Equal(1, without.Meta.GetProperty("elements").GetArrayLength());
         Assert.True(with.Props.TryGetProperty("101", out _));
+    }
+
+    // JsonDocument keeps duplicate members, but JSON.parse in the page keeps only the last one.
+    private static void AssertNoDuplicateMembers(JsonElement json)
+    {
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(json.GetRawText()));
+        var objects = new Stack<HashSet<string>>();
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.StartObject) objects.Push([]);
+            else if (reader.TokenType == JsonTokenType.EndObject) objects.Pop();
+            else if (reader.TokenType == JsonTokenType.PropertyName)
+            {
+                string name = reader.GetString()!;
+                Assert.True(objects.Peek().Add(name), $"Member '{name}' is written twice in one object.");
+            }
+        }
+    }
+
+    private static (string Name, string? Value)[] Members(JsonElement group) =>
+        [.. group.EnumerateObject().Select(p => (p.Name, p.Value.GetString()))];
+
+    private static ScenePropertySet Set(int id, string name, params (string Name, string Value)[] properties) =>
+        new() { Id = id, Name = name, Properties = [.. properties.Select(p => new SceneProperty { Name = p.Name, Value = SceneValue.FromText(p.Value) })] };
+
+    [Fact]
+    public void Props_SetsWithTheSameName_AreOneGroup()
+    {
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "3000 mm")));
+        scene.PropertySets.Add(Set(2, "Identity Data", ("Mark", "D1")));
+        scene.PropertySets.Add(Set(3, "Dimensions", ("Width", "900 mm")));
+        scene.Elements[0].PropertySetIds.AddRange([1, 2, 3, 1]);
+        Assert.Empty(scene.Validate());
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        var element = view.Props.GetProperty("1");
+        Assert.Equal(["Dimensions", "Identity Data"], element.EnumerateObject().Select(p => p.Name));
+        Assert.Equal([("Height", "3000 mm"), ("Width", "900 mm")], Members(element.GetProperty("Dimensions")));
+        Assert.Equal([("Mark", "D1")], Members(element.GetProperty("Identity Data")));
+    }
+
+    [Fact]
+    public void Props_RepeatedPropertyName_GetsNumberedSuffix()
+    {
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "a"), ("Height (2)", "b")));
+        scene.PropertySets.Add(Set(2, "Dimensions", ("Height", "c"), ("Height", "d")));
+        scene.Elements[0].PropertySetIds.AddRange([1, 2]);
+        Assert.Empty(scene.Validate());
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        Assert.Equal(
+            [("Height", "a"), ("Height (2)", "b"), ("Height (3)", "c"), ("Height (4)", "d")],
+            Members(view.Props.GetProperty("1").GetProperty("Dimensions")));
+    }
+
+    [Fact]
+    public void Props_NamesWrittenAlike_AreMerged()
+    {
+        // Each lone surrogate is written as U+FFFD, so these names differ in the scene but not in the page.
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.PropertySets.Add(Set(1, "Group \uD800", ("Name \uD800", "a")));
+        scene.PropertySets.Add(Set(2, "Group \uDC00", ("Name \uDC00", "b")));
+        scene.Elements[0].PropertySetIds.AddRange([1, 2]);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        Assert.Equal([("Name \uFFFD", "a"), ("Name \uFFFD (2)", "b")], Members(view.Props.GetProperty("1").GetProperty("Group \uFFFD")));
+    }
+
+    [Fact]
+    public void Props_ElementsThatShareAnId_AreOneEntry()
+    {
+        // A scene Validate rejects, but the page finds properties by element id.
+        var scene = TestScenes.Empty();
+        scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
+        scene.Elements.Add(new SceneElement { Id = 1, ModelId = 1, Name = "Twin", PropertySetIds = [2] });
+        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "3000 mm")));
+        scene.PropertySets.Add(Set(2, "Identity Data", ("Mark", "D1")));
+        scene.Elements[0].PropertySetIds.Add(1);
+
+        var view = ViewerHtml.Export(new ViewerDocument(scene));
+
+        AssertNoDuplicateMembers(view.Props);
+        var element = view.Props.GetProperty("1");
+        Assert.Equal([("Height", "3000 mm")], Members(element.GetProperty("Dimensions")));
+        Assert.Equal([("Mark", "D1")], Members(element.GetProperty("Identity Data")));
     }
 
     [Fact]

@@ -94,6 +94,9 @@ the `IOViewer` package). The `IOViewer.Cli` tool only gains inputs.
   look lighter than in 0.2.0, which is now correct. The alpha stays linear; every channel is now rounded to the nearest
   byte, where it was truncated.
 - A 4D task of a type this version does not know is shown as a construct task; it was left out of the schedule.
+- The properties panel shows the property sets of an element that have the same name as one group, and a property name
+  that repeats in a group gets a numbered suffix (`Height (2)`), so no property is lost. Elements that share an id,
+  which `SceneDocument.Validate()` rejects, show the properties of all of them.
 
 ## [0.2.0] - 2026-11-12
 
