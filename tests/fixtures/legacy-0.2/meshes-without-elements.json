@@ -1,0 +1,502 @@
+{
+  "Title": "Meshes Without Elements",
+  "SourcePath": null,
+  "Author": "IOViewer",
+  "CreatedAt": "2026-11-12T12:00:00Z",
+  "Application": "IOViewer 0.2.0",
+  "BoundingBox": {
+    "Min": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0,
+      "LengthSquared": 0,
+      "Length": 0
+    },
+    "Max": {
+      "X": 3,
+      "Y": 3,
+      "Z": 0,
+      "LengthSquared": 18,
+      "Length": 4.242640687119285
+    },
+    "IsEmpty": false,
+    "Center": {
+      "X": 1.5,
+      "Y": 1.5,
+      "Z": 0,
+      "LengthSquared": 4.5,
+      "Length": 2.1213203435596424
+    },
+    "Size": {
+      "X": 3,
+      "Y": 3,
+      "Z": 0,
+      "LengthSquared": 18,
+      "Length": 4.242640687119285
+    }
+  },
+  "Elements": [],
+  "Meshes": [
+    {
+      "Id": 1,
+      "Name": "Pane A",
+      "ElementId": 100,
+      "Vertices": [
+        {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "LengthSquared": 0,
+          "Length": 0
+        },
+        {
+          "X": 1,
+          "Y": 0,
+          "Z": 0,
+          "LengthSquared": 1,
+          "Length": 1
+        },
+        {
+          "X": 1,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 2,
+          "Length": 1.4142135623730951
+        },
+        {
+          "X": 0,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 1,
+          "Length": 1
+        }
+      ],
+      "Indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3
+      ],
+      "Normals": null,
+      "UVs": null,
+      "GeometryId": null,
+      "Transform": null,
+      "MaterialId": 1,
+      "Color": null,
+      "Opacity": 0.8,
+      "TextureIndex": null,
+      "BoundingBox": {
+        "Min": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "LengthSquared": 0,
+          "Length": 0
+        },
+        "Max": {
+          "X": 1,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 2,
+          "Length": 1.4142135623730951
+        },
+        "IsEmpty": false,
+        "Center": {
+          "X": 0.5,
+          "Y": 0.5,
+          "Z": 0,
+          "LengthSquared": 0.5,
+          "Length": 0.7071067811865476
+        },
+        "Size": {
+          "X": 1,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 2,
+          "Length": 1.4142135623730951
+        }
+      }
+    },
+    {
+      "Id": 2,
+      "Name": "Pane B",
+      "ElementId": 100,
+      "Vertices": [
+        {
+          "X": 2,
+          "Y": 0,
+          "Z": 0,
+          "LengthSquared": 4,
+          "Length": 2
+        },
+        {
+          "X": 3,
+          "Y": 0,
+          "Z": 0,
+          "LengthSquared": 9,
+          "Length": 3
+        },
+        {
+          "X": 3,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 10,
+          "Length": 3.1622776601683795
+        },
+        {
+          "X": 2,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 5,
+          "Length": 2.23606797749979
+        }
+      ],
+      "Indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3
+      ],
+      "Normals": null,
+      "UVs": null,
+      "GeometryId": null,
+      "Transform": null,
+      "MaterialId": 2,
+      "Color": null,
+      "Opacity": 1,
+      "TextureIndex": null,
+      "BoundingBox": {
+        "Min": {
+          "X": 2,
+          "Y": 0,
+          "Z": 0,
+          "LengthSquared": 4,
+          "Length": 2
+        },
+        "Max": {
+          "X": 3,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 10,
+          "Length": 3.1622776601683795
+        },
+        "IsEmpty": false,
+        "Center": {
+          "X": 2.5,
+          "Y": 0.5,
+          "Z": 0,
+          "LengthSquared": 6.5,
+          "Length": 2.5495097567963922
+        },
+        "Size": {
+          "X": 1,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 2,
+          "Length": 1.4142135623730951
+        }
+      }
+    },
+    {
+      "Id": 3,
+      "Name": "Slab",
+      "ElementId": 200,
+      "Vertices": [
+        {
+          "X": 0,
+          "Y": 2,
+          "Z": 0,
+          "LengthSquared": 4,
+          "Length": 2
+        },
+        {
+          "X": 1,
+          "Y": 2,
+          "Z": 0,
+          "LengthSquared": 5,
+          "Length": 2.23606797749979
+        },
+        {
+          "X": 1,
+          "Y": 3,
+          "Z": 0,
+          "LengthSquared": 10,
+          "Length": 3.1622776601683795
+        },
+        {
+          "X": 0,
+          "Y": 3,
+          "Z": 0,
+          "LengthSquared": 9,
+          "Length": 3
+        }
+      ],
+      "Indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3
+      ],
+      "Normals": null,
+      "UVs": [
+        {
+          "X": 0,
+          "Y": 0
+        },
+        {
+          "X": 1,
+          "Y": 0
+        },
+        {
+          "X": 1,
+          "Y": 1
+        },
+        {
+          "X": 0,
+          "Y": 1
+        }
+      ],
+      "GeometryId": null,
+      "Transform": null,
+      "MaterialId": 2,
+      "Color": null,
+      "Opacity": 1,
+      "TextureIndex": 0,
+      "BoundingBox": {
+        "Min": {
+          "X": 0,
+          "Y": 2,
+          "Z": 0,
+          "LengthSquared": 4,
+          "Length": 2
+        },
+        "Max": {
+          "X": 1,
+          "Y": 3,
+          "Z": 0,
+          "LengthSquared": 10,
+          "Length": 3.1622776601683795
+        },
+        "IsEmpty": false,
+        "Center": {
+          "X": 0.5,
+          "Y": 2.5,
+          "Z": 0,
+          "LengthSquared": 6.5,
+          "Length": 2.5495097567963922
+        },
+        "Size": {
+          "X": 1,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 2,
+          "Length": 1.4142135623730951
+        }
+      }
+    },
+    {
+      "Id": 4,
+      "Name": "Loose Mesh",
+      "ElementId": null,
+      "Vertices": [
+        {
+          "X": 2,
+          "Y": 2,
+          "Z": 0,
+          "LengthSquared": 8,
+          "Length": 2.8284271247461903
+        },
+        {
+          "X": 3,
+          "Y": 2,
+          "Z": 0,
+          "LengthSquared": 13,
+          "Length": 3.605551275463989
+        },
+        {
+          "X": 3,
+          "Y": 3,
+          "Z": 0,
+          "LengthSquared": 18,
+          "Length": 4.242640687119285
+        },
+        {
+          "X": 2,
+          "Y": 3,
+          "Z": 0,
+          "LengthSquared": 13,
+          "Length": 3.605551275463989
+        }
+      ],
+      "Indices": [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3
+      ],
+      "Normals": null,
+      "UVs": null,
+      "GeometryId": null,
+      "Transform": null,
+      "MaterialId": null,
+      "Color": {
+        "R": 200,
+        "G": 60,
+        "B": 60,
+        "A": 255,
+        "Rf": 0.7843137254901961,
+        "Gf": 0.23529411764705882,
+        "Bf": 0.23529411764705882,
+        "Af": 1
+      },
+      "Opacity": 1,
+      "TextureIndex": null,
+      "BoundingBox": {
+        "Min": {
+          "X": 2,
+          "Y": 2,
+          "Z": 0,
+          "LengthSquared": 8,
+          "Length": 2.8284271247461903
+        },
+        "Max": {
+          "X": 3,
+          "Y": 3,
+          "Z": 0,
+          "LengthSquared": 18,
+          "Length": 4.242640687119285
+        },
+        "IsEmpty": false,
+        "Center": {
+          "X": 2.5,
+          "Y": 2.5,
+          "Z": 0,
+          "LengthSquared": 12.5,
+          "Length": 3.5355339059327378
+        },
+        "Size": {
+          "X": 1,
+          "Y": 1,
+          "Z": 0,
+          "LengthSquared": 2,
+          "Length": 1.4142135623730951
+        }
+      }
+    }
+  ],
+  "Geometries": [],
+  "Materials": [
+    {
+      "Id": 1,
+      "Name": "Glass",
+      "Color": {
+        "R": 150,
+        "G": 200,
+        "B": 230,
+        "A": 255,
+        "Rf": 0.5882352941176471,
+        "Gf": 0.7843137254901961,
+        "Bf": 0.9019607843137255,
+        "Af": 1
+      },
+      "Opacity": 0.5,
+      "Roughness": 0.5,
+      "Metalness": 0.1,
+      "TextureIndex": null
+    },
+    {
+      "Id": 2,
+      "Name": "Concrete",
+      "Color": {
+        "R": 185,
+        "G": 183,
+        "B": 178,
+        "A": 255,
+        "Rf": 0.7254901960784313,
+        "Gf": 0.7176470588235294,
+        "Bf": 0.6980392156862745,
+        "Af": 1
+      },
+      "Opacity": 1,
+      "Roughness": 0.5,
+      "Metalness": 0.1,
+      "TextureIndex": null
+    }
+  ],
+  "Textures": [
+    {
+      "Id": 0,
+      "MimeType": "image/png",
+      "Base64Data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "ScaleX": 2,
+      "ScaleY": 2
+    }
+  ],
+  "Grids": null,
+  "Viewpoints": [],
+  "SectionPlanes": [],
+  "SectionBox": null,
+  "TimeLiner": {
+    "Name": "Schedule",
+    "Tasks": [
+      {
+        "Id": "T1",
+        "Name": "Install",
+        "TaskType": 0,
+        "PlannedStart": "2026-01-05T00:00:00+00:00",
+        "PlannedEnd": "2026-01-16T00:00:00+00:00",
+        "ActualStart": null,
+        "ActualEnd": null,
+        "PlannedCost": null,
+        "ActualCost": null,
+        "Progress": 0,
+        "AttachedSetName": null,
+        "AttachedElementIds": [
+          100,
+          200,
+          4
+        ],
+        "Children": []
+      }
+    ]
+  },
+  "ClashTests": [
+    {
+      "Name": "Panes vs Slab",
+      "Clashes": [
+        {
+          "Id": "C1",
+          "Name": "Clash 1",
+          "Element1Name": "Pane A",
+          "Element2Name": "Slab",
+          "Element1Id": 100,
+          "Element2Id": 200,
+          "Point": {
+            "X": 0.5,
+            "Y": 1.5,
+            "Z": 0,
+            "LengthSquared": 2.5,
+            "Length": 1.5811388300841898
+          },
+          "Distance": 0.02,
+          "Status": 0
+        }
+      ]
+    }
+  ],
+  "LinkedFiles": [
+    {
+      "Name": "Structure",
+      "Path": "links/structure.glb",
+      "Visible": false
+    }
+  ]
+}

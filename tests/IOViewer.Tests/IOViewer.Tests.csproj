@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\fixtures\legacy-0.2\*.json" Link="legacy-0.2\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\IOViewer\IOViewer.csproj" />
     <ProjectReference Include="..\..\src\IOViewer.Cli\IOViewer.Cli.csproj" />
   </ItemGroup>
