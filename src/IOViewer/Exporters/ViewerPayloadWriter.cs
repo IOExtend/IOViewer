@@ -426,6 +426,7 @@ internal sealed class ViewerPayloadWriter
             }
             var referenced = new HashSet<int>();
             var names = new HashSet<string>();
+            var nextSuffix = new Dictionary<string, int>();
             foreach (var el in _scene.Elements)
             {
                 if (!setIds.Remove(el.Id, out var ids) || !ids.Any()) continue;
@@ -438,10 +439,18 @@ internal sealed class ViewerPayloadWriter
                 {
                     w.WriteStartObject(group.Key);
                     names.Clear();
+                    nextSuffix.Clear();
                     foreach (var prop in group.SelectMany(s => s.Properties))
                     {
                         string written = Written(prop.Name), name = written;
-                        for (int n = 2; !names.Add(name); n++) name = string.Create(CultureInfo.InvariantCulture, $"{written} ({n})");
+                        if (!names.Add(name))
+                        {
+                            // Every suffix below nextSuffix[written] is taken, so a name that repeats many times is not
+                            // searched from " (2)" again each time.
+                            int n = nextSuffix.GetValueOrDefault(written, 2);
+                            while (!names.Add(name = string.Create(CultureInfo.InvariantCulture, $"{written} ({n})"))) n++;
+                            nextSuffix[written] = n + 1;
+                        }
                         // The display string: a value of a kind this version does not know is shown as text.
                         w.WriteString(name, prop.Value.Text);
                     }
