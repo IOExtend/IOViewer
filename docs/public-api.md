@@ -38,8 +38,9 @@ A separate package that depends on IOViewer and [IfcIO](https://github.com/IOExt
 
 - `IfcViewerAdapter.ToViewerDocument(IfcModel, IfcViewerOptions?)`: Converts a model in memory, without reading the file
   again, into a `ViewerDocument` in metres with Z up. Each element becomes a `ViewerElement` with the STEP entity id as
-  `Id`, the GlobalId as `SourceId`, the IFC class as `Category`, the storey as `Level`, and its property sets and
-  quantity sets as property groups; an element with geometry gets one mesh of its own. Work schedules become the TimeLiner. Duplicate element
+  `Id`, the GlobalId as `SourceId`, the IFC class as `Category`, the IfcIO storey as `Level` (elements outside a storey
+  and spaces get the first storey), and its property sets and quantity sets as property groups; type objects and lining
+  and panel properties that IfcIO lists as elements are skipped; an element with geometry gets one mesh of its own. Work schedules become the TimeLiner. Duplicate element
   ids throw `ArgumentException`.
 - `IfcViewerAdapter.Convert(IfcModel, IfcViewerOptions?)`: The same, returning an `IfcViewerConversion` with the
   document and a report: the length unit and its exact factor to metres, the number of elements and of own meshes,

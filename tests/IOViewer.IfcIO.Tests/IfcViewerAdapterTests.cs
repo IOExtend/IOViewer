@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using IfcIO;
 using IfcIO.Geometry;
 using IfcIO.Model;
@@ -23,7 +24,7 @@ public class IfcViewerAdapterTests
 
     // Site far from the origin; storey 3000 up; Panel placed at (10,20,0) in the storey and styled red.
     // Fitting A and B draw one representation map (origin (0,0,100)); B's mapping moves it by (0,250,0).
-    private static string PlacedIfc(string lengthUnit) => $"""
+    private static string PlacedIfc(string lengthUnit, string extra = "") => $"""
         ISO-10303-21;
         HEADER;
         FILE_DESCRIPTION((''),'2;1');
@@ -82,6 +83,7 @@ public class IfcViewerAdapterTests
         #317=IFCCARTESIANTRANSFORMATIONOPERATOR3D($,$,#318,$,$);
         #318=IFCCARTESIANPOINT((0.,250.,0.));
         #400=IFCRELCONTAINEDINSPATIALSTRUCTURE('2AdapterContainment001',$,$,$,(#100,#300,#310),#40);
+        {extra}
         ENDSEC;
         END-ISO-10303-21;
         """;
@@ -116,6 +118,25 @@ public class IfcViewerAdapterTests
         var red = Assert.Single(doc.Materials);
         Assert.Equal(new RgbaColor(255, 0, 0), red.Color);
         Assert.Equal(red.Id, MeshOf(doc, 100).MaterialId);
+    }
+
+    [Fact]
+    public void Convert_TypeObjectsAndLiningProperties_AreNotElements()
+    {
+        const string NonProducts = """
+            #500=IFCWALLTYPE('1AdapterWallType000001',$,'WT',$,$,$,$,$,$,.STANDARD.);
+            #501=IFCDOORSTYLE('1AdapterDoorStyle00001',$,'DS',$,$,$,$,$,.SINGLE_SWING_LEFT.,.WOOD.,.F.,.F.);
+            #502=IFCDOORLININGPROPERTIES('1AdapterDoorLining0001',$,'DL',$,50.,$,$,$,$,$,$,$,$,$,$);
+            """;
+        var model = OpenText(PlacedIfc(Millimetre, NonProducts));
+        long[] nonProducts = [500, 501, 502];
+        // IfcIO lists them as elements, which is what the adapter has to undo.
+        Assert.All(nonProducts, id => Assert.Contains(model.AllElements, e => e.Id == id));
+
+        var conversion = IfcViewerAdapter.Convert(model);
+
+        Assert.Equal(new long[] { 100, 300, 310 }, conversion.Document.Elements.Select(e => e.Id).Order());
+        Assert.Empty(conversion.ElementsWithoutGeometry);
     }
 
     [Theory]
@@ -291,7 +312,9 @@ public class IfcViewerAdapterTests
 
         var conversion = IfcViewerAdapter.Convert(model);
 
-        Assert.Equal(model.AllElements.Count(), conversion.ElementCount);
+        Assert.Equal(
+            model.AllElements.Count(e => !Regex.IsMatch(e.IfcType, "(TYPE|STYLE|PROPERTIES)$", RegexOptions.IgnoreCase)),
+            conversion.ElementCount);
         Assert.Equal(conversion.ElementsWithGeometry, conversion.OwnMeshes);
         Assert.All(conversion.Document.Elements, e => Assert.False(string.IsNullOrEmpty(e.SourceId)));
         Assert.NotEmpty(HtmlViewerExporter.ExportToString(conversion.Document));

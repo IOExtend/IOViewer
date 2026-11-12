@@ -53,12 +53,17 @@ engine into a local folder and pass its version and the folder:
 ```sh
 dotnet build IOViewer.slnx -c Release -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local-feed>
 dotnet test IOViewer.slnx -c Release --no-build
-dotnet pack src/IOViewer.IfcIO/IOViewer.IfcIO.csproj -c Release -p:Version=0.2.0-local.1 -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local-feed> -o <out>
+dotnet pack IOViewer.slnx -c Release -p:Version=0.3.0-local.1 -p:IfcIOVersion=0.11.0-local.1 -p:RestoreAdditionalProjectSources=<local-feed> -o <out>
 ```
 
-Packing needs a prerelease `Version` as well, because NuGet refuses a stable
-package that depends on a prerelease one. Do not commit a `nuget.config` that
-points to a local feed.
+Pack the whole solution with a prerelease of the next version: NuGet refuses a
+stable package that depends on a prerelease one, and the adapter package
+depends on the `IOViewer` package of the same version, so both must be in the
+output. Do not commit a `nuget.config` that points to a local feed.
+
+Until the IfcIO version in `EngineVersions.props` is on nuget.org, restoring
+the solution fails in the CI build job, the Docs workflow and `release.yml`
+(the CLI alone still restores), so do not tag a release before then.
 
 ### Viewer
 
@@ -128,7 +133,7 @@ Write commit messages in the imperative mood, for example,
 
 Push a tag matching the package version, such as `v0.2.0`, to run `release.yml`.
 The workflow builds and tests the solution, attaches packages, symbols, source and checksums to a GitHub release,
-and publishes the NuGet packages through Trusted Publishing. The release notes are the section of `CHANGELOG.md` for the version, so add that section before the tag.
+and publishes the NuGet packages, including the engine adapters such as `IOViewer.IfcIO`, through Trusted Publishing. The release notes are the section of `CHANGELOG.md` for the version, so add that section before the tag.
 The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
 
 ## Licensing contributions

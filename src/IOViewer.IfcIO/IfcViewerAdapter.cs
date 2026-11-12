@@ -19,12 +19,15 @@ namespace IOViewer.IfcIO;
 /// </para>
 /// <para>
 /// Each element of <see cref="IfcModel.AllElements"/> (and of <see cref="IfcModel.AllSpaces"/> with
-/// <see cref="IfcViewerOptions.IncludeSpaces"/>) becomes one <see cref="ViewerElement"/>:
+/// <see cref="IfcViewerOptions.IncludeSpaces"/>) becomes one <see cref="ViewerElement"/>, except the type objects
+/// (for example <c>IFCWALLTYPE</c>, <c>IFCDOORSTYLE</c>) and lining and panel properties that IfcIO also lists there:
 /// <see cref="ViewerElement.Id"/> is <see cref="IfcElement.Id"/>, which for a model opened with
 /// <see cref="IfcModel.Open(string)"/> is the element's STEP entity id (<c>#123</c> gives 123), stable for a given file;
 /// <see cref="ViewerElement.SourceId"/> is the GlobalId; <see cref="ViewerElement.Category"/> is the IFC class as IfcIO
-/// reports it (upper case, for example <c>IFCWALL</c>); <see cref="ViewerElement.Level"/> is the name of the storey
-/// that contains it. Property sets and quantity sets become property groups named after the set; quantity values are
+/// reports it (upper case, for example <c>IFCWALL</c>); <see cref="ViewerElement.Level"/> is the name of the IfcIO
+/// storey that holds it. IfcIO places an element in a storey only through <c>IfcRelContainedInSpatialStructure</c>, so
+/// elements contained in the site or building, and spaces aggregated to a storey (<c>IfcRelAggregates</c>, which IfcIO
+/// does not read), get the first storey's name. Property sets and quantity sets become property groups named after the set; quantity values are
 /// written as IfcIO reads them, in the file's units, with invariant formatting.
 /// </para>
 /// <para>
@@ -69,6 +72,8 @@ public static class IfcViewerAdapter
             var elements = options.IncludeSpaces ? storey.Elements.Concat(storey.Spaces) : storey.Elements;
             foreach (var element in elements)
             {
+                if (IsNotProduct(element.IfcType)) continue;
+
                 // Mesh ElementIds, 4D tasks and clashes all key on Id, so a repeat would merge two elements.
                 if (!ids.Add(element.Id))
                 {
@@ -91,6 +96,14 @@ public static class IfcViewerAdapter
         doc.ComputeBoundingBox();
         return new IfcViewerConversion(doc, model.LengthUnit, scale, withoutGeometry, skippedTasks);
     }
+
+    // shortcut: IfcIO picks products by class-name prefix (IFCWALL, IFCDOOR, ...), so type objects such as IfcWallType or
+    // IfcDoorStyle and the door and window lining and panel properties arrive as elements without geometry; no product
+    // class it matches ends like these. Remove once IfcIO reads only IfcProduct subtypes.
+    private static bool IsNotProduct(string ifcType) =>
+        ifcType.EndsWith("TYPE", StringComparison.OrdinalIgnoreCase)
+        || ifcType.EndsWith("STYLE", StringComparison.OrdinalIgnoreCase)
+        || ifcType.EndsWith("PROPERTIES", StringComparison.OrdinalIgnoreCase);
 
     // Exact lengths of the units IfcIO reports; it already converts any other file unit to metres while reading.
     private static double MetresPerUnit(IfcLengthUnit unit) => unit switch

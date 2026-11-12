@@ -115,8 +115,10 @@ does not read the file again. It maps the model as follows:
 - Geometry: IfcIO's world mesh of each element, converted from `IfcModel.LengthUnit` to metres by an exact factor
   (`conversion.MetresPerUnit`). IFC is Z up like the viewer, so axes are not swapped. Coordinates stay doubles until the
   HTML exporter makes them relative to the model centre, so georeferenced models keep their precision.
-- Elements: one per element of `IfcModel.AllElements`. `Id` is the STEP entity id (`#123` gives 123), `SourceId` the
-  GlobalId, `Category` the IFC class as IfcIO reports it (for example `IFCWALL`), `Level` the storey name.
+- Elements: one per element of `IfcModel.AllElements`, except the type objects (for example `IFCWALLTYPE`,
+  `IFCDOORSTYLE`) and door and window lining and panel properties that IfcIO also lists there. `Id` is the STEP entity
+  id (`#123` gives 123), `SourceId` the GlobalId, `Category` the IFC class as IfcIO reports it (for example `IFCWALL`),
+  `Level` the name of the IfcIO storey that holds it.
   `IfcViewerOptions.IncludeSpaces` adds spaces, drawn translucent. Openings are not converted.
 - Properties: each property set and quantity set becomes a property group with its name. Quantity values are written as
   IfcIO reads them, in the file's units.
@@ -130,6 +132,9 @@ Current limits, all from what IfcIO exposes:
 - IfcIO bakes mapped items (`IfcMappedItem`) into each element's mesh and does not expose the shared representation,
   so every element gets its own mesh (`conversion.OwnMeshes`) and repeated shapes are not stored once.
 - IfcIO does not read type objects (`TypeName` stays empty), grids, transparency from files or task times from IFC2x3.
+- IfcIO assigns storeys only from `IfcRelContainedInSpatialStructure` and puts everything else in the first storey, so
+  elements contained in the site or building, and spaces (which IFC aggregates to storeys with `IfcRelAggregates`), get
+  the first storey's name as `Level`.
 - Clash results from `IfcModel.DetectClashes` are not converted.
 - Element ids must be unique. They are for a model read with `IfcModel.Open`; a model built in memory numbers its
   elements per storey, so save and reopen it before converting.
