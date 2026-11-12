@@ -100,6 +100,49 @@ public class JsonAndImportTests
         Assert.Contains(message, ex.Message, StringComparison.Ordinal);
     }
 
+    // A member larger than the read buffer before Kind, a BOM, and a stream that cannot seek.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void ViewerJson_WithLongMemberBeforeKind_LoadsFromAnyStream(bool bom, bool seekable)
+    {
+        string json = JsonViewerExporter.ExportToString(SampleDocument(), indented: false);
+        json = $$"""{"Note":"{{new string('x', 200_000)}}",{{json[1..]}}""";
+        byte[] bytes = [.. bom ? (byte[])[0xEF, 0xBB, 0xBF] : [], .. Encoding.UTF8.GetBytes(json)];
+        using var ms = new MemoryStream(bytes);
+        using Stream input = seekable ? ms : new ForwardOnlyStream(ms);
+
+        var doc = JsonViewerImporter.Load(input);
+
+        Assert.Equal(SceneJson.Write(SampleDocument().Scene), SceneJson.Write(doc.Scene));
+        Assert.Equal(["mep.rvt"], doc.HiddenModelKeys);
+    }
+
+    [Fact]
+    public void SeekableStream_IsReadFromItsPosition()
+    {
+        byte[] json = Encoding.UTF8.GetBytes(JsonViewerExporter.ExportToString(SampleDocument()));
+        using var ms = new MemoryStream([.. "junk"u8, .. json]) { Position = 4 };
+
+        Assert.Equal("Test Document", JsonViewerImporter.Load(ms).Title);
+    }
+
+    private sealed class ForwardOnlyStream(Stream inner) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, Math.Min(count, 1000));
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     [Fact]
     public void SceneFile_LoadsAsDocumentWithoutSectionsAndExportsToHtml()
     {

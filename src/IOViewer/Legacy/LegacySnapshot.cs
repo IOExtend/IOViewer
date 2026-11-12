@@ -26,7 +26,7 @@ internal static class LegacySnapshot
 
     private static readonly S.RgbaColor DefaultColor = new(200, 200, 200);
 
-    public static Model.ViewerDocument Read(byte[] json)
+    public static Model.ViewerDocument Read(Stream json)
     {
         var old = JsonSerializer.Deserialize<ViewerDocument>(json, Options)
             ?? throw new InvalidDataException("Not an IOViewer snapshot: the JSON root is null.");
