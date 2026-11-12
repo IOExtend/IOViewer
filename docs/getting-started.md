@@ -28,41 +28,31 @@ ioviewer model.glb --serve
 
 ## C# API usage
 
-Build a `ViewerDocument` and export to HTML:
+The model data is a `SceneDocument` from the [IOScene](https://github.com/IOExtend/IOScene) package: models, elements,
+geometries and the instances that place geometries for elements, in metres with Z up. Build one and export it to HTML:
 
 ```csharp
-using IOViewer;
-using IOViewer.Model;
+using IOScene;
 using IOViewer.Exporters;
 
-var doc = new ViewerDocument
-{
-    Title = "Commercial Tower 3D Viewer",
-    Author = "IOExtend"
-};
+var scene = new SceneDocument { Title = "Commercial Tower" };
+scene.AddMesh("Column C1", [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2], new RgbaColor(70, 130, 180));
 
-// Add meshes and elements
-var mesh = new ViewerMesh
-{
-    Id = 1,
-    Name = "Column C1",
-    Vertices = [new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)],
-    Indices = [0, 1, 2],
-    Color = new RgbaColor(70, 130, 180)
-};
-doc.Meshes.Add(mesh);
-
-// Export to self-contained HTML
-HtmlViewerExporter.Save(doc, "tower_viewer.html");
+HtmlViewerExporter.Save(scene, "tower_viewer.html");
 ```
 
-## Sharing geometry between meshes
+`ViewerDocument` (namespace `IOViewer.Model`) wraps a scene with what only the viewer uses: section planes, a section
+box and the keys of the models hidden at start. `JsonViewerExporter` writes it as viewer JSON, and `JsonViewerImporter`
+reads viewer JSON, IOScene scene files and IOViewer 0.1/0.2 snapshots.
 
-Repeated shapes, such as identical fittings or columns, can be stored once in `ViewerDocument.Geometries` and placed by
-each mesh with `GeometryId` and `Transform`. The HTML file then holds the vertices once and the viewer draws the copies.
+## Sharing geometry between instances
+
+Repeated shapes, such as identical fittings or columns, are stored once in `SceneDocument.Geometries` and placed by
+each `SceneInstance` with `GeometryId` and `Transform`. The HTML file then holds the vertices once and the viewer draws
+the copies. Every instance belongs to an element:
 
 ```csharp
-doc.Geometries.Add(new ViewerGeometry
+scene.Geometries.Add(new SceneGeometry
 {
     Id = 7,
     Vertices = [new(0, 0, 0), new(0.3, 0, 0), new(0, 0.3, 0)],
@@ -71,9 +61,10 @@ doc.Geometries.Add(new ViewerGeometry
 
 for (int i = 0; i < 100; i++)
 {
-    doc.Meshes.Add(new ViewerMesh
+    scene.Elements.Add(new SceneElement { Id = 100 + i, ModelId = scene.Models[0].Id, Name = $"Fitting {i}" });
+    scene.Instances.Add(new SceneInstance
     {
-        Id = 100 + i,
+        ElementId = 100 + i,
         GeometryId = 7,
         Transform = Transform3d.Translate(new(i * 6.0, 0, 0)),
         Color = new RgbaColor(120, 120, 120)
@@ -81,8 +72,9 @@ for (int i = 0; i < 100; i++)
 }
 ```
 
-`GlbViewerImporter` fills these properties from glTF nodes and meshes. Meshes with their own `Vertices` keep working as
-before; the exporter also writes exact translated copies of such meshes once.
+`GlbViewerImporter` fills these lists from glTF nodes and meshes. A geometry placed by one instance only is written
+like any other; the exporter also writes exact translated copies of such geometries once. `scene.Validate()` lists
+what breaks the scene contract, such as an instance that names a missing element.
 
 ## Using the viewer
 

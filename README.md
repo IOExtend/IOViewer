@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 
-IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Geometry read by sibling libraries ([RvtIO](https://github.com/IOExtend/RvtIO), [IfcIO](https://github.com/IOExtend/IfcIO), and [NwcIO](https://github.com/IOExtend/NwcIO)) can be passed in by building a `ViewerDocument` in code; IOViewer has no direct dependency on them.
+IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Geometry read by sibling libraries ([RvtIO](https://github.com/IOExtend/RvtIO), [IfcIO](https://github.com/IOExtend/IfcIO), and [NwcIO](https://github.com/IOExtend/NwcIO)) can be passed in by building a `SceneDocument` in code. The scene model comes from the [IOScene](https://github.com/IOExtend/IOScene) package; IOViewer has no direct dependency on the format libraries.
 
 The generated HTML is a single file with no external dependencies that works offline: it opens from disk (`file://`) in a current browser with WebGL 2 and makes no network requests. The viewer is built on [three.js](https://threejs.org/), which is embedded in the file (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
@@ -19,7 +19,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
 ## What it does
 
 - Writes one self-contained HTML file per model; the viewer, its styles and the model data are all inlined.
-- Stores geometry once per shape: meshes can share a `ViewerGeometry` placed by a `Transform3d`, and the exporter also finds meshes that are exact translated copies of each other.
+- Stores geometry once per shape: instances can share a `SceneGeometry` placed by a `Transform3d`, and the exporter also finds geometries that are exact translated copies of each other.
 - Packs geometry compactly: positions quantized to 16-bit steps of 2⁻¹⁰ m (error at most 0.49 mm, 0.85 mm for rotated shared geometry; geometry larger than about 64 m, or shared geometry that an instance scales up, stays 32-bit float), octahedral 16-bit normals, 16- or 32-bit indices, all in one base64 block.
 - Shifts coordinates relative to the model centre (RTC), so georeferenced models with coordinates around 10⁶ m do not jitter.
 - Draws large models with few draw calls: geometry is merged into spatial chunks per material (very large models draw their repeated shapes as instanced copies instead), and hiding, selection and colouring are per-object data, so they never rebuild geometry.
@@ -31,7 +31,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
   - section planes (up to six, moved and rotated with an in-scene gizmo) or a section box (keep inside or cut inside, face handles, move by the centre, box around the selection);
   - point-to-point distance measurement, display modes (materials, textures, white, wireframe), grid lines and a global opacity slider;
   - saved viewpoints with a viewpoint tour, clash results, a 4D schedule player and linked-file visibility, each shown only when the document has that data.
-- Imports binary glTF 2.0 (`.glb`), Wavefront OBJ (`.obj`), and JSON snapshots.
+- Imports binary glTF 2.0 (`.glb`), Wavefront OBJ (`.obj`), and JSON: viewer JSON, IOScene scene files and IOViewer 0.1/0.2 snapshots.
 
 ### Mouse and keyboard
 
@@ -64,6 +64,9 @@ Add the library to a .NET project:
 dotnet add package IOViewer
 ```
 
+The library examples below are for 0.3.0, which builds on the IOScene scene model and is in preview; 0.2.0 has the
+earlier model, and [CHANGELOG.md](CHANGELOG.md) lists how its types map to the new ones.
+
 The library targets .NET 8 and .NET 10. It uses managed code without native dependencies or Windows-only APIs and supports Windows, Linux, and macOS.
 
 ## Command line
@@ -92,40 +95,25 @@ Diagnostics and progress go to standard error. Run `ioviewer --help` for the ful
 
 ## Library
 
-Create a viewer document programmatically and export to HTML:
+Build a scene in code and export it to HTML:
 
 ```csharp
-using IOViewer;
-using IOViewer.Model;
+using IOScene;
 using IOViewer.Exporters;
 
-// Create viewer document
-var doc = new ViewerDocument
-{
-    Title = "Commercial Building 3D Showcase",
-    Author = "IOExtend"
-};
+var scene = new SceneDocument { Title = "Curtain wall panel" };
+scene.AddMesh("Panel",
+    [new(0, 0, 0), new(3, 0, 0), new(3, 0, 3), new(0, 0, 3)],
+    [0, 1, 2, 0, 2, 3],
+    new RgbaColor(100, 149, 237, 200));
 
-// Add mesh geometry
-var mesh = new ViewerMesh
-{
-    Id = 1,
-    Name = "Curtain Wall Panel",
-    Vertices = [new(0, 0, 0), new(3, 0, 0), new(3, 3, 0), new(0, 3, 0)],
-    Indices = [0, 1, 2, 0, 2, 3],
-    Color = new RgbaColor(100, 149, 237, 200),
-    Opacity = 0.8
-};
-doc.Meshes.Add(mesh);
-
-// Export to self-contained HTML
-HtmlViewerExporter.Save(doc, "showcase.html", new HtmlViewerOptions
-{
-    Title = "Commercial Building 3D Showcase",
-    IncludeProperties = true,
-    IncludeViewpoints = true
-});
+HtmlViewerExporter.Save(scene, "panel.html");
 ```
+
+`AddMesh` adds the model, the geometry, the element and the instance that links them. A real importer fills the scene
+lists directly (`Models`, `Elements`, `Geometries`, `Instances`, `Materials`, `PropertySets` and the rest); the
+[IOScene contract](https://github.com/IOExtend/IOScene/blob/main/docs/contract.md) describes them. To open the page with
+section planes, a section box or linked models hidden, wrap the scene in a `ViewerDocument` (namespace `IOViewer.Model`).
 
 Import a glTF / GLB model and convert to HTML viewer:
 
@@ -154,7 +142,8 @@ The documentation site with API references and guides is at <https://ioextend.gi
 - `HtmlViewerOptions.MaxMeshVertices` is unlimited by default. When a lower limit cuts the model, the viewer shows a banner with the number of meshes written.
 - The viewer needs WebGL 2; without it the page says so. If the browser drops the graphics context, the page shows a message asking to reload it.
 - Transparent objects are sorted per chunk of merged geometry (or per cell of instanced copies), not per object, so overlapping transparent objects in the same chunk can blend in the wrong order.
-- Section planes and section boxes stored in `ViewerDocument` are kept in JSON snapshots but are not applied by the HTML viewer when it opens.
+- Section planes and section boxes stored in `ViewerDocument` are kept in viewer JSON but are not applied by the HTML viewer when it opens.
+- The viewer draws triangles only. Instances of line or point geometry are skipped, and the CLI prints a warning with their number.
 - The OBJ importer reads geometry only; `.mtl` material files are not read.
 
 ## Build from source and tests
