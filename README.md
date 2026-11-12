@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 
-IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Geometry read by sibling libraries ([RvtIO](https://github.com/IOExtend/RvtIO), [IfcIO](https://github.com/IOExtend/IfcIO), and [NwcIO](https://github.com/IOExtend/NwcIO)) can be passed in by building a `SceneDocument` in code. The scene model comes from the [IOScene](https://github.com/IOExtend/IOScene) package; IOViewer has no direct dependency on the format libraries.
+IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Geometry read by sibling libraries ([RvtIO](https://github.com/IOExtend/RvtIO), [IfcIO](https://github.com/IOExtend/IfcIO), and [NwcIO](https://github.com/IOExtend/NwcIO)) can be passed in by building a `SceneDocument` in code, and the `ioviewer` command line tool reads IFC and Revit files directly through IfcIO and RvtIO. The scene model comes from the [IOScene](https://github.com/IOExtend/IOScene) package; the IOViewer library has no dependency on the format libraries.
 
 The generated HTML is a single file with no external dependencies that works offline: it opens from disk (`file://`) in a current browser with WebGL 2 and makes no network requests. The viewer is built on [three.js](https://threejs.org/), which is embedded in the file (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
@@ -80,6 +80,10 @@ ioviewer model.glb -o viewer.html
 # Convert Wavefront OBJ model to interactive HTML viewer
 ioviewer model.obj -o viewer.html
 
+# Convert an IFC model (.ifc or .ifczip, read with IfcIO) or a Revit model (.rvt, read with RvtIO)
+ioviewer model.ifc
+ioviewer model.rvt -o viewer.html
+
 # Convert and immediately preview in default web browser via built-in HTTP server
 ioviewer model.glb --serve
 ```
@@ -91,7 +95,8 @@ Export structured JSON snapshots:
 ioviewer model.glb -o model.json
 ```
 
-Diagnostics and progress go to standard error. Run `ioviewer --help` for the full list of options.
+Diagnostics and progress go to standard error, including what IfcIO or RvtIO could not convert (one warning per kind,
+with its count). Run `ioviewer --help` for the full list of options.
 
 ## Library
 

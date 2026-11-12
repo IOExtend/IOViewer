@@ -24,7 +24,7 @@ The generated HTML is a single file with no external dependencies that works off
 
 - [Getting started](getting-started.md): install the package or CLI tool and generate your first 3D viewer.
 - [Public API](public-api.md): supported surface and key entry points of the library.
-- [Third-party notices](https://github.com/IOExtend/IOViewer/blob/main/THIRD-PARTY-NOTICES.md): the three.js license.
+- [Third-party notices](https://github.com/IOExtend/IOViewer/blob/main/THIRD-PARTY-NOTICES.md): the three.js license and the components the command line tool ships.
 - [Source on GitHub](https://github.com/IOExtend/IOViewer) and [DeepWiki](https://deepwiki.com/IOExtend/IOViewer) for an automatically generated overview of the repository.
 
 IOViewer is not affiliated with, endorsed by or sponsored by Autodesk. Autodesk, Revit, Navisworks, ViewCube and TimeLiner are trademarks of Autodesk, Inc.

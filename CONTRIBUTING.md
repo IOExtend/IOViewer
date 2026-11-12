@@ -132,6 +132,7 @@ The workflow builds and tests the solution, publishes the NuGet packages through
 packages, symbols, source and checksums to a GitHub release, marked as a prerelease when the version has a hyphen
 (`v0.3.0-preview.1`). The release notes are the section of `CHANGELOG.md` for the version, so add that section before
 the tag; the workflow stops before publishing when it is missing.
+Before the tag, run the Revit test with a real Revit 2022 file, which CI does not have: set `IOVIEWER_RVT_FILE` to its path and run `dotnet test IOViewer.slnx -c Release --filter Cli_ConvertRvtToHtml`.
 The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
 
 ## Licensing contributions

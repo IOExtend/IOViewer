@@ -16,11 +16,16 @@ dotnet add package IOViewer
 
 ## Command line usage
 
-Convert any glTF 2.0 Binary (`.glb`) or Wavefront OBJ (`.obj`) into a self-contained 3D HTML viewer:
+Convert any glTF 2.0 Binary (`.glb`), Wavefront OBJ (`.obj`), IFC (`.ifc`, `.ifczip`, read with IfcIO) or Revit
+(`.rvt`, read with RvtIO) model into a self-contained 3D HTML viewer:
 
 ```sh
 # Convert 3D model into an interactive standalone HTML viewer
 ioviewer model.glb -o viewer.html
+
+# IFC and Revit models; what the engine could not convert is printed as warnings on standard error
+ioviewer model.ifc
+ioviewer model.rvt
 
 # Launch local preview server and open in default browser
 ioviewer model.glb --serve
