@@ -160,6 +160,24 @@ public class LegacyFixtureTests
         Assert.Equal(((long?)null, (long?)8), (clash.Element1Id, clash.Element2Id));
     }
 
+    [Fact]
+    public void LinkNameWithoutLinkedFile_BecomesAModelListedOnThePage()
+    {
+        // 0.2.0 listed only LinkedFiles; the scene has no way to tell a link name from a linked file, so both are listed.
+        var old = new Legacy.ViewerDocument();
+        old.Elements.Add(new Legacy.ViewerElement { Id = 1, Name = "Wall", LinkName = "Arch" });
+        old.Meshes.Add(Triangle(id: 1, elementId: 1, "wall"));
+
+        var doc = Map(old);
+
+        var model = doc.Scene.Models[1];
+        Assert.Equal(("Arch", "Arch", (string?)null, 2), (model.Key, model.Name, model.Path, doc.Scene.Elements[0].ModelId));
+        var meta = ViewerHtml.Export(doc).Meta;
+        var file = Assert.Single(meta.GetProperty("linkedFiles").EnumerateArray());
+        Assert.Equal(("Arch", "", true), (file.GetProperty("name").GetString(), file.GetProperty("path").GetString(), file.GetProperty("visible").GetBoolean()));
+        Assert.Equal("Arch", meta.GetProperty("elements")[0].GetProperty("link").GetString());
+    }
+
     private static Legacy.ViewerMesh Triangle(int id, long? elementId, string name) => new()
     {
         Id = id,

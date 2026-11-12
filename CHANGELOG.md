@@ -79,6 +79,8 @@ the `IOViewer` package). The `IOViewer.Cli` tool only gains inputs.
 - The viewer draws triangles only: instances of line or point geometry are skipped, and the `ioviewer` tool prints a
   warning with their number.
 - Opacity is a colour alpha byte, so an opacity that is not a multiple of 1/255 is rounded (0.35 becomes 89/255).
+- In an IOViewer 0.1/0.2 snapshot, an element `LinkName` that matches no linked file becomes a model of the scene, so
+  a page made from the snapshot lists it in the linked files panel, where its elements can be hidden.
 - The documentation states the model's units and axes: all coordinates and lengths are in metres, with Z up.
 
 ## [0.2.0] - 2026-11-12
