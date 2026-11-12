@@ -95,8 +95,8 @@ Export structured JSON snapshots:
 ioviewer model.glb -o model.json
 ```
 
-Diagnostics and progress go to standard error, including what IfcIO or RvtIO could not convert (one warning per kind,
-with its count). Run `ioviewer --help` for the full list of options.
+Diagnostics and progress go to standard error, including what IfcIO or RvtIO could not convert (one warning or error
+per kind, with its count). Run `ioviewer --help` for the full list of options.
 
 ## Library
 

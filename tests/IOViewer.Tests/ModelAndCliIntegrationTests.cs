@@ -326,6 +326,38 @@ public class ModelAndCliIntegrationTests
         }
     }
 
+    [Fact]
+    public void Cli_AdapterDiagnostics_AreReportedOncePerSeverityAndKind()
+    {
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            Console.SetError(errors);
+
+            Program.FromScene("model.rvt", new SceneDocument(),
+            [
+                new(SceneSeverity.Error, "read-cut", "Cut one."),
+                new(SceneSeverity.Error, "read-cut", "Cut two."),
+                new(SceneSeverity.Warning, "read-cut", "Cut warning."),
+                new(SceneSeverity.Warning, "no-geometry", "No geometry."),
+                new(SceneSeverity.Info, "skipped", "Skipped."),
+            ]);
+
+            Assert.Equal(
+                string.Join(Environment.NewLine,
+                    "Error: read-cut: Cut one. (1 more)",
+                    "Warning: read-cut: Cut warning.",
+                    "Warning: no-geometry: No geometry.",
+                    ""),
+                errors.ToString());
+        }
+        finally
+        {
+            Console.SetError(origErr);
+        }
+    }
+
     // A real Revit file cannot be committed; run with IOVIEWER_RVT_FILE set to one before a release.
     [RvtFileFact]
     public void Cli_ConvertRvtToHtml_ReadsTheModelThroughRvtIO()

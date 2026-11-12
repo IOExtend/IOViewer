@@ -73,9 +73,9 @@ the `IOViewer` package). The `IOViewer.Cli` tool only gains inputs.
   it. It is written to the page's element list only when set.
 - The `ioviewer` tool reads IFC (`.ifc`, `.ifczip`) through `IfcIO.Scene` 0.11.0 and Revit (`.rvt`) through
   `RvtIO.Scene` 0.4.0. The model key is the file name; the title is the IFC project name, or the Revit file name. What
-  the engine could not convert (such as an element without geometry) is printed to standard error as one warning per
-  kind with its count. The `IOViewer` library still references no engine; only the `IOViewer.Cli` tool package ships
-  IfcIO, RvtIO and their dependencies (see `THIRD-PARTY-NOTICES.md`).
+  the engine could not convert (such as an element without geometry) is printed to standard error as one warning or
+  error per kind with its count. The `IOViewer` library still references no engine; only the `IOViewer.Cli` tool
+  package ships IfcIO, RvtIO and their dependencies (see `THIRD-PARTY-NOTICES.md`).
 
 ### Changed
 - `JsonViewerExporter` writes viewer JSON format 2: `{ "Kind": "ioviewer", "Format": 2, "Scene", "SectionPlanes",
