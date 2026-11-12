@@ -311,8 +311,12 @@ public class JsonAndImportTests
         Assert.All(scene.Instances, i => Assert.Equal(new RgbaColor(200, 200, 200), i.Color)); // no glTF material
     }
 
-    [Fact]
-    public void GlbViewerImporter_ParsesBinaryGltf()
+    [Theory]
+    // Linear 0.5 is sRGB 188 (power segment); the alpha stays linear (0.5 is 128).
+    [InlineData("1, 0.5, 0, 0.5", 255, 188, 0, 128)]
+    // 0.002 is in the linear segment (12.92 * 0.002 * 255 = 6.59); values outside 0..1 are clamped.
+    [InlineData("0.002, 1.5, -0.1, 1.2", 7, 255, 0, 255)]
+    public void GlbViewerImporter_ParsesBinaryGltf(string baseColorFactor, byte r, byte g, byte b, byte a)
     {
         // Construct minimal valid GLB in memory
         // 3 vertices: (0,0,0), (1,0,0), (0,1,0) = 36 bytes float
@@ -337,7 +341,7 @@ public class JsonAndImportTests
         Buffer.BlockCopy(posBytes, 0, binBuffer, 0, 36);
         Buffer.BlockCopy(idxBytes, 0, binBuffer, 36, 8);
 
-        string json = """
+        string json = $$"""
         {
           "asset": { "version": "2.0" },
           "buffers": [{ "byteLength": 44 }],
@@ -355,7 +359,7 @@ public class JsonAndImportTests
               "primitives": [{ "attributes": { "POSITION": 0 }, "indices": 1, "material": 0 }]
             }
           ],
-          "materials": [{ "name": "Orange glass", "pbrMetallicRoughness": { "baseColorFactor": [1, 0.5, 0, 0.5] } }]
+          "materials": [{ "name": "Orange glass", "pbrMetallicRoughness": { "baseColorFactor": [{{baseColorFactor}}] } }]
         }
         """;
 
@@ -401,8 +405,8 @@ public class JsonAndImportTests
         Assert.Equal(new Vector3d(1, 0, 0), geometry.Vertices[1]);
         var material = Assert.Single(scene.Materials);
         Assert.Equal((material.Id, (RgbaColor?)null), (mesh.MaterialId, mesh.Color));
-        // The base colour factor, alpha once: linear 0.5 is sRGB 188, and the alpha stays linear (0.5 is 128).
-        Assert.Equal(new RgbaColor(255, 188, 0, 128), material.Color);
+        // The base colour factor, alpha once: RGB through the sRGB transfer function, alpha linear.
+        Assert.Equal(new RgbaColor(r, g, b, a), material.Color);
 
         // Without a scene graph the element is named after the mesh.
         var element = Assert.Single(scene.Elements);
