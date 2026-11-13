@@ -5,7 +5,7 @@
     <PackageId>IOViewer</PackageId>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <DefaultItemExcludes>$(DefaultItemExcludes);Viewer/node_modules/**</DefaultItemExcludes>
-    <!-- The IOScene range ends at 0.2.0-0, a prerelease bound, which pack reports as NU5104. -->
+    <!-- The IOScene range ends at 0.2.0-0.0, a prerelease bound, which pack reports as NU5104. -->
     <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 

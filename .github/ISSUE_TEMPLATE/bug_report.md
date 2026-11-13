@@ -6,7 +6,7 @@ labels: bug
 
 **IOViewer version** (`ioviewer --version` or the package version):
 
-**Input format** (`.glb`, `.obj`, `.json` or a `ViewerDocument` built in code):
+**Input format** (`.glb`, `.obj`, `.json`, `.ifc`, `.ifczip`, `.rvt`, or a `SceneDocument` or `ViewerDocument` built in code):
 
 **Browser and operating system** (for problems in the generated viewer):
 

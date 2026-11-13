@@ -6,8 +6,10 @@ API between minor releases.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
 Version 0.3.0 builds the viewer on the scene model of the [IOScene](https://github.com/IOExtend/IOScene) package
-(`IOScene` `[0.1.0-preview.2, 0.2.0-0)`, a new dependency of the `IOViewer` package). This is a breaking change of the
+(`IOScene` `[0.1.0, 0.2.0-0.0)`, a new dependency of the `IOViewer` package). This is a breaking change of the
 library API. What breaks for existing users:
 
 1. The model types move to namespace `IOScene` with `Scene*` names, `ViewerClash*` included; `doc.Elements` becomes
@@ -71,10 +73,11 @@ the `IOViewer` package). The `IOViewer.Cli` tool only gains inputs.
 - The HTML viewer shows `SceneElement.SourceId`, the element's id in its source format (such as a Revit UniqueId or an
   IFC GlobalId), as its own row in the properties panel ("Source ID" / "ID источника"), and the model tree search finds
   it. It is written to the page's element list only when set.
-- The `ioviewer` tool reads IFC (`.ifc`, `.ifczip`) through `IfcIO.Scene` 0.11.0 and Revit (`.rvt`) through
+- The `ioviewer` tool reads IFC (`.ifc`, `.ifczip`) through `IfcIO.Scene` 0.11.1 and Revit (`.rvt`) through
   `RvtIO.Scene` 0.4.0. The model key is the file name; the title is the IFC project name, or the Revit file name. What
   the engine could not convert (such as an element without geometry) is printed to standard error as one warning or
-  error per kind with its count. The `IOViewer` library still references no engine; only the `IOViewer.Cli` tool
+  error per kind with its count. When the engine reported an error (elements may be missing), the requested output
+  (the page, the JSON or both) is still written and the tool exits with code 4. The `IOViewer` library still references no engine; only the `IOViewer.Cli` tool
   package ships IfcIO, RvtIO and their dependencies (see `THIRD-PARTY-NOTICES.md`).
 
 ### Changed

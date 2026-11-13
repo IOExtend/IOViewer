@@ -64,7 +64,7 @@ Add the library to a .NET project:
 dotnet add package IOViewer
 ```
 
-The library examples below are for 0.3.0, which builds on the IOScene scene model and is in preview; 0.2.0 has the
+The library examples below are for 0.3.0, which builds on the IOScene scene model; 0.2.0 has the
 earlier model, and [CHANGELOG.md](CHANGELOG.md) lists how its types map to the new ones.
 
 The library targets .NET 8 and .NET 10. It uses managed code without native dependencies or Windows-only APIs and supports Windows, Linux, and macOS.
@@ -96,7 +96,8 @@ ioviewer model.glb -o model.json
 ```
 
 Diagnostics and progress go to standard error, including what IfcIO or RvtIO could not convert (one warning or error
-per kind, with its count). Run `ioviewer --help` for the full list of options.
+per kind, with its count). When the engine reported an error, elements may be missing: the output is still written and
+the exit code is 4. Run `ioviewer --help` for the full list of options and exit codes.
 
 ## Library
 

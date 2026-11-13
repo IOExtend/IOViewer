@@ -23,7 +23,8 @@ Convert any glTF 2.0 Binary (`.glb`), Wavefront OBJ (`.obj`), IFC (`.ifc`, `.ifc
 # Convert 3D model into an interactive standalone HTML viewer
 ioviewer model.glb -o viewer.html
 
-# IFC and Revit models; what the engine could not convert is printed as warnings or errors on standard error
+# IFC and Revit models; what the engine could not convert is printed as warnings or errors on standard error,
+# and an error (elements may be missing) gives exit code 4 after the output is written
 ioviewer model.ifc
 ioviewer model.rvt
 

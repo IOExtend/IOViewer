@@ -46,6 +46,7 @@ internal static class Program
           1  Usage error (missing or invalid arguments)
           2  File not found
           3  Data format error or parsing failure
+          4  Output written, but IfcIO or RvtIO reported an error: elements may be missing
         """;
 
     public static int Main(string[] args)
@@ -164,6 +165,7 @@ internal static class Program
 
         var sw = Stopwatch.StartNew();
         ViewerDocument doc;
+        IReadOnlyList<SceneDiagnostic> diagnostics = [];
         try
         {
             string ext = Path.GetExtension(inputPath).ToLowerInvariant();
@@ -172,8 +174,8 @@ internal static class Program
                 ".glb" => GlbViewerImporter.Load(inputPath),
                 ".obj" => ObjViewerImporter.Load(inputPath),
                 ".json" => JsonViewerImporter.Load(inputPath),
-                ".ifc" or ".ifczip" => FromIfc(inputPath),
-                ".rvt" => FromRvt(inputPath),
+                ".ifc" or ".ifczip" => FromIfc(inputPath, out diagnostics),
+                ".rvt" => FromRvt(inputPath, out diagnostics),
                 _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt.")
             };
         }
@@ -236,20 +238,26 @@ internal static class Program
             StartServe(outputPath, servePort);
         }
 
-        return 0;
+        return ExitCode(diagnostics);
     }
 
-    private static ViewerDocument FromIfc(string path)
+    private static ViewerDocument FromIfc(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
     {
         var result = IfcSceneReader.Read(path);
-        return FromScene(path, result.Document, result.Diagnostics);
+        diagnostics = result.Diagnostics;
+        return FromScene(path, result.Document, diagnostics);
     }
 
-    private static ViewerDocument FromRvt(string path)
+    private static ViewerDocument FromRvt(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
     {
         var result = RvtSceneReader.Read(path);
-        return FromScene(path, result.Document, result.Diagnostics);
+        diagnostics = result.Diagnostics;
+        return FromScene(path, result.Document, diagnostics);
     }
+
+    // An error of the engine adapter means elements may be missing: the output is still written, and the exit code says so.
+    internal static int ExitCode(IReadOnlyList<SceneDiagnostic> diagnostics) =>
+        diagnostics.Any(d => d.Severity == SceneSeverity.Error) ? 4 : 0;
 
     // The engine adapters key the model by its file name, as the other importers do; the title falls back to it too.
     internal static ViewerDocument FromScene(string path, SceneDocument scene, IReadOnlyList<SceneDiagnostic> diagnostics)

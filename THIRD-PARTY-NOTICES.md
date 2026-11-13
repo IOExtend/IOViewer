@@ -44,7 +44,7 @@ references none of them.
 
 | Component | Use | License |
 |---|---|---|
-| [IfcIO](https://github.com/IOExtend/IfcIO) 0.11.0 and IfcIO.Scene 0.11.0 | read IFC files into a scene | MIT, copyright (c) 2026 IfcIO contributors |
+| [IfcIO](https://github.com/IOExtend/IfcIO) 0.11.1 and IfcIO.Scene 0.11.1 | read IFC files into a scene | MIT, copyright (c) 2026 IfcIO contributors |
 | [RvtIO](https://github.com/IOExtend/RvtIO) 0.4.0 and RvtIO.Scene 0.4.0 | read Revit files into a scene | MIT, copyright (c) 2026 mahach666 |
 | .NET runtime libraries (DeflateManaged sources, compiled into RvtIO) | managed inflate implementation adapted for tolerant decoding | MIT, copyright (c) .NET Foundation and Contributors |
 | [OpenMcdf](https://github.com/openmcdf/openmcdf) 3.4.0, used by RvtIO | reads the compound file container of Revit files | MPL-2.0, copyright (c) 2010-2026 Federico Blaseotto, Jeremy Powell |

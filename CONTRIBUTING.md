@@ -40,21 +40,24 @@ The repository ships no customer models.
 ### Local feed for unpublished packages
 
 The model data comes from the `IOScene` package. `Directory.Packages.props`
-references it with a range such as `[0.1.0-preview.1, 0.2.0-0)`: a patch of
-IOScene is additive and a minor is breaking. NuGet restores the lowest version
-in the range that it finds.
+references it with a range such as `[0.1.0, 0.2.0-0.0)`: a patch of IOScene
+adds or fixes and a minor is breaking, and the `-0.0` keeps out the previews of
+the next minor (nuget.org refuses the shorter bound `-0` in a dependency). NuGet
+restores the lowest version in the range that it finds.
 
-To build against an IOScene version that is not on nuget.org yet (an IOScene
-preview, or the lower bound itself before it is published), pack IOScene into
-a local folder and pass that folder:
+To build against an IOScene version that is not on nuget.org yet, start the
+range at that version (for a new minor, move the upper bound too, for example
+`[0.2.0-preview.1, 0.3.0-0.0)`, and raise `IfcIO.Scene` and `RvtIO.Scene` to
+versions built on that minor: IfcIO.Scene 0.11.1 and RvtIO.Scene 0.4.0 accept
+only IOScene `[0.1.0, 0.2.0-0.0)`), pack IOScene into a local folder and pass
+that folder:
 
 ```sh
 dotnet build IOViewer.slnx -c Release -p:RestoreAdditionalProjectSources=<local-feed>
 dotnet test IOViewer.slnx -c Release --no-build
 ```
 
-For a newer preview, also raise the lower bound of the range to it. Once a
-restore has put the package in the NuGet global packages folder, later
+Once a restore has put the package in the NuGet global packages folder, later
 restores, `dotnet run` of the tools and `npm run e2e` find it there. Do not
 commit a `nuget.config` that points to a local feed, and commit a lower bound
 only when that version is on nuget.org: until then, restoring the solution
@@ -131,7 +134,9 @@ Push a tag matching the package version, such as `v0.2.0`, to run `release.yml`.
 The workflow builds and tests the solution, publishes the NuGet packages through Trusted Publishing, and then attaches
 packages, symbols, source and checksums to a GitHub release, marked as a prerelease when the version has a hyphen
 (`v0.3.0-preview.1`). The release notes are the section of `CHANGELOG.md` for the version, so add that section before
-the tag; the workflow stops before publishing when it is missing.
+the tag; the workflow stops before publishing when it is missing. `tools/pack-release.ps1` also stops it when the
+`IOViewer` package would depend on a missing or preview IOScene lower bound, or on a dependency bound that nuget.org
+refuses (a bound with metadata, or a prerelease label of one part that does not start with a letter).
 Before the tag, run the Revit test with a real Revit 2022 file, which CI does not have: set `IOVIEWER_RVT_FILE` to its path and run `dotnet test IOViewer.slnx -c Release --filter Cli_ConvertRvtToHtml`.
 The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
 

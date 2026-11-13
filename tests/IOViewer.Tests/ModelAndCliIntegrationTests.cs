@@ -358,6 +358,22 @@ public class ModelAndCliIntegrationTests
         }
     }
 
+    [Fact]
+    public void Cli_ExitCode_IsFourOnlyWhenTheAdapterReportedAnError()
+    {
+        Assert.Equal(0, Program.ExitCode([]));
+        Assert.Equal(0, Program.ExitCode(
+        [
+            new(SceneSeverity.Warning, "no-geometry", "No geometry."),
+            new(SceneSeverity.Info, "skipped", "Skipped."),
+        ]));
+        Assert.Equal(4, Program.ExitCode(
+        [
+            new(SceneSeverity.Warning, "no-geometry", "No geometry."),
+            new(SceneSeverity.Error, "read-cut", "Cut."),
+        ]));
+    }
+
     // A real Revit file cannot be committed; run with IOVIEWER_RVT_FILE set to one before a release.
     [RvtFileFact]
     public void Cli_ConvertRvtToHtml_ReadsTheModelThroughRvtIO()
@@ -365,16 +381,24 @@ public class ModelAndCliIntegrationTests
         var rvt = Environment.GetEnvironmentVariable(RvtFileFactAttribute.Variable)!;
         var tempHtml = Path.Combine(Path.GetTempPath(), $"test_viewer_{Guid.NewGuid():N}.html");
         var tempJson = Path.ChangeExtension(tempHtml, ".json");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
         try
         {
+            Console.SetError(errors);
             int code = Program.Main([rvt, "-o", tempHtml, "--json", tempJson]);
+            Console.SetError(origErr);
 
-            Assert.Equal(0, code);
+            // An engine error still writes both outputs and gives exit code 4; anything else must be a clean 0.
+            bool engineError = errors.ToString().Split(Environment.NewLine)
+                .Any(line => line.StartsWith("Error: ", StringComparison.Ordinal) && !line.StartsWith("Error: Failed", StringComparison.Ordinal));
+            Assert.True(code == (engineError ? 4 : 0), $"exit code {code}: {errors}");
             Assert.Empty(JsonViewerImporter.Load(tempJson).Scene.Validate());
             Assert.True(ViewerHtml.Parse(File.ReadAllText(tempHtml)).InstanceCount > 0);
         }
         finally
         {
+            Console.SetError(origErr);
             if (File.Exists(tempHtml)) File.Delete(tempHtml);
             if (File.Exists(tempJson)) File.Delete(tempJson);
         }
