@@ -6,6 +6,8 @@ API between minor releases.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-13
+
 ### Fixed
 - `ioviewer`: an output that cannot be written (a locked file, a read-only folder, a folder where the file should be or
   a file where its folder should be) ends the run with `Error: Failed to export` and exit code 3 for the page, the
