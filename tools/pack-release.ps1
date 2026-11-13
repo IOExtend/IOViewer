@@ -73,7 +73,50 @@ if ($LASTEXITCODE -ne 0) { throw "git archive failed with exit code $LASTEXITCOD
 
 # 5. Pack NuGet Packages
 Write-Host "Packing NuGet packages..."
+# Packages left from an earlier run would be checked and published together with this version.
+Get-ChildItem -LiteralPath $Output -File | Where-Object { $_.Extension -in '.nupkg', '.snupkg' } | Remove-Item
 Invoke-DotNet pack (Join-Path $root 'IOViewer.slnx') -c Release --no-build -o $Output
+
+Write-Host "Checking package dependencies..."
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$checkedViewer = $false
+foreach ($package in Get-ChildItem -LiteralPath $Output -Filter '*.nupkg') {
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
+    try {
+        $entry = @($zip.Entries | Where-Object { $_.FullName -notlike '*/*' -and $_.Name -like '*.nuspec' })[0]
+        $reader = New-Object System.IO.StreamReader($entry.Open())
+        try { $nuspec = [xml]$reader.ReadToEnd() } finally { $reader.Dispose() }
+    }
+    finally { $zip.Dispose() }
+    $dependencies = @($nuspec.SelectNodes("//*[local-name()='dependency']"))
+    # IOScene lower bound: replaces the NU5104 check that the IOScene range switches off: no package built on a preview contract reaches nuget.org.
+    if ($package.Name -eq "IOViewer.$version.nupkg") {
+        $checkedViewer = $true
+        $scene = @($dependencies | Where-Object { $_.GetAttribute('id') -eq 'IOScene' })
+        if ($scene.Count -eq 0) { throw "$($package.Name) has no dependency on IOScene" }
+        foreach ($dependency in $scene) {
+            $range = $dependency.GetAttribute('version')
+            $lower = $range.TrimStart('[', '(').Split(',')[0].Trim()
+            if ($lower -eq '' -or $lower.Contains('-')) {
+                throw "$($package.Name) depends on IOScene '$range', whose lower bound is missing or a preview; release on a published IOScene"
+            }
+        }
+    }
+    # Bounds nuget.org accepts: nuget.org refuses a dependency bound with metadata, or one whose prerelease label has one part and does not start
+    # with a letter (NuGetGallery ManifestValidator.ValidateDependencyVersion); dotnet pack accepts both, so only the push would fail.
+    foreach ($dependency in $dependencies) {
+        $range = $dependency.GetAttribute('version')
+        foreach ($bound in $range.Trim('[', ']', '(', ')').Split(',')) {
+            $bound = $bound.Trim()
+            $label = if ($bound.Contains('-')) { $bound.Substring($bound.IndexOf('-') + 1) } else { '' }
+            if ($bound.Contains('+') -or ($label -ne '' -and -not $label.Contains('.') -and $label -notmatch '^[a-z][0-9a-z-]*$')) {
+                throw "$($package.Name) depends on $($dependency.GetAttribute('id')) '$range', whose bound '$bound' nuget.org refuses"
+            }
+        }
+    }
+}
+# NuGet names the package by the normalized version; a Version written otherwise would skip the IOScene lower-bound check without this.
+if (-not $checkedViewer) { throw "IOViewer.$version.nupkg was not found in '$Output'; its IOScene dependency was not checked" }
 
 # 6. Checksums
 Write-Host "Calculating SHA-256 sums..."

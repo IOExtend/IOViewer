@@ -9,10 +9,15 @@
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <!-- A low, moderate or high advisory against a dependency of an engine must not stop the release of the viewer;
+         a critical one (NU1904) still fails the build, since the engines parse untrusted files. -->
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\IOViewer\IOViewer.csproj" />
+    <PackageReference Include="IfcIO.Scene" />
+    <PackageReference Include="RvtIO.Scene" />
   </ItemGroup>
 
   <ItemGroup>

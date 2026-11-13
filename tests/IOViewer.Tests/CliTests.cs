@@ -3,6 +3,8 @@ using Xunit;
 
 namespace IOViewer.Tests;
 
+// Redirects Console.Out and Console.Error; see ModelAndCliIntegrationTests.
+[Collection("Console")]
 public class CliTests
 {
     private static readonly string[] HelpArgs = ["--help"];
@@ -19,7 +21,7 @@ public class CliTests
             int code = Program.Main(HelpArgs);
             Assert.Equal(0, code);
             string output = sw.ToString();
-            Assert.Contains("ioviewer <input.glb|input.obj|input.json>", output);
+            Assert.Contains("ioviewer <input.glb|input.obj|input.json|input.ifc|input.ifczip|input.rvt>", output);
             Assert.Contains("--wireframe", output);
             Assert.Contains("--white-mode", output);
             Assert.Contains("--serve", output);

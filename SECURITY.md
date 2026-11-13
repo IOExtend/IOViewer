@@ -19,7 +19,8 @@ is credited unless you prefer otherwise.
 IOViewer reads files that can come from untrusted sources and writes HTML that is opened in a browser. Problems that
 matter most:
 
-- crashes, hangs or unbounded memory use caused by a crafted `.glb`, `.obj` or `.json` file;
+- crashes, hangs or unbounded memory use caused by a crafted `.glb`, `.obj`, `.json`, `.ifc`, `.ifczip` or `.rvt` file
+  (the CLI reads IFC and Revit files through IfcIO and RvtIO);
 - script injection into the generated HTML through model names, properties or other text taken from the input;
 - writing files outside the path a command was given;
 - the `--serve` preview server exposing files other than the generated viewer, or listening beyond the local machine;

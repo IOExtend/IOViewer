@@ -1,25 +1,32 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
+using System.Text;
+using IfcIO.Scene;
+using IOScene;
 using IOViewer.Exporters;
 using IOViewer.Importers;
 using IOViewer.Model;
+using RvtIO.Scene;
 
 namespace IOViewer.Cli;
 
 internal static class Program
 {
     private const string UsageText = """
-        Usage: ioviewer <input.glb|input.obj|input.json> [output.html] [options]
+        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.ifczip|input.rvt> [output.html] [options]
                ioviewer --help | --version
 
         Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
-        from 3D models (glTF/GLB, Wavefront OBJ, JSON). The HTML file has no
-        external dependencies and works offline. JSON input is viewer JSON, an
-        IOScene scene file or an IOViewer 0.1/0.2 snapshot.
+        from 3D models (glTF/GLB, Wavefront OBJ, JSON, IFC, Revit). The HTML file
+        has no external dependencies and works offline. JSON input is viewer JSON,
+        an IOScene scene file or an IOViewer 0.1/0.2 snapshot. IFC (.ifc, .ifczip)
+        is read with IfcIO and Revit (.rvt) with RvtIO; what they could not convert
+        is reported as warnings or errors.
 
         Arguments:
-          <input>            Path to input 3D model (.glb, .obj, or .json).
+          <input>            Path to input 3D model (.glb, .obj, .json, .ifc, .ifczip or .rvt).
           [output]           Destination path for exported file (.html or .json).
                              Default: <input-without-ext>.html.
 
@@ -41,6 +48,7 @@ internal static class Program
           1  Usage error (missing or invalid arguments)
           2  File not found
           3  Data format error or parsing failure
+          4  Output written, but IfcIO or RvtIO reported an error: elements may be missing
         """;
 
     public static int Main(string[] args)
@@ -159,6 +167,7 @@ internal static class Program
 
         var sw = Stopwatch.StartNew();
         ViewerDocument doc;
+        IReadOnlyList<SceneDiagnostic> diagnostics = [];
         try
         {
             string ext = Path.GetExtension(inputPath).ToLowerInvariant();
@@ -167,12 +176,14 @@ internal static class Program
                 ".glb" => GlbViewerImporter.Load(inputPath),
                 ".obj" => ObjViewerImporter.Load(inputPath),
                 ".json" => JsonViewerImporter.Load(inputPath),
-                _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json.")
+                ".ifc" or ".ifczip" => FromIfc(inputPath, out diagnostics),
+                ".rvt" => FromRvt(inputPath, out diagnostics),
+                _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt.")
             };
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: Failed to load '{inputPath}': {ex.Message}");
+            Console.Error.WriteLine($"Error: Failed to load '{inputPath}': {Printable(ex.Message)}");
             return 3;
         }
 
@@ -205,7 +216,7 @@ internal static class Program
             }
             catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
             {
-                Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {ex.Message}");
+                Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {Printable(ex.Message)}");
                 return 3;
             }
             var fi = new FileInfo(outputPath);
@@ -229,8 +240,46 @@ internal static class Program
             StartServe(outputPath, servePort);
         }
 
-        return 0;
+        return ExitCode(diagnostics);
     }
+
+    private static ViewerDocument FromIfc(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
+    {
+        var result = IfcSceneReader.Read(path);
+        diagnostics = result.Diagnostics;
+        return FromScene(path, result.Document, diagnostics);
+    }
+
+    private static ViewerDocument FromRvt(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
+    {
+        var result = RvtSceneReader.Read(path);
+        diagnostics = result.Diagnostics;
+        return FromScene(path, result.Document, diagnostics);
+    }
+
+    // An error of the engine adapter means elements may be missing: the output is still written, and the exit code says so.
+    internal static int ExitCode(IReadOnlyList<SceneDiagnostic> diagnostics) =>
+        diagnostics.Any(d => d.Severity == SceneSeverity.Error) ? 4 : 0;
+
+    // The engine adapters key the model by its file name, as the other importers do; the title falls back to it too.
+    internal static ViewerDocument FromScene(string path, SceneDocument scene, IReadOnlyList<SceneDiagnostic> diagnostics)
+    {
+        if (string.IsNullOrEmpty(scene.Title)) scene.Title = Path.GetFileNameWithoutExtension(path);
+        // Information entries (such as an element that has no geometry by design) are not reported; one line per kind.
+        foreach (var kind in diagnostics.Where(d => d.Severity != SceneSeverity.Info).GroupBy(d => (d.Severity, d.Code)))
+        {
+            int more = kind.Count() - 1;
+            string label = kind.Key.Severity == SceneSeverity.Error ? "Error" : "Warning";
+            Console.Error.WriteLine($"{label}: {kind.Key.Code}: {Printable(kind.First().Message)}{(more > 0 ? $" ({more} more)" : "")}");
+        }
+        return new ViewerDocument(scene);
+    }
+
+    // Messages can quote names from the model file: control characters (escape sequences, line breaks) and format
+    // characters (bidirectional overrides, invisible tag characters) become '?'. Runes, so characters above U+FFFF count too.
+    internal static string Printable(string text) =>
+        string.Concat(text.EnumerateRunes().Select(r =>
+            Rune.IsControl(r) || Rune.GetUnicodeCategory(r) == UnicodeCategory.Format ? "?" : r.ToString()));
 
     private static void StartServe(string htmlPath, int port)
     {
