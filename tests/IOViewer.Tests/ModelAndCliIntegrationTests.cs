@@ -345,7 +345,7 @@ public class ModelAndCliIntegrationTests
                 new(SceneSeverity.Warning, "read-cut", "Cut warning."),
                 new(SceneSeverity.Warning, "no-geometry", "No geometry."),
                 new(SceneSeverity.Info, "skipped", "Skipped."),
-                new(SceneSeverity.Warning, "empty-mesh", "Element 'x\u001b]0;t\u0007\r\nError: forged' has no mesh."),
+                new(SceneSeverity.Warning, "empty-mesh", "Element 'x\u001b]0;t\u0007\r\nError: forged‮gpj.exe' has no mesh."),
             ]);
 
             Assert.Equal(
@@ -353,7 +353,7 @@ public class ModelAndCliIntegrationTests
                     "Error: read-cut: Cut one. (1 more)",
                     "Warning: read-cut: Cut warning.",
                     "Warning: no-geometry: No geometry.",
-                    "Warning: empty-mesh: Element 'x?]0;t???Error: forged' has no mesh.",
+                    "Warning: empty-mesh: Element 'x?]0;t???Error: forged?gpj.exe' has no mesh.",
                     ""),
                 errors.ToString());
         }
@@ -361,6 +361,12 @@ public class ModelAndCliIntegrationTests
         {
             Console.SetError(origErr);
         }
+    }
+
+    [Fact]
+    public void Cli_Printable_ReplacesControlAndFormatCharactersOnly()
+    {
+        Assert.Equal("Стена 1 «A» ?? ? ? ?", Program.Printable("Стена 1 «A» \t\n \u0085 ⁦ ​"));
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 using IfcIO.Scene;
@@ -181,7 +182,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: Failed to load '{inputPath}': {ex.Message}");
+            Console.Error.WriteLine($"Error: Failed to load '{inputPath}': {Printable(ex.Message)}");
             return 3;
         }
 
@@ -214,7 +215,7 @@ internal static class Program
             }
             catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
             {
-                Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {ex.Message}");
+                Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {Printable(ex.Message)}");
                 return 3;
             }
             var fi = new FileInfo(outputPath);
@@ -268,12 +269,15 @@ internal static class Program
         {
             int more = kind.Count() - 1;
             string label = kind.Key.Severity == SceneSeverity.Error ? "Error" : "Warning";
-            // The message quotes names from the model file: control characters (escape sequences, line breaks) become '?'.
-            string message = string.Concat(kind.First().Message.Select(c => char.IsControl(c) ? '?' : c));
-            Console.Error.WriteLine($"{label}: {kind.Key.Code}: {message}{(more > 0 ? $" ({more} more)" : "")}");
+            Console.Error.WriteLine($"{label}: {kind.Key.Code}: {Printable(kind.First().Message)}{(more > 0 ? $" ({more} more)" : "")}");
         }
         return new ViewerDocument(scene);
     }
+
+    // Messages can quote names from the model file: control characters (escape sequences, line breaks) and format
+    // characters (bidirectional overrides that reorder the line on screen) become '?'.
+    internal static string Printable(string text) =>
+        string.Concat(text.Select(c => char.IsControl(c) || char.GetUnicodeCategory(c) == UnicodeCategory.Format ? '?' : c));
 
     private static void StartServe(string htmlPath, int port)
     {
