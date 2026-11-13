@@ -366,7 +366,7 @@ public class ModelAndCliIntegrationTests
     [Fact]
     public void Cli_Printable_ReplacesControlAndFormatCharactersOnly()
     {
-        Assert.Equal("Стена 1 «A» ?? ? ? ?", Program.Printable("Стена 1 «A» \t\n \u0085 ⁦ ​"));
+        Assert.Equal("Стена 1 «A» ?? ? ? ? ?? 😀", Program.Printable("Стена 1 «A» \t\n \u0085 ⁦ ​ \U000E0041\U000E007F 😀"));
     }
 
     [Fact]

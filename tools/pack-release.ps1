@@ -73,6 +73,8 @@ if ($LASTEXITCODE -ne 0) { throw "git archive failed with exit code $LASTEXITCOD
 
 # 5. Pack NuGet Packages
 Write-Host "Packing NuGet packages..."
+# Packages left from an earlier run would be checked and published together with this version.
+Get-ChildItem -LiteralPath $Output -File | Where-Object { $_.Extension -in '.nupkg', '.snupkg' } | Remove-Item
 Invoke-DotNet pack (Join-Path $root 'IOViewer.slnx') -c Release --no-build -o $Output
 
 Write-Host "Checking package dependencies..."
@@ -87,7 +89,7 @@ foreach ($package in Get-ChildItem -LiteralPath $Output -Filter '*.nupkg') {
     }
     finally { $zip.Dispose() }
     $dependencies = @($nuspec.SelectNodes("//*[local-name()='dependency']"))
-    # (b) Replaces the NU5104 check that the IOScene range switches off: no package built on a preview contract reaches nuget.org.
+    # IOScene lower bound: replaces the NU5104 check that the IOScene range switches off: no package built on a preview contract reaches nuget.org.
     if ($package.Name -eq "IOViewer.$version.nupkg") {
         $checkedViewer = $true
         $scene = @($dependencies | Where-Object { $_.GetAttribute('id') -eq 'IOScene' })
@@ -100,7 +102,7 @@ foreach ($package in Get-ChildItem -LiteralPath $Output -Filter '*.nupkg') {
             }
         }
     }
-    # (c) nuget.org refuses a dependency bound with metadata, or one whose prerelease label has one part and does not start
+    # Bounds nuget.org accepts: nuget.org refuses a dependency bound with metadata, or one whose prerelease label has one part and does not start
     # with a letter (NuGetGallery ManifestValidator.ValidateDependencyVersion); dotnet pack accepts both, so only the push would fail.
     foreach ($dependency in $dependencies) {
         $range = $dependency.GetAttribute('version')
@@ -113,7 +115,7 @@ foreach ($package in Get-ChildItem -LiteralPath $Output -Filter '*.nupkg') {
         }
     }
 }
-# NuGet names the package by the normalized version; a Version written otherwise would skip check (b) without this.
+# NuGet names the package by the normalized version; a Version written otherwise would skip the IOScene lower-bound check without this.
 if (-not $checkedViewer) { throw "IOViewer.$version.nupkg was not found in '$Output'; its IOScene dependency was not checked" }
 
 # 6. Checksums

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Reflection;
+using System.Text;
 using IfcIO.Scene;
 using IOScene;
 using IOViewer.Exporters;
@@ -14,7 +15,7 @@ namespace IOViewer.Cli;
 internal static class Program
 {
     private const string UsageText = """
-        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.rvt> [output.html] [options]
+        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.ifczip|input.rvt> [output.html] [options]
                ioviewer --help | --version
 
         Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
@@ -275,9 +276,10 @@ internal static class Program
     }
 
     // Messages can quote names from the model file: control characters (escape sequences, line breaks) and format
-    // characters (bidirectional overrides that reorder the line on screen) become '?'.
+    // characters (bidirectional overrides, invisible tag characters) become '?'. Runes, so characters above U+FFFF count too.
     internal static string Printable(string text) =>
-        string.Concat(text.Select(c => char.IsControl(c) || char.GetUnicodeCategory(c) == UnicodeCategory.Format ? '?' : c));
+        string.Concat(text.EnumerateRunes().Select(r =>
+            Rune.IsControl(r) || Rune.GetUnicodeCategory(r) == UnicodeCategory.Format ? "?" : r.ToString()));
 
     private static void StartServe(string htmlPath, int port)
     {
