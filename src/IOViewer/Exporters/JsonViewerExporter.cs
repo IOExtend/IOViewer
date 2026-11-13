@@ -15,13 +15,27 @@ public static class JsonViewerExporter
 
     private static readonly JsonSerializerOptions CompactOptions = Options(indented: false);
 
+    /// <summary>
+    /// Writes viewer JSON to a file. The file is written beside the target first and moved over it when complete, so a
+    /// failed write, such as data the serializer rejects, leaves an existing file as it was. It needs permission to
+    /// create a file in the target's folder, and it replaces the target: a symbolic link is replaced, not written through.
+    /// </summary>
     public static void Save(ViewerDocument doc, string filePath, bool indented = true)
     {
         ArgumentNullException.ThrowIfNull(doc);
-        ArgumentNullException.ThrowIfNull(filePath);
+        ArgumentException.ThrowIfNullOrEmpty(filePath);
 
-        using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        Export(doc, fs, indented);
+        string temporary = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var fs = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) Export(doc, fs, indented);
+            File.Move(temporary, filePath, overwrite: true);
+        }
+        catch
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+            throw;
+        }
     }
 
     public static void Export(ViewerDocument doc, Stream stream, bool indented = true)

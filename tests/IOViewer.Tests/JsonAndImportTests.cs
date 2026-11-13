@@ -82,6 +82,29 @@ public class JsonAndImportTests
         }
     }
 
+    [Fact]
+    public void ViewerJson_SaveOfDataTheSerializerRejects_LeavesAnExistingFileAsItWas()
+    {
+        var scene = new SceneDocument();
+        scene.AddMesh("bad", [new Vector3d(double.PositiveInfinity, 0, 0), new Vector3d(1, 0, 0), new Vector3d(0, 1, 0)], [0, 1, 2], null);
+        string folder = Path.Combine(Path.GetTempPath(), $"ioviewer_test_{Guid.NewGuid():N}");
+        string path = Path.Combine(folder, "viewer.json");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(path, "previous");
+
+            Assert.ThrowsAny<ArgumentException>(() => JsonViewerExporter.Save(new ViewerDocument(scene), path));
+
+            Assert.Equal("previous", File.ReadAllText(path));
+            Assert.Equal(path, Assert.Single(Directory.GetFiles(folder)));   // no temporary file is left behind
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("""{"Kind":"ioviewer","Format":3,"Scene":{"Kind":"ioscene","Format":1}}""", "IOViewer JSON format 3 is newer than this version reads")]
     [InlineData("""{"Format":2,"Kind":"ioviewer","Scene":{"Kind":"ioscene","Format":99}}""", "IOScene format 99 is not supported")]

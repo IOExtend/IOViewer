@@ -205,6 +205,8 @@ internal static class Program
         };
 
         // Data the exporters reject, and an output file or folder that cannot be written, end the run with code 3.
+        // The output being written, named in the error: an exception of a file move does not name it.
+        string target = outputPath;
         try
         {
             EnsureParentDirectory(outputPath);
@@ -227,6 +229,7 @@ internal static class Program
 
             if (!string.IsNullOrEmpty(explicitJsonPath))
             {
+                target = explicitJsonPath;
                 EnsureParentDirectory(explicitJsonPath);
                 JsonViewerExporter.Save(doc, explicitJsonPath);
                 Console.WriteLine($"Exported JSON snapshot to '{explicitJsonPath}'.");
@@ -234,7 +237,7 @@ internal static class Program
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IOException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {Printable(ex.Message)}");
+            Console.Error.WriteLine($"Error: Failed to export '{inputPath}' to '{target}': {Printable(ex.Message)}");
             return 3;
         }
 

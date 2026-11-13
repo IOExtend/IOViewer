@@ -78,19 +78,22 @@ public class ModelAndCliIntegrationTests
             Console.SetError(errors);
 
             // The page, the JSON output, the --json file and the output folder: each where a file or folder cannot be written.
-            string[][] runs =
+            string inFile = Path.Combine(fileAsFolder, "viewer.html");
+            (string[] Args, string Target)[] runs =
             [
-                [obj, "-o", folderAsHtml],
-                [obj, "-o", folderAsJson],
-                [obj, "-o", html, "--json", folderAsJson],
-                [obj, "-o", Path.Combine(fileAsFolder, "viewer.html")],
+                ([obj, "-o", folderAsHtml], folderAsHtml),
+                ([obj, "-o", folderAsJson], folderAsJson),
+                ([obj, "-o", html, "--json", folderAsJson], folderAsJson),
+                ([obj, "-o", inFile], inFile),
             ];
-            foreach (var run in runs)
+            foreach (var (args, target) in runs)
             {
                 errors.GetStringBuilder().Clear();
-                int code = Program.Main(run);
-                Assert.True(code == 3, $"{string.Join(' ', run)}: exit code {code}, {errors}");
-                Assert.StartsWith("Error: Failed to export", errors.ToString());
+                int code = Program.Main(args);
+                Assert.True(code == 3, $"{string.Join(' ', args)}: exit code {code}, {errors}");
+                // The error names the output that failed, also when the exception of a file move does not.
+                Assert.StartsWith($"Error: Failed to export '{obj}' to '{target}': ", errors.ToString());
+                Assert.Empty(Directory.GetFiles(root, "*.tmp"));
             }
         }
         finally
