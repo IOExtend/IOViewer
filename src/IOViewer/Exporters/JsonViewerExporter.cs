@@ -16,26 +16,21 @@ public static class JsonViewerExporter
     private static readonly JsonSerializerOptions CompactOptions = Options(indented: false);
 
     /// <summary>
-    /// Writes viewer JSON to a file. The file is written beside the target first and moved over it when complete, so a
-    /// failed write, such as data the serializer rejects, leaves an existing file as it was. It needs permission to
-    /// create a file in the target's folder, and it replaces the target: a symbolic link is replaced, not written through.
+    /// Writes viewer JSON to a file. The data is serialized once before the file is opened, so data the serializer
+    /// rejects, such as a non-finite coordinate, leaves an existing file as it was. The file is then rewritten in place
+    /// and keeps its permissions.
     /// </summary>
     public static void Save(ViewerDocument doc, string filePath, bool indented = true)
     {
         ArgumentNullException.ThrowIfNull(doc);
-        ArgumentException.ThrowIfNullOrEmpty(filePath);
+        ArgumentNullException.ThrowIfNull(filePath);
 
-        string temporary = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            using (var fs = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) Export(doc, fs, indented);
-            File.Move(temporary, filePath, overwrite: true);
-        }
-        catch
-        {
-            if (File.Exists(temporary)) File.Delete(temporary);
-            throw;
-        }
+        var file = ViewerJsonFile.From(doc);
+        var options = indented ? DefaultOptions : CompactOptions;
+        // A pass that writes nothing: the serializer throws here, before the target is truncated, as it would below.
+        JsonSerializer.Serialize(Stream.Null, file, options);
+        using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        JsonSerializer.Serialize(fs, file, options);
     }
 
     public static void Export(ViewerDocument doc, Stream stream, bool indented = true)

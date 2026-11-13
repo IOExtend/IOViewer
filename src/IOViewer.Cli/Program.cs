@@ -205,7 +205,7 @@ internal static class Program
         };
 
         // Data the exporters reject, and an output file or folder that cannot be written, end the run with code 3.
-        // The output being written, named in the error: an exception of a file move does not name it.
+        // The output being written, named in the error: the page and the --json file can fail in one run.
         string target = outputPath;
         try
         {

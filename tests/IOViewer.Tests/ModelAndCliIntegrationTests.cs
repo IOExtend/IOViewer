@@ -91,9 +91,8 @@ public class ModelAndCliIntegrationTests
                 errors.GetStringBuilder().Clear();
                 int code = Program.Main(args);
                 Assert.True(code == 3, $"{string.Join(' ', args)}: exit code {code}, {errors}");
-                // The error names the output that failed, also when the exception of a file move does not.
+                // The error names the output that failed, whatever the exception says.
                 Assert.StartsWith($"Error: Failed to export '{obj}' to '{target}': ", errors.ToString());
-                Assert.Empty(Directory.GetFiles(root, "*.tmp"));
             }
         }
         finally

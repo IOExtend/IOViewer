@@ -14,12 +14,11 @@ API between minor releases.
 - `ioviewer --serve`: when the preview server cannot start (a port in use or out of range) or fails while serving, the
   tool exits with the new code 5 after printing the error; the output has been written. Before, it exited with 0, or 4
   for an engine error.
-- `JsonViewerExporter.Save` writes the file beside the target and moves it over the target when complete, so data the
-  serializer rejects (such as a non-finite coordinate) or a failed write leaves an existing file as it was; before, the
-  file was emptied first (the HTML export already kept the file when it rejected the data). It now needs permission to
-  create a file in the target's folder, and it replaces the target: a symbolic link is replaced, not written through.
-  The JSON outputs of `ioviewer` (`-o *.json`, `--json`) get this too, and its export error names the output that
-  failed: `Error: Failed to export '<input>' to '<output>': ...`.
+- `JsonViewerExporter.Save` serializes the data once before it opens the file, so data the serializer rejects (such as
+  a non-finite coordinate) leaves an existing file as it was, as the HTML export already did; before, the file was
+  emptied first. The file is still rewritten in place and keeps its permissions. The JSON outputs of `ioviewer`
+  (`-o *.json`, `--json`) get this too, and its export error names the output that failed:
+  `Error: Failed to export '<input>' to '<output>': ...`.
 
 ## [0.3.0] - 2026-11-13
 

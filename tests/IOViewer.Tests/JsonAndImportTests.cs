@@ -97,7 +97,76 @@ public class JsonAndImportTests
             Assert.ThrowsAny<ArgumentException>(() => JsonViewerExporter.Save(new ViewerDocument(scene), path));
 
             Assert.Equal("previous", File.ReadAllText(path));
-            Assert.Equal(path, Assert.Single(Directory.GetFiles(folder)));   // no temporary file is left behind
+            Assert.Equal(path, Assert.Single(Directory.GetFiles(folder)));   // no other file is created
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ViewerJson_Save_RewritesAnExistingFileInPlace_KeepingItsPermissions()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), $"ioviewer_test_{Guid.NewGuid():N}");
+        string path = Path.Combine(folder, "viewer.json");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(path, "previous");
+            string before = Restrict(path);
+
+            JsonViewerExporter.Save(SampleDocument(), path);
+
+            Assert.Equal(before, Permissions(path));
+            Assert.StartsWith("{", File.ReadAllText(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+
+        // Permissions a new file in the folder never gets: only the current user, not inherited from the folder (Windows);
+        // 0700 (Unix: a new file is created 0666 under the umask, so it never has an execute bit).
+        static string Restrict(string file)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var security = new System.Security.AccessControl.FileSecurity();
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    System.Security.Principal.WindowsIdentity.GetCurrent().User!,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.AccessControlType.Allow));
+                new FileInfo(file).SetAccessControl(security);
+            }
+            else
+            {
+                File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+            return Permissions(file);
+        }
+
+        static string Permissions(string file) => OperatingSystem.IsWindows()
+            ? new FileInfo(file).GetAccessControl().GetSecurityDescriptorSddlForm(System.Security.AccessControl.AccessControlSections.Access)
+            : File.GetUnixFileMode(file).ToString();
+    }
+
+    [Fact]
+    public void ViewerJson_Save_WritesAnyValidFileName()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), $"ioviewer_test_{Guid.NewGuid():N}");
+        // 255 characters, the longest valid name: no suffix fits on it, such as that of a temporary file beside it.
+        string path = Path.Combine(folder, new string('n', 250) + ".json");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(path, "previous");
+
+            JsonViewerExporter.Save(SampleDocument(), path);
+
+            Assert.StartsWith("{", File.ReadAllText(path), StringComparison.Ordinal);
+            Assert.Equal(path, Assert.Single(Directory.GetFiles(folder)));
         }
         finally
         {
