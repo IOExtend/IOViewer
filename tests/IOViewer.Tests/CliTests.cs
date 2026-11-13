@@ -3,6 +3,8 @@ using Xunit;
 
 namespace IOViewer.Tests;
 
+// Redirects Console.Out and Console.Error; see ModelAndCliIntegrationTests.
+[Collection("Console")]
 public class CliTests
 {
     private static readonly string[] HelpArgs = ["--help"];

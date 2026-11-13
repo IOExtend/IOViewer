@@ -3,10 +3,13 @@ using IOViewer.Cli;
 using IOViewer.Exporters;
 using IOViewer.Importers;
 using IOViewer.Model;
+using RvtIO.Scene;
 using Xunit;
 
 namespace IOViewer.Tests;
 
+// Console.Error and Console.Out are process-wide: tests that redirect them share one collection, so they never run in parallel.
+[Collection("Console")]
 public class ModelAndCliIntegrationTests
 {
     [Fact]
@@ -342,6 +345,7 @@ public class ModelAndCliIntegrationTests
                 new(SceneSeverity.Warning, "read-cut", "Cut warning."),
                 new(SceneSeverity.Warning, "no-geometry", "No geometry."),
                 new(SceneSeverity.Info, "skipped", "Skipped."),
+                new(SceneSeverity.Warning, "empty-mesh", "Element 'x\u001b]0;t\u0007\r\nError: forged' has no mesh."),
             ]);
 
             Assert.Equal(
@@ -349,6 +353,7 @@ public class ModelAndCliIntegrationTests
                     "Error: read-cut: Cut one. (1 more)",
                     "Warning: read-cut: Cut warning.",
                     "Warning: no-geometry: No geometry.",
+                    "Warning: empty-mesh: Element 'x?]0;t???Error: forged' has no mesh.",
                     ""),
                 errors.ToString());
         }
@@ -390,8 +395,7 @@ public class ModelAndCliIntegrationTests
             Console.SetError(origErr);
 
             // An engine error still writes both outputs and gives exit code 4; anything else must be a clean 0.
-            bool engineError = errors.ToString().Split(Environment.NewLine)
-                .Any(line => line.StartsWith("Error: ", StringComparison.Ordinal) && !line.StartsWith("Error: Failed", StringComparison.Ordinal));
+            bool engineError = RvtSceneReader.Read(rvt).Diagnostics.Any(d => d.Severity == SceneSeverity.Error);
             Assert.True(code == (engineError ? 4 : 0), $"exit code {code}: {errors}");
             Assert.Empty(JsonViewerImporter.Load(tempJson).Scene.Validate());
             Assert.True(ViewerHtml.Parse(File.ReadAllText(tempHtml)).InstanceCount > 0);

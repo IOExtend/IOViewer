@@ -268,7 +268,9 @@ internal static class Program
         {
             int more = kind.Count() - 1;
             string label = kind.Key.Severity == SceneSeverity.Error ? "Error" : "Warning";
-            Console.Error.WriteLine($"{label}: {kind.Key.Code}: {kind.First().Message}{(more > 0 ? $" ({more} more)" : "")}");
+            // The message quotes names from the model file: control characters (escape sequences, line breaks) become '?'.
+            string message = string.Concat(kind.First().Message.Select(c => char.IsControl(c) ? '?' : c));
+            Console.Error.WriteLine($"{label}: {kind.Key.Code}: {message}{(more > 0 ? $" ({more} more)" : "")}");
         }
         return new ViewerDocument(scene);
     }
