@@ -6,6 +6,20 @@ API between minor releases.
 
 ## [Unreleased]
 
+### Fixed
+- `ioviewer`: an output that cannot be written (a locked file, a read-only folder, a folder where the file should be or
+  a file where its folder should be) ends the run with `Error: Failed to export` and exit code 3 for the page, the
+  JSON output and the `--json` file alike. Before, only the page caught rejected data, and an I/O error ended the tool
+  with an unhandled exception.
+- `ioviewer --serve`: when the preview server cannot start (a port in use or out of range) or fails while serving, the
+  tool exits with the new code 5 after printing the error; the output has been written. Before, it exited with 0, or 4
+  for an engine error.
+- `JsonViewerExporter.Save` serializes the data once before it opens the file, so data the serializer rejects (such as
+  a non-finite coordinate) leaves an existing file as it was, as the HTML export already did; before, the file was
+  emptied first. The file is still rewritten in place and keeps its permissions. The JSON outputs of `ioviewer`
+  (`-o *.json`, `--json`) get this too, and its export error names the output that failed:
+  `Error: Failed to export '<input>' to '<output>': ...`.
+
 ## [0.3.0] - 2026-11-13
 
 Version 0.3.0 builds the viewer on the scene model of the [IOScene](https://github.com/IOExtend/IOScene) package

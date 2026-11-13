@@ -15,13 +15,22 @@ public static class JsonViewerExporter
 
     private static readonly JsonSerializerOptions CompactOptions = Options(indented: false);
 
+    /// <summary>
+    /// Writes viewer JSON to a file. The data is serialized once before the file is opened, so data the serializer
+    /// rejects, such as a non-finite coordinate, leaves an existing file as it was. The file is then rewritten in place
+    /// and keeps its permissions.
+    /// </summary>
     public static void Save(ViewerDocument doc, string filePath, bool indented = true)
     {
         ArgumentNullException.ThrowIfNull(doc);
         ArgumentNullException.ThrowIfNull(filePath);
 
+        var file = ViewerJsonFile.From(doc);
+        var options = indented ? DefaultOptions : CompactOptions;
+        // A pass that writes nothing: the serializer throws here, before the target is truncated, as it would below.
+        JsonSerializer.Serialize(Stream.Null, file, options);
         using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        Export(doc, fs, indented);
+        JsonSerializer.Serialize(fs, file, options);
     }
 
     public static void Export(ViewerDocument doc, Stream stream, bool indented = true)

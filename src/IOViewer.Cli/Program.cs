@@ -47,8 +47,10 @@ internal static class Program
           0  Success
           1  Usage error (missing or invalid arguments)
           2  File not found
-          3  Data format error or parsing failure
+          3  Data format error, parsing failure, or an output that cannot be written
           4  Output written, but IfcIO or RvtIO reported an error: elements may be missing
+          5  Output written, but the --serve preview server could not start or failed
+          Codes 3 and 5 take precedence over 4.
         """;
 
     public static int Main(string[] args)
@@ -192,7 +194,6 @@ internal static class Program
             doc.Title = customTitle;
         }
 
-        EnsureParentDirectory(outputPath);
         var options = new HtmlViewerOptions
         {
             Title = doc.Title,
@@ -203,41 +204,46 @@ internal static class Program
             IncludeTimeLiner = includeTimeLiner
         };
 
-        if (outputPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        // Data the exporters reject, and an output file or folder that cannot be written, end the run with code 3.
+        // The output being written, named in the error: the page and the --json file can fail in one run.
+        string target = outputPath;
+        try
         {
-            JsonViewerExporter.Save(doc, outputPath);
-            Console.WriteLine($"Exported JSON snapshot to '{outputPath}' ({doc.Scene.Instances.Count} meshes, {doc.Scene.Elements.Count} elements) in {sw.ElapsedMilliseconds} ms.");
-        }
-        else
-        {
-            try
+            EnsureParentDirectory(outputPath);
+            if (outputPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                JsonViewerExporter.Save(doc, outputPath);
+                Console.WriteLine($"Exported JSON snapshot to '{outputPath}' ({doc.Scene.Instances.Count} meshes, {doc.Scene.Elements.Count} elements) in {sw.ElapsedMilliseconds} ms.");
+            }
+            else
             {
                 HtmlViewerExporter.Save(doc, outputPath, options);
+                var fi = new FileInfo(outputPath);
+                Console.WriteLine($"Exported standalone 3D HTML viewer to '{outputPath}' ({fi.Length / 1024:N0} KB, {doc.Scene.Instances.Count} meshes) in {sw.ElapsedMilliseconds} ms.");
+                int undrawn = ViewerPayloadWriter.UndrawnInstances(doc.Scene);
+                if (undrawn > 0)
+                {
+                    Console.Error.WriteLine($"Warning: {undrawn} meshes of lines, points or an unknown kind are not shown; the viewer draws triangles only.");
+                }
             }
-            catch (Exception ex) when (ex is InvalidDataException or ArgumentException)
+
+            if (!string.IsNullOrEmpty(explicitJsonPath))
             {
-                Console.Error.WriteLine($"Error: Failed to export '{inputPath}': {Printable(ex.Message)}");
-                return 3;
-            }
-            var fi = new FileInfo(outputPath);
-            Console.WriteLine($"Exported standalone 3D HTML viewer to '{outputPath}' ({fi.Length / 1024:N0} KB, {doc.Scene.Instances.Count} meshes) in {sw.ElapsedMilliseconds} ms.");
-            int undrawn = ViewerPayloadWriter.UndrawnInstances(doc.Scene);
-            if (undrawn > 0)
-            {
-                Console.Error.WriteLine($"Warning: {undrawn} meshes of lines, points or an unknown kind are not shown; the viewer draws triangles only.");
+                target = explicitJsonPath;
+                EnsureParentDirectory(explicitJsonPath);
+                JsonViewerExporter.Save(doc, explicitJsonPath);
+                Console.WriteLine($"Exported JSON snapshot to '{explicitJsonPath}'.");
             }
         }
-
-        if (!string.IsNullOrEmpty(explicitJsonPath))
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IOException or UnauthorizedAccessException)
         {
-            EnsureParentDirectory(explicitJsonPath);
-            JsonViewerExporter.Save(doc, explicitJsonPath);
-            Console.WriteLine($"Exported JSON snapshot to '{explicitJsonPath}'.");
+            Console.Error.WriteLine($"Error: Failed to export '{inputPath}' to '{target}': {Printable(ex.Message)}");
+            return 3;
         }
 
-        if (serve)
+        if (serve && !StartServe(outputPath, servePort))
         {
-            StartServe(outputPath, servePort);
+            return 5;
         }
 
         return ExitCode(diagnostics);
@@ -281,7 +287,8 @@ internal static class Program
         string.Concat(text.EnumerateRunes().Select(r =>
             Rune.IsControl(r) || Rune.GetUnicodeCategory(r) == UnicodeCategory.Format ? "?" : r.ToString()));
 
-    private static void StartServe(string htmlPath, int port)
+    // Serves the page until the process is stopped; false when the server could not start or failed.
+    private static bool StartServe(string htmlPath, int port)
     {
         string url = $"http://localhost:{port}/";
         Console.WriteLine($"Starting local HTTP preview server at {url}...");
@@ -314,7 +321,9 @@ internal static class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"HTTP Server error: {ex.Message}");
+            return false;
         }
+        return true;
     }
 
     private static void EnsureParentDirectory(string path)
