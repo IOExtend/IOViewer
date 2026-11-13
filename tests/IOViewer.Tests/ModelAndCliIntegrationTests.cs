@@ -51,6 +51,82 @@ public class ModelAndCliIntegrationTests
         }
     }
 
+    private const string Triangle = """
+        v 0 0 0
+        v 1 0 0
+        v 0 1 0
+        f 1 2 3
+        """;
+
+    [Fact]
+    public void Cli_AnOutputThatCannotBeWritten_GivesExitCode3()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"test_cli_{Guid.NewGuid():N}");
+        string obj = Path.Combine(root, "model.obj");
+        string html = Path.Combine(root, "viewer.html");
+        string folderAsHtml = Path.Combine(root, "folder.html");
+        string folderAsJson = Path.Combine(root, "folder.json");
+        string fileAsFolder = Path.Combine(root, "file");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            Directory.CreateDirectory(folderAsHtml);
+            Directory.CreateDirectory(folderAsJson);
+            File.WriteAllText(obj, Triangle);
+            File.WriteAllText(fileAsFolder, "");
+            Console.SetError(errors);
+
+            // The page, the JSON output, the --json file and the output folder: each where a file or folder cannot be written.
+            string[][] runs =
+            [
+                [obj, "-o", folderAsHtml],
+                [obj, "-o", folderAsJson],
+                [obj, "-o", html, "--json", folderAsJson],
+                [obj, "-o", Path.Combine(fileAsFolder, "viewer.html")],
+            ];
+            foreach (var run in runs)
+            {
+                errors.GetStringBuilder().Clear();
+                int code = Program.Main(run);
+                Assert.True(code == 3, $"{string.Join(' ', run)}: exit code {code}, {errors}");
+                Assert.StartsWith("Error: Failed to export", errors.ToString());
+            }
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Cli_ServeThatCannotStart_GivesExitCode5AfterThePageIsWritten()
+    {
+        string obj = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.obj");
+        string html = Path.ChangeExtension(obj, ".html");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            File.WriteAllText(obj, Triangle);
+            Console.SetError(errors);
+
+            // No server listens on a port above 65535, so the preview server fails before it opens a browser.
+            int code = Program.Main([obj, "-o", html, "--serve", "70000"]);
+
+            Assert.Equal(5, code);
+            Assert.True(File.Exists(html));
+            Assert.Contains("HTTP Server error", errors.ToString());
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            if (File.Exists(obj)) File.Delete(obj);
+            if (File.Exists(html)) File.Delete(html);
+        }
+    }
+
     [Fact]
     public void Cli_ConvertObjToJson_CreatesValidJsonSnapshot()
     {

@@ -97,7 +97,9 @@ ioviewer model.glb -o model.json
 
 Diagnostics and progress go to standard error, including what IfcIO or RvtIO could not convert (one warning or error
 per kind, with its count). When the engine reported an error, elements may be missing: the output is still written and
-the exit code is 4. Run `ioviewer --help` for the full list of options and exit codes.
+the exit code is 4. An output that cannot be written gives exit code 3, and a `--serve` preview server that cannot start
+or fails gives exit code 5 after the output is written; codes 3 and 5 take precedence over 4. Run `ioviewer --help` for
+the full list of options and exit codes.
 
 ## Library
 
