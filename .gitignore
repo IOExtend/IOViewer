@@ -33,8 +33,6 @@ test_files/
 *.nwd
 *.nwf
 *.dwg
-# Small synthetic fixtures are committed on purpose
-!tests/**/Fixtures/**
 
 # Local secrets
 .env
