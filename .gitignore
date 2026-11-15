@@ -22,3 +22,17 @@ docs/api/
 node_modules/
 test-results/
 playwright-report/
+
+# Private test fixtures, customer models and vendor files never go into the repository
+test_files/
+*.rvt
+*.rfa
+*.ifc
+*.ifczip
+*.nwc
+*.nwd
+*.nwf
+*.dwg
+
+# Local secrets
+.env
