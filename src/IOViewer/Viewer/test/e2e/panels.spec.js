@@ -36,6 +36,17 @@ const colorOf = (page, i) =>
   }, i);
 const css = (page, color) => page.evaluate((c) => window.__ioviewer.scene.instance(0).mesh.material.color.clone().set(c).toArray(), color);
 
+function buildingVariant(name, edit) {
+  const html = readFileSync(path.join(viewerDir, 'test-results', 'building.html'), 'utf8');
+  const tag = /(<script id="ioviewer-meta" type="application\/json">)([^<]*)/;
+  const variant = html.replace(tag, (_, open, payload) => {
+    const data = JSON.parse(payload);
+    edit(data);
+    return open + JSON.stringify(data);
+  });
+  writeFileSync(path.join(viewerDir, 'test-results', `${name}.html`), variant);
+}
+
 test.describe('clashes', () => {
   test('a large clash list renders only nearby rows and keeps the chosen clash after scrolling', async ({ page }) => {
     const errors = await open(page, 'large-clashes');
@@ -232,7 +243,7 @@ test.describe('views', () => {
     expect(errors).toEqual([]);
   });
 
-  test('the tour goes from view to view and stops on a mouse press or a key', async ({ page }) => {
+  test('the tour goes from view to view and stops on a mouse press, wheel or key', async ({ page }) => {
     test.setTimeout(40000);
     const errors = await open(page);
     const { viewpoints } = await meta(page);
@@ -263,6 +274,12 @@ test.describe('views', () => {
     const stopped = await camera(page);
     await page.waitForTimeout(3600);
     expect(await camera(page)).toEqual(stopped);
+
+    await tour.click();
+    await at(0);
+    await expect(tour).toHaveAttribute('aria-pressed', 'true');
+    await page.mouse.wheel(0, -100);
+    await expect(tour).toHaveAttribute('aria-pressed', 'false');
 
     // A key stops it too; the tour button itself toggles it.
     await tour.click();
@@ -308,6 +325,52 @@ test.describe('views', () => {
 });
 
 test.describe('4D', () => {
+  test('the speed buttons advance 1, 5 or 15 schedule days per second', async ({ page }) => {
+    const errors = await open(page);
+    await rail(page, 'timeliner').click();
+    await page.evaluate(() => window.__ioviewer.timeliner.open());
+    const player = page.locator('.ioviewer-player');
+    const start = Date.parse('2026-03-02T08:00:00Z');
+    const dayMs = 86_400_000;
+    const elapsedMs = 960; // exactly 60 animation frames
+    await page.clock.install({ time: start });
+    await page.clock.pauseAt(start + 16000);
+
+    for (const speed of [1, 5, 15]) {
+      await page.evaluate((start) => window.__ioviewer.timeliner.setDate(start), start);
+      await player.getByRole('button', { name: `${speed}×`, exact: true }).dispatchEvent('click');
+      await player.getByRole('button', { name: 'Воспроизвести' }).dispatchEvent('click');
+      await page.clock.runFor(elapsedMs);
+      expect(await page.evaluate(() => window.__ioviewer.timeliner.date)).toBe(start + speed * dayMs * elapsedMs / 1000);
+      await player.getByRole('button', { name: 'Пауза' }).dispatchEvent('click');
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test('active demolition and temporary work tint their elements and restore the original colours on close', async ({ page }) => {
+    buildingVariant('typed-4d', (data) => {
+      data.timeliner.tasks[0].type = 'demolish';
+      data.timeliner.tasks.at(-1).type = 'temporary';
+    });
+    const errors = await open(page, 'typed-4d');
+    const { elements, timeliner } = await meta(page);
+    const cases = [[timeliner.tasks[0], '#ef4444'], [timeliner.tasks.at(-1), '#a855f7']];
+    const samples = [];
+    for (const [task, color] of cases) {
+      const index = elements.findIndex((e) => e.id === task.attachedElements[0]);
+      samples.push({ task, index, plain: await colorOf(page, index), tint: await css(page, color) });
+    }
+    await page.evaluate(() => window.__ioviewer.timeliner.open());
+    for (const { task, index, tint } of samples) {
+      await page.evaluate((start) => window.__ioviewer.timeliner.setDate(Date.parse(start)), task.start);
+      expect(await visible(page, index)).toBe(true);
+      expect(near(await colorOf(page, index), tint, 1e-6)).toBe(true);
+    }
+    await page.evaluate(() => window.__ioviewer.timeliner.close());
+    for (const { index, plain } of samples) expect(await colorOf(page, index)).toEqual(plain);
+    expect(errors).toEqual([]);
+  });
+
   test('at the start date future work is hidden and active work is green; closing leaves the user state', async ({ page }) => {
     const errors = await open(page);
     const slab = await indexOf(page, 'Ground Slab');
@@ -461,21 +524,17 @@ test.describe('4D dates west of UTC', () => {
 
 test.describe('malformed 4D', () => {
   test('bad tasks are left out and the viewer and the player still work', async ({ page }) => {
-    const html = readFileSync(path.join(viewerDir, 'test-results', 'building.html'), 'utf8');
-    const tag = '<script id="ioviewer-meta" type="application/json">';
-    const start = html.indexOf(tag) + tag.length;
-    const end = html.indexOf('</script>', start);
-    const data = JSON.parse(html.slice(start, end));
     const bad = (id, name, dates) => ({ id, name, type: 'construct', progress: 0, attachedElements: [300002], ...dates });
-    data.timeliner.start = '0001-01-01T00:00:00Z';
-    data.timeliner.tasks.unshift(
-      bad('B1', 'No dates', {}),
-      bad('B2', 'Default year', { start: '0001-01-01T00:00:00Z', end: '2026-03-03T00:00:00Z' }),
-      bad('B3', 'Reversed', { start: '2026-03-10T00:00:00Z', end: '2026-03-05T00:00:00Z' }),
-      bad('B4', 'Invalid', { start: 'soon', end: '2026-03-05T00:00:00Z' }),
-      { ...bad('B5', 'Unknown ids', { start: '2026-03-02T08:00:00Z', end: '2026-03-05T00:00:00Z' }), attachedElements: [999999] },
-    );
-    writeFileSync(path.join(viewerDir, 'test-results', 'bad-4d.html'), html.slice(0, start) + JSON.stringify(data) + html.slice(end));
+    buildingVariant('bad-4d', (data) => {
+      data.timeliner.start = '0001-01-01T00:00:00Z';
+      data.timeliner.tasks.unshift(
+        bad('B1', 'No dates', {}),
+        bad('B2', 'Default year', { start: '0001-01-01T00:00:00Z', end: '2026-03-03T00:00:00Z' }),
+        bad('B3', 'Reversed', { start: '2026-03-10T00:00:00Z', end: '2026-03-05T00:00:00Z' }),
+        bad('B4', 'Invalid', { start: 'soon', end: '2026-03-05T00:00:00Z' }),
+        { ...bad('B5', 'Unknown ids', { start: '2026-03-02T08:00:00Z', end: '2026-03-05T00:00:00Z' }), attachedElements: [999999] },
+      );
+    });
 
     const errors = await open(page, 'bad-4d');
     await rail(page, 'timeliner').click();
@@ -491,6 +550,32 @@ test.describe('malformed 4D', () => {
 });
 
 test.describe('links', () => {
+  test('legacy files resolve members by file name and path', async ({ page }) => {
+    buildingVariant('legacy-links', (data) => {
+      const file = data.linkedFiles.find((f) => f.name === 'Structure');
+      delete file.members;
+      const byName = data.elements.find((e) => e.name === 'Column Twin');
+      const byPath = data.elements.find((e) => e.name === 'Column Twin Mirrored');
+      byName.link = file.name;
+      byPath.link = file.path;
+      for (const element of data.elements) if (element !== byName && element !== byPath) delete element.link;
+    });
+    const errors = await open(page, 'legacy-links');
+    const twins = [await indexOf(page, 'Column Twin'), await indexOf(page, 'Column Twin Mirrored')];
+    const slab = await indexOf(page, 'Ground Slab');
+    await rail(page, 'links').click();
+    const row = sidePanel(page, 'links').locator('.ioviewer-link').filter({ hasText: 'Structure' });
+    await expect(row.locator('.ioviewer-row-count')).toHaveText('2');
+    const checkbox = row.getByRole('checkbox');
+    await expect(checkbox).toBeChecked();
+    await checkbox.uncheck();
+    for (const index of twins) expect(await visible(page, index)).toBe(false);
+    expect(await visible(page, slab)).toBe(true);
+    await checkbox.check();
+    for (const index of twins) expect(await visible(page, index)).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
   test('unchecking a link hides its elements; checking shows them again but not those the user hid', async ({ page }) => {
     const errors = await open(page);
     const duct = await indexOf(page, 'Supply Duct SA-1');

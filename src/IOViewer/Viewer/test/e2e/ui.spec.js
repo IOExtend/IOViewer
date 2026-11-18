@@ -162,6 +162,9 @@ test('hotkeys: I isolates, H hides, Shift+H shows all, F zooms to the selection;
   await sidePanel(page, 'model').locator('input').fill('');
   await sidePanel(page, 'model').locator('input').press('KeyH');
   expect(await visible(page, d2)).toBe(true);
+  await sidePanel(page, 'model').locator('input').press('Escape');
+  await expect(sidePanel(page, 'model').locator('input')).toBeFocused();
+  expect(await selected(page)).toEqual([d2]);
   await page.mouse.click(...blank); // leaves the field; H now hides
   await page.mouse.click(...(await screenAt(page, d2)));
   await page.keyboard.press('KeyH');

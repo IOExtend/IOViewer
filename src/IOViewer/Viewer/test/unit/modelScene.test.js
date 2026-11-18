@@ -139,8 +139,13 @@ test('<=256 changed slots -> updateRanges, >256 -> full upload', () => {
   };
   uploaded();
   const version = texture.version;
-  scene.setHighlighted([3, 4, 5]);
-  assert.equal(texture.updateRanges.length, 3);
+  const highlighted = [3, 9, 257];
+  const unchanged = [2, 4, 8, 10, 256, 258];
+  const original = unchanged.map((i) => bytes(scene, i));
+  scene.setHighlighted(highlighted);
+  assert.deepEqual(texture.updateRanges, highlighted.map((i) => ({ start: scene.instance(i).slot * 4, count: 4 })));
+  assert.deepEqual(highlighted.map((i) => bytes(scene, i)), highlighted.map(() => [245, 158, 11, 255]));
+  assert.deepEqual(unchanged.map((i) => bytes(scene, i)), original);
   assert.equal(texture.version, version + 1);
   uploaded();
   scene.setHighlighted(Array.from({ length: 300 }, (_, i) => i));
