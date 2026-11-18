@@ -61,6 +61,11 @@ jobs:
           global-json-file: global.json
           dotnet-version: |
             8.0.x
+      - name: Build the viewer fixture and benchmark tools
+        working-directory: .
+        run: |
+          dotnet build tests/fixtures/viewer/generate-fixtures.cs -c Release
+          dotnet build tools/SyntheticModel/SyntheticModel.cs -c Release
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -71,5 +76,5 @@ jobs:
       # dist/viewer.js is committed and embedded in the library: it must match the sources.
       - run: git diff --exit-code dist/
       - run: npm test
-      - run: npx playwright install --with-deps chromium
-      - run: npm run e2e
+      - run: npx playwright install --with-deps chromium firefox
+      - run: xvfb-run -a npx playwright test
