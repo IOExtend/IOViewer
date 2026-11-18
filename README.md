@@ -44,6 +44,9 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
 | Middle or right drag | Pan |
 | Wheel | Zoom towards the cursor |
 | Right click | Context menu |
+| Ctrl / Cmd + click or Space in the model tree | Toggle an element or all elements in a category |
+| Shift + click or Shift+Space in the model tree | Select a range of expanded or filtered rows from the last individually selected or toggled row |
+| Ctrl / Cmd + Shift + click in the model tree | Add a range to the current selection |
 | Menu key / Shift+F10 | Open the context menu. In the model tree, use the focused element |
 | Up / Down, Enter in the context menu | Move between actions and run the focused action |
 | Up / Down, Left / Right in the model tree | Move between rows, collapse or expand a category, or move to a parent or child |

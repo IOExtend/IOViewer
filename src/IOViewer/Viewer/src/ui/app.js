@@ -57,11 +57,8 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
         elements: meta.elements,
         selection,
         scene,
-        openKeyboardMenu,
-        activate: (i) => {
-          selection.set([i]);
-          controls.zoomToBox(scene.elementBox(i));
-        },
+        openContextMenu,
+        zoomToElement: (i) => controls.zoomToBox(scene.elementBox(i)),
       }),
   });
   const properties = document.createElement('aside');
@@ -98,16 +95,16 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   }
 
   const contextMenu = createContextMenu(root);
-  function openKeyboardMenu(anchor, index = null, restore = () => anchor.focus({ preventScroll: true })) {
+  function openContextMenu(x, y, target, restoreFocus) {
+    contextMenu.open(target === null ? 'empty' : 'element', x, y, target, restoreFocus);
+  }
+  function openKeyboardMenu(anchor) {
     if (contextMenu.isOpen) return;
     const fromCanvas = anchor === document.body;
     const rect = (fromCanvas ? controls.dom : anchor).getBoundingClientRect();
-    if (index !== null && !selection.has(index)) selection.set([index]);
-    const [first] = selection.values();
-    const target = index ?? first ?? null;
     const x = fromCanvas ? rect.left + rect.width / 2 : rect.left;
     const y = fromCanvas ? rect.top + rect.height / 2 : rect.bottom;
-    contextMenu.open(target === null ? 'empty' : 'element', x, y, target, restore);
+    openContextMenu(x, y, selection.values().next().value ?? null, () => anchor.focus({ preventScroll: true }));
   }
   contextMenu.setItem('properties', { handler: (i) => selection.set([i]) });
   for (const id of ['hide', 'isolate', 'showAll', 'zoomTo', 'fitAll']) contextMenu.setItem(id, { handler: actions[id] });
@@ -123,13 +120,12 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   controls.addEventListener('contextmenu', (e) => {
     const { x, y } = e.detail;
     if (measure.active) {
-      const [first] = selection.values();
-      return first === undefined ? contextMenu.open('empty', x, y, null) : contextMenu.open('element', x, y, first);
+      return openContextMenu(x, y, selection.values().next().value ?? null);
     }
     const hit = picker.pick(x, y);
-    if (!hit || hit.element < 0) return contextMenu.open('empty', x, y, null);
+    if (!hit || hit.element < 0) return openContextMenu(x, y, null);
     if (!selection.has(hit.element)) selection.set([hit.element]);
-    contextMenu.open('element', x, y, hit.element);
+    openContextMenu(x, y, hit.element);
   });
 
   const escapeHandlers = [];

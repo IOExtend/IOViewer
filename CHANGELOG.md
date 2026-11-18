@@ -14,6 +14,7 @@ API between minor releases.
 - Saved viewpoints can restore clipping, hidden elements and linked-file checkboxes. The viewpoint list and the
   tour both use the saved state.
 - Keyboard navigation and visible focus in the model tree and context menu.
+- Select multiple elements in the model tree and open the viewer context menu from its rows.
 
 ### Fixed
 

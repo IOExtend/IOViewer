@@ -21,13 +21,16 @@ function swallow(e) {
   e.stopPropagation();
 }
 
-// Swallows a whole press from its capturing pointerdown `e`: that pointerdown, its pointerup and the click that
-// follows, so a press that dismisses a menu or popover never reaches the model or the panels.
+// Swallows the pointerdown, pointerup and resulting click or context menu of a dismissing press.
 export function swallowPress(e) {
   swallow(e);
+  const context = e.button === 2;
   const release = () => {
     window.removeEventListener('pointerup', swallowUp, true);
-    setTimeout(() => window.removeEventListener('click', swallow, true)); // the click, if any, comes in this task
+    setTimeout(() => {
+      window.removeEventListener('click', swallow, true);
+      if (context) window.removeEventListener('contextmenu', swallow, true);
+    }); // the activation, if any, comes in this task
   };
   const swallowUp = (up) => {
     swallow(up);
@@ -35,6 +38,7 @@ export function swallowPress(e) {
   };
   window.addEventListener('pointerup', swallowUp, true);
   window.addEventListener('click', swallow, true);
+  if (context) window.addEventListener('contextmenu', swallow, true);
 }
 
 // Puts a screen-space label (position: absolute in the full-window #ioviewer-ui) over the scene point `point`;
