@@ -392,6 +392,44 @@ test('cell wireframe: three\'s wireframe over the cell\'s geometry and matrices;
   assert.deepEqual([m.opacity, m.transparent, m.depthWrite, m.clipIntersection, m.clippingPlanes.length], [0.5, true, false, true, 1]);
 });
 
+test('a pick draws only through the last cell slot intersecting its tile, in original order', () => {
+  const scene = model([{ x: 0 }, { x: 4 }, { x: 8 }, { x: 12 }], { options: { ...INSTANCED, cellExtent: 1 } });
+  const { mesh } = scene.instance(0);
+  const pick = new THREE.MeshBasicMaterial();
+  const c = new THREE.OrthographicCamera(-0.1, 0.1, 0.1, -0.1, 0.1, 20);
+  const drawCount = (x) => {
+    c.position.set(x, 0, 5);
+    c.updateMatrixWorld();
+    return scene.withMaterial(pick, () => {
+      mesh.onBeforeRender(renderer, null, c, mesh.geometry, pick);
+      return mesh.count;
+    }, c);
+  };
+  assert.equal(drawCount(0), 1);
+  assert.equal(drawCount(4), 2);
+  assert.equal(drawCount(3), 0);
+  scene.setVisible([1], false);
+  assert.equal(drawCount(4), 0);
+  assert.equal(drawCount(8), 3);
+  mesh.onBeforeRender(renderer, null, c, mesh.geometry, mesh.material);
+  assert.equal(mesh.count, 4);
+});
+
+test('the pick tile includes encoded geometry extending beyond the authored bounds', () => {
+  const geometry = quantizedCube();
+  geometry.bbox.max[0] = 0.5 - GRID / 4;
+  const scene = model([{ x: 0 }], { geometries: [geometry], options: INSTANCED });
+  const { mesh } = scene.instance(0);
+  const pick = new THREE.MeshBasicMaterial();
+  const c = new THREE.OrthographicCamera(-GRID / 32, GRID / 32, 0.1, -0.1, 0.1, 20);
+  c.position.set(0.5 - GRID / 8, 0, 5);
+  c.updateMatrixWorld();
+  scene.withMaterial(pick, () => {
+    mesh.onBeforeRender(renderer, null, c, mesh.geometry, pick);
+    assert.equal(mesh.count, 1);
+  }, c);
+});
+
 test('over the cap, cells are bounded in extent: one shape spread along 190 m takes several cells', () => {
   const scene = model(Array.from({ length: 20 }, (_, i) => ({ x: i * 10 })), { options: { mergedCap: 0, minRepeats: 1 } });
   const { cells, instancedInstances } = scene.memory();
@@ -413,6 +451,14 @@ test('a unit the detail cut leaves empty is hidden for that frame, counted in vi
   scene.setDetail(threshold, 800);
   assert.deepEqual([big.visible, small.visible], [true, false]);
   big.onBeforeRender({ info: { render: { frame: 7 } } }, null, c, big.geometry, big.material, null);
+  assert.deepEqual(scene.drawStats(), { drawn: 12, inView: 24, draws: 1 });
+  const pick = new THREE.MeshBasicMaterial();
+  scene.withMaterial(pick, () => {
+    assert.ok(small.visible);
+    small.onBeforeRender({ info: { render: { frame: 8 } } }, null, c, small.geometry, pick);
+    assert.equal(small.geometry.drawRange.count, 36);
+  }, c);
+  assert.equal(small.visible, false);
   assert.deepEqual(scene.drawStats(), { drawn: 12, inView: 24, draws: 1 });
   scene.setDetail(0);
   assert.deepEqual([big.visible, small.visible], [true, true]);

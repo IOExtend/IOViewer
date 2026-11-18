@@ -30,6 +30,7 @@ API between minor releases.
   drawable geometry, and set the model title when WebGL 2 is unavailable.
 - Keep close geometry visible and pickable in kilometre-scale models. Orthographic wheel zoom changes the
   magnification around the cursor while keeping the camera at the same depth.
+- Speed up picking in large instanced models by skipping the trailing instances outside the pick tile.
 
 ## [0.3.1] - 2026-11-13
 

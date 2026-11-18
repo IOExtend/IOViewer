@@ -7,6 +7,7 @@
 // PERF_OUT: where JSON results go (default <os temp>/ioviewer-perf); PERF_LABEL names the run (e.g. baseline);
 // PERF_PROFILE=1 also writes a CPU profile of each model's whole run; PERF_GPU: see playwright.perf.config.js.
 // PERF_STARTUP_ONLY=1 stops after the first rendered frame and writes only the startup measurements.
+// PERF_PICK_BOUNDS_ONLY=1 compares full-cell and bounded picking with the same fixed camera and pixels.
 // After all runs, one table across them is printed and written with every result to <PERF_OUT>/ladder-<label>.{md,json}.
 import { test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -23,6 +24,7 @@ const MODELS = list(process.env.PERF_MODELS ?? (LADDER.length ? '' : path.join(O
 const VARIANTS = list(process.env.PERF_VARIANTS);
 const LABEL = process.env.PERF_LABEL ?? 'run';
 const STARTUP_ONLY = process.env.PERF_STARTUP_ONLY === '1';
+const PICK_BOUNDS_ONLY = process.env.PERF_PICK_BOUNDS_ONLY === '1';
 const ORBIT_MS = 5000;
 const REPO = fileURLToPath(new URL('../../../../../', import.meta.url));
 const LIBRARY = path.join(REPO, 'src', 'IOViewer');
@@ -73,6 +75,62 @@ const median = (values) => quantile(values, 0.5);
 function quantile(values, q) {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : NaN;
+}
+
+async function comparePickBounds(page) {
+  const groups = await page.evaluate(() => {
+    const { scene, picker, camera } = window.__ioviewer;
+    if (typeof scene._pickBounds !== 'boolean') throw new Error('Export the model with the current viewer bundle.');
+    const query = (enabled, [x, y]) => {
+      scene._pickBounds = enabled;
+      picker._last = null;
+      const start = performance.now();
+      const hit = picker.pick(x, y);
+      return { hit, time: performance.now() - start, triangles: picker.renderer.info.render.triangles };
+    };
+    const grid = Array.from({ length: 81 }, (_, i) => [innerWidth / 2 + (i % 9 - 4) * 37, innerHeight / 2 + (Math.floor(i / 9) - 4) * 29]);
+    const targets = [];
+    const seen = new Set();
+    const point = camera.position.clone();
+    const boxes = scene._boxes;
+    for (let i = 0, step = Math.max(1, Math.ceil(scene.instanceCount / 512)); i < scene.instanceCount && targets.length < 48; i += step) {
+      const k = i * 6;
+      point.set((boxes[k] + boxes[k + 3]) / 2, (boxes[k + 1] + boxes[k + 4]) / 2, (boxes[k + 2] + boxes[k + 5]) / 2).project(camera);
+      const x = Math.floor((point.x + 1) * innerWidth / 2), y = Math.floor((1 - point.y) * innerHeight / 2);
+      if (!(point.z >= -1 && point.z <= 1 && x >= 0 && y >= 0 && x < innerWidth && y < innerHeight)) continue;
+      const key = y * innerWidth + x;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (query(false, [x, y]).hit) targets.push([x, y]);
+    }
+    for (const pixel of grid.slice(0, 9)) for (const mode of [false, true]) query(mode, pixel);
+    const measure = (pixels) => {
+      const full = [], bounded = [];
+      let hits = 0;
+      for (let i = 0; i < 3 * pixels.length; i++) {
+        const pixel = pixels[i % pixels.length];
+        const a = query(i % 2 !== 0, pixel), b = query(i % 2 === 0, pixel);
+        const [before, after] = i % 2 ? [b, a] : [a, b];
+        if (before.hit?.element !== after.hit?.element || (before.hit && !before.hit.point.equals(after.hit.point)))
+          throw new Error(`Picking with bounds changed the hit at pixel ${pixel.join(', ')}`);
+        if (before.hit) hits++;
+        full.push(before);
+        bounded.push(after);
+      }
+      return { samples: full.length, hits, full, bounded };
+    };
+    const result = { grid: measure(grid), hits: measure(targets) };
+    scene._pickBounds = true;
+    picker._last = null;
+    return result;
+  });
+  const summarize = (records) => ({
+    p50Ms: median(records.map((r) => r.time)), p95Ms: quantile(records.map((r) => r.time), 0.95),
+    medianTriangles: median(records.map((r) => r.triangles)),
+  });
+  return Object.fromEntries(Object.entries(groups).map(([name, { samples, hits, full, bounded }]) => [
+    name, { samples, hits, full: summarize(full), bounded: summarize(bounded) },
+  ]));
 }
 
 // Programmatic orbit about the vertical axis through the target (~46°/s) for `ms`; returns per frame the interval, the
@@ -308,9 +366,15 @@ for (const run of RUNS) {
         writeFileSync(path.join(OUT, `profile-${LABEL}-${name}.cpuprofile`), JSON.stringify(profile));
       }
       save(result);
-      if (!STARTUP_ONLY) console.log(table(result));
+      if (result.pickBounds) console.log(JSON.stringify({ model: result.model, renderer: result.renderer, ...result.pickBounds }));
+      else if (!STARTUP_ONLY) console.log(table(result));
     };
     if (STARTUP_ONLY) {
+      await finish();
+      return;
+    }
+    if (PICK_BOUNDS_ONLY) {
+      result.pickBounds = await comparePickBounds(page);
       await finish();
       return;
     }
@@ -445,7 +509,14 @@ test.afterAll(() => {
     ['startup blocking ms (over 50 ms)', (r) => n(r.startup.blockingMs)],
     ['sampled peak startup JS heap MiB', (r) => n(r.startup.sampledHeapPeakMiB, 0)],
   ];
-  const rows = STARTUP_ONLY ? startupRows : [
+  const rows = STARTUP_ONLY ? startupRows : PICK_BOUNDS_ONLY ? [
+    ...['grid', 'hits'].flatMap((group) => ['full', 'bounded'].map((mode) => [
+      `${group} ${mode} pick ms, p50 / p95`, (r) => {
+        const sample = r.pickBounds[group][mode];
+        return `${n(sample.p50Ms)} / ${n(sample.p95Ms)}`;
+      },
+    ])),
+  ] : [
     ...startupRows,
     ['full-detail still frame ms, median (max of 10)', (r) => still(r.stillFrame)],
     ['draw calls (still frame)', (r) => String(r.stillFrame?.calls ?? '—')],
