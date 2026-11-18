@@ -46,6 +46,44 @@ test('building renders the model and counts elements', async ({ page }) => {
   expect(requests).toEqual([]);
 });
 
+for (const pickFloat of [true, false]) {
+  test(`a fitting 25 cm away remains drawable and pickable in a 10 km model (pickFloat: ${pickFloat})`, async ({ page }) => {
+    await page.addInitScript((value) => { window.IOVIEWER_TEST = { pickFloat: value }; }, pickFloat);
+    const { errors } = await open(page, 'depth-range');
+    const expected = await page.evaluate(() => {
+      const { controls, scene } = window.__ioviewer;
+      const box = scene.elementBox(0);
+      const target = box.getCenter(box.min.clone());
+      controls._set(target.clone().setY(box.min.y - 0.25), target);
+      return box.min.y;
+    });
+    const hit = await page.evaluate(() => {
+      const { picker, camera } = window.__ioviewer;
+      const pick = picker.pick(innerWidth / 2, innerHeight / 2);
+      const logDepth = picker.renderer.capabilities.logarithmicDepthBuffer;
+      return { near: camera.near, far: camera.far, logDepth, element: pick?.element, y: pick?.point.y };
+    });
+    expect(hit.far).toBeGreaterThan(5000);
+    expect(hit.near).toBeLessThan(0.25);
+    expect(hit.logDepth).toBe(true);
+    expect(hit.element).toBe(0);
+    expect(hit.y).toBeCloseTo(expected, 3);
+    await renderedCenter(page);
+
+    const farHit = await page.evaluate(() => {
+      const { controls, picker, scene } = window.__ioviewer;
+      const box = scene.elementBox(2);
+      const target = box.getCenter(box.min.clone());
+      controls._set(target.clone().setY(box.min.y - 4876.33), target);
+      const pick = picker.pick(innerWidth / 2, innerHeight / 2);
+      return { element: pick?.element, surfaceError: pick ? pick.point.y - box.min.y : Infinity };
+    });
+    expect(farHit.element).toBe(2);
+    expect(farHit.surfaceError).toBeCloseTo(0, 2);
+    expect(errors).toEqual([]);
+  });
+}
+
 test('empty document shows "no geometry"', async ({ page }) => {
   const { errors, requests } = await open(page, 'empty');
 

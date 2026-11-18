@@ -3,8 +3,26 @@ import { isClick, orbit, zoomTowards, wheelZoomFactor, boxSelectMode, interpolat
 
 const ORBIT_SPEED = 0.005; // radians per pixel
 const DEFAULT_DIRECTION = new THREE.Vector3(1, -1, 0.8).normalize();
+const NEAR_MIN = 0.01; // metres
+const FAR_MARGIN = 1.05;
+const LINEAR_DEPTH_RATIO = 5000;
 
 const detail = (type, d) => new CustomEvent(type, { detail: d });
+
+export function needsLogarithmicDepth({ bbox, grids }) {
+  const finitePoint = (p) => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
+  if (!finitePoint(bbox?.min) || !finitePoint(bbox?.max)) return true;
+  const bounds = new THREE.Box3(new THREE.Vector3(...bbox.min), new THREE.Vector3(...bbox.max));
+  if (bounds.isEmpty()) return true;
+  const point = new THREE.Vector3();
+  for (const grid of grids ?? []) {
+    if (!finitePoint(grid.start) || !finitePoint(grid.end)) return true;
+    bounds.expandByPoint(point.fromArray(grid.start));
+    bounds.expandByPoint(point.fromArray(grid.end));
+  }
+  // Inside the bounding sphere, its diameter bounds far. Keep early depth testing when this fits the linear range.
+  return bounds.getSize(point).length() * FAR_MARGIN > NEAR_MIN * LINEAR_DEPTH_RATIO;
+}
 
 // Navisworks-style camera: left drag orbits (or pans), middle/right drag pans, wheel zooms to the cursor.
 // Pointer coordinates in events and in `pick(x, y)` are client pixels; `pick` returns a Vector3 or null.
@@ -48,7 +66,13 @@ export class NavigationControls extends EventTarget {
     const next = kind === 'perspective' ? this._perspective : this._orthographic;
     const previous = this.camera;
     if (next === previous) return;
+    this._stopAnimation();
     next.position.copy(previous.position);
+    if (previous.isOrthographicCamera) {
+      // Match the apparent scale at the target when going back to a perspective camera.
+      next.position.sub(this.target).divideScalar(previous.zoom).add(this.target);
+    }
+    next.zoom = 1;
     next.quaternion.copy(previous.quaternion);
     next.up.copy(previous.up);
     previous.parent?.add(next);
@@ -72,9 +96,11 @@ export class NavigationControls extends EventTarget {
     }
     const sphere = this._rangeSphere();
     if (sphere) {
-      const toCentre = cam.position.distanceTo(sphere.center);
-      cam.far = (toCentre + sphere.radius) * 1.05;
-      cam.near = Math.max((toCentre - sphere.radius) * 0.95, cam.far / 5000);
+      const toCentre = sphere.center.clone().sub(cam.position);
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+      cam.far = Math.max(1e-6, (toCentre.length() + sphere.radius) * FAR_MARGIN);
+      const nearest = toCentre.dot(forward) - sphere.radius;
+      cam.near = Math.max(nearest * 0.95, Math.min(NEAR_MIN, cam.far / 2));
     }
     cam.updateProjectionMatrix();
     this.dispatchEvent(new Event('change'));
@@ -120,7 +146,10 @@ export class NavigationControls extends EventTarget {
     if (direction.lengthSq() < 1e-12) direction.copy(DEFAULT_DIRECTION);
     const position = direction.normalize().multiplyScalar(distance).add(sphere.center);
     if (animate) this.animateTo({ position, target: sphere.center });
-    else this._set(position, sphere.center);
+    else {
+      this.camera.zoom = 1;
+      this._set(position, sphere.center);
+    }
   }
 
   zoomToBox(box) {
@@ -128,14 +157,17 @@ export class NavigationControls extends EventTarget {
   }
 
   // Swings the camera round the target (see interpolateView); `up` stays +Z, so it is accepted and ignored.
-  animateTo({ position, target }, ms = 400) {
+  animateTo({ position, target, zoom = 1 }, ms = 400) {
     this._stopAnimation();
     const from = { position: this.camera.position.clone(), target: this.target.clone() };
     const to = { position: position ?? from.position, target: target ?? from.target };
+    const fromZoom = this.camera.zoom;
     const start = performance.now();
     const step = (now) => {
       const k = Math.min((now - start) / ms, 1);
-      const r = interpolateView(from, to, k * k * (3 - 2 * k));
+      const eased = k * k * (3 - 2 * k);
+      const r = interpolateView(from, to, eased);
+      if (this.camera.isOrthographicCamera) this.camera.zoom = THREE.MathUtils.lerp(fromZoom, zoom, eased);
       this._set(r.position, r.target);
       this._animation = k < 1 ? requestAnimationFrame(step) : 0;
     };
@@ -198,7 +230,7 @@ export class NavigationControls extends EventTarget {
     const height = Math.max(this.dom.clientHeight, 1);
     const worldPerPixel = cam.isPerspectiveCamera
       ? (2 * cam.position.distanceTo(this.target) * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))) / height
-      : (cam.top - cam.bottom) / height;
+      : (cam.top - cam.bottom) / cam.zoom / height;
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
     // The model follows the hand, so the camera moves the other way.
@@ -257,13 +289,29 @@ export class NavigationControls extends EventTarget {
     e.preventDefault();
     if (e.deltaY === 0) return; // a horizontal swipe or Shift+wheel does not zoom
     this._stopAnimation();
+    const factor = wheelZoomFactor(e.deltaY, e.deltaMode, this.dom.clientHeight);
+    const cam = this.camera;
+    if (cam.isOrthographicCamera) {
+      const { left, top, width, height } = this.dom.getBoundingClientRect();
+      if (!width || !height) return;
+      const zoom = THREE.MathUtils.clamp(cam.zoom / factor, 1e-6, 1e6);
+      // Translate in the view plane by the change in the cursor offset. Depth and the pivot distance stay fixed.
+      const shift = new THREE.Vector3(
+        (2 * (e.clientX - left) / width - 1) * cam.right,
+        (1 - 2 * (e.clientY - top) / height) * cam.top,
+        0,
+      ).multiplyScalar(1 / cam.zoom - 1 / zoom).applyQuaternion(cam.quaternion);
+      cam.zoom = zoom;
+      this._set(cam.position.clone().add(shift), this.target.clone().add(shift));
+      return;
+    }
     // One pick per animation frame: notches arriving within a frame zoom towards the same point.
     if (!this._wheelPick) {
       this._wheelPick = { point: this.pick(e.clientX, e.clientY) };
       requestAnimationFrame(() => (this._wheelPick = null));
     }
     const point = this._wheelPick.point ?? this.target;
-    const r = zoomTowards(this.camera.position, this.target, point, wheelZoomFactor(e.deltaY, e.deltaMode, this.dom.clientHeight));
+    const r = zoomTowards(cam.position, this.target, point, factor);
     this._set(r.position, r.target);
   }
 }

@@ -259,6 +259,10 @@ export class ViewCube {
   _look(direction) {
     const { controls } = this;
     const distance = controls.camera.position.distanceTo(controls.target);
-    controls.animateTo({ position: direction.clone().multiplyScalar(distance).add(controls.target), target: controls.target.clone() });
+    controls.animateTo({
+      position: direction.clone().multiplyScalar(distance).add(controls.target),
+      target: controls.target.clone(),
+      zoom: controls.camera.zoom,
+    });
   }
 }

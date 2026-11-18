@@ -7,14 +7,22 @@ import { SLOT_DECODE, SLOT_PARS } from './slotShader.js';
 const VERTEX = /* glsl */ `
 #include <common>
 ${SLOT_PARS}
+#include <logdepthbuf_pars_vertex>
 #include <clipping_planes_pars_vertex>
 varying vec3 vPos;
 varying vec2 vSlot;
+#ifdef IO_PICK_DEPTH
+varying float vViewDepth;
+#endif
 void main() {
   ${SLOT_DECODE}
   vec3 transformed = slotPosition;
   #include <project_vertex>
+  #include <logdepthbuf_vertex>
   #include <clipping_planes_vertex>
+  #ifdef IO_PICK_DEPTH
+  vViewDepth = -mvPosition.z;
+  #endif
   vec4 wp = vec4( transformed, 1.0 );
   #ifdef USE_INSTANCING
   wp = instanceMatrix * wp;
@@ -24,18 +32,24 @@ void main() {
   if ( state.a < 0.5 ) gl_Position = vec4( 0.0, 0.0, 2.0, 1.0 );
 }`;
 
-// IO_PICK_RGBA8: slot + 1 as 4 bytes, little-endian; IO_PICK_DEPTH: the fragment depth packed into 4 bytes.
+// IO_PICK_RGBA8: slot + 1 as 4 bytes; IO_PICK_DEPTH: the bits of the view-space depth, both little-endian.
 const FRAGMENT = /* glsl */ `
 #include <common>
-#include <packing>
+#include <logdepthbuf_pars_fragment>
 #include <clipping_planes_pars_fragment>
 varying vec3 vPos;
 varying vec2 vSlot;
+#ifdef IO_PICK_DEPTH
+varying float vViewDepth;
+#endif
 void main() {
   #include <clipping_planes_fragment>
+  #include <logdepthbuf_fragment>
   float id = floor( vSlot.x + 0.5 ) * 4096.0 + floor( vSlot.y + 0.5 ) + 1.0;
   #if defined( IO_PICK_DEPTH )
-  gl_FragColor = packDepthToRGBA( gl_FragCoord.z );
+  uint bits = floatBitsToUint( vViewDepth );
+  uvec4 bytes = ( uvec4( bits ) >> uvec4( 0u, 8u, 16u, 24u ) ) & 255u;
+  gl_FragColor = vec4( bytes ) / 255.0;
   #elif defined( IO_PICK_RGBA8 )
   gl_FragColor = vec4( mod( id, 256.0 ), mod( floor( id / 256.0 ), 256.0 ), mod( floor( id / 65536.0 ), 256.0 ), floor( id / 16777216.0 ) ) / 255.0;
   #else
@@ -117,10 +131,15 @@ export class Picker {
     if (slot < 0) return null;
     const element = this.scene.slotElement(slot);
     if (this._float) return { element, point: new THREE.Vector3(pixel[0], pixel[1], pixel[2]) };
-    const [r, g, b, a] = this._render(this._depthMaterial, x, y, rect);
-    const depth = r / 256 + g / 65536 + b / 16777216 + a / 255 / 16777216; // three's unpackRGBAToDepth on the bytes
-    const ndc = new THREE.Vector3(((x + 0.5) / rect.width) * 2 - 1, 1 - ((y + 0.5) / rect.height) * 2, depth * 2 - 1);
-    return { element, point: ndc.unproject(this.camera) };
+    const bytes = this._render(this._depthMaterial, x, y, rect);
+    const depth = new DataView(bytes.buffer).getFloat32(0, true);
+    // Recover the world point from view-space depth, independent of the depth buffer mapping.
+    const camera = this.camera;
+    const point = new THREE.Vector3(((x + 0.5) / rect.width) * 2 - 1, 1 - ((y + 0.5) / rect.height) * 2, -1)
+      .applyMatrix4(camera.projectionMatrixInverse);
+    if (camera.isPerspectiveCamera) point.multiplyScalar(-depth / point.z);
+    else point.z = -depth;
+    return { element, point: point.applyMatrix4(camera.matrixWorld) };
   }
 
   // Draws the model with `material` into the 1x1 target at pixel (x, y) and reads it back.

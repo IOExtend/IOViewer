@@ -2,9 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { isClick, orbit, zoomTowards, boxSelectMode } from '../../src/nav/math.js';
+import { needsLogarithmicDepth } from '../../src/nav/controls.js';
 
 const v = (x, y, z) => new THREE.Vector3(x, y, z);
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
+
+test('logarithmic depth covers a wide model or grids that extend beyond its bounds', () => {
+  const bbox = { min: [0, 0, 0], max: [47, 0, 0] };
+  assert.equal(needsLogarithmicDepth({ bbox, grids: null }), false);
+  assert.equal(needsLogarithmicDepth({ bbox: { ...bbox, max: [48, 0, 0] } }), true);
+  assert.equal(needsLogarithmicDepth({ bbox, grids: [{ start: [-2, 0, 0], end: [40, 0, 0] }] }), true);
+  assert.equal(needsLogarithmicDepth({}), true);
+});
 
 test('isClick uses a 4 px threshold', () => {
   assert.equal(isClick({ x: 0, y: 0 }, { x: 3, y: 0 }), true);
