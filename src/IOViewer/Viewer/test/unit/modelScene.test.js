@@ -191,6 +191,21 @@ test('isolate keeps only the element\'s slots, element-less slots hidden; showAl
   assert.deepEqual(alpha(), [255, 255, 255, 255]);
 });
 
+test('saved element and link visibility replace their own layers and leave other layers intact', () => {
+  const scene = model([{ x: 0 }, { x: 2 }, { x: 4 }, { x: 6, element: -1 }]);
+  scene.setLayerHidden('schedule', [1], true);
+  scene.isolate([1]);
+  scene.setHiddenElements([0]);
+  assert.deepEqual([...scene.visibilityState()], [0, 0, 1, 1]);
+  const emitted = [];
+  scene.root.addEventListener('change', () => emitted.push([...scene.visibilityState()]));
+  scene.replaceLayerHidden('links', [2]);
+  scene.replaceLayerHidden('links', [0]);
+  scene.setHiddenElements([]);
+  scene.replaceLayerHidden('links', []);
+  assert.deepEqual(emitted, [[0, 0, 0, 1], [0, 0, 1, 1], [0, 0, 1, 1], [1, 0, 1, 1]]);
+});
+
 test('every chunk geometry carries its octahedral normals in the `normal` attribute (three shades smooth)', () => {
   const scene = model([{ x: 0 }, { x: 40 }], { options: { chunkVertices: 36 } });
   assert.equal(scene.memory().chunks, 2);

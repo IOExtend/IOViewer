@@ -6,7 +6,7 @@ namespace IOViewer.Exporters;
 
 /// <summary>
 /// Writes a <see cref="ViewerDocument"/> as viewer JSON: <c>{ "Kind": "ioviewer", "Format": 2, "Scene": {...},
-/// "SectionPlanes", "SectionBox", "HiddenModelKeys" }</c>, with the scene in the encoding of scene JSON.
+/// "SectionPlanes", "SectionBox", "HiddenModelKeys", "ViewpointStates" }</c>, with the scene in the encoding of scene JSON.
 /// </summary>
 /// <remarks>A scene alone is written as a scene file with <see cref="SceneJson"/>.</remarks>
 public static class JsonViewerExporter
@@ -67,6 +67,7 @@ internal sealed class ViewerJsonFile
     public List<ViewerSectionPlane> SectionPlanes { get; set; } = [];
     public ViewerSectionBox? SectionBox { get; set; }
     public List<string> HiddenModelKeys { get; set; } = [];
+    public Dictionary<string, ViewerViewpointState>? ViewpointStates { get; set; }
 
     public static ViewerJsonFile From(ViewerDocument doc) => new()
     {
@@ -74,6 +75,7 @@ internal sealed class ViewerJsonFile
         SectionPlanes = doc.SectionPlanes,
         SectionBox = doc.SectionBox,
         HiddenModelKeys = doc.HiddenModelKeys,
+        ViewpointStates = doc.ViewpointStates is { Count: > 0 } ? doc.ViewpointStates : null,
     };
 
     public ViewerDocument ToDocument() => new(Scene)
@@ -81,5 +83,6 @@ internal sealed class ViewerJsonFile
         SectionPlanes = SectionPlanes,
         SectionBox = SectionBox,
         HiddenModelKeys = HiddenModelKeys,
+        ViewpointStates = ViewpointStates ?? [],
     };
 }

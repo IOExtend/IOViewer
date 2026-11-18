@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadModelData, ModelDataError } from '../../src/data.js';
+import { loadModelData, ModelDataError, readModelMeta } from '../../src/data.js';
 
 const emptyMeta = {
   format: 2,
@@ -16,6 +16,21 @@ const emptyMeta = {
   },
 };
 const emptyMetaBlock = { textContent: JSON.stringify(emptyMeta) };
+
+test('checks optional saved viewpoint state and explicit linked-file members', () => {
+  const camera = { position: [2, 2, 2], target: [0, 0, 0] };
+  const read = (meta) => readModelMeta({ getElementById: () => ({ textContent: JSON.stringify(meta) }) });
+  const meta = { ...emptyMeta, elements: [{}], viewpoints: [{ camera }], linkedFiles: [{ key: 'link', members: [0] }] };
+  assert.deepEqual(read(meta), meta);
+  for (const invalid of [
+    { ...meta, viewpoints: [{ camera, hiddenElements: [1] }] },
+    { ...meta, viewpoints: [{ camera, hiddenModelKeys: [1] }] },
+    { ...meta, viewpoints: [{ camera, sections: { planes: [{ normal: [0, 0, 0], offset: 1 }] } }] },
+    { ...meta, linkedFiles: [{ key: 'link', members: [-1] }] },
+  ]) {
+    assert.throws(() => read(invalid), ModelDataError);
+  }
+});
 
 // A data block as the DOM has it: its text in text nodes (`pieces` of it, one node each), read with substringData.
 function textBlock(text, pieces = 1) {

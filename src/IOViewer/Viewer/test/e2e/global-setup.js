@@ -83,6 +83,32 @@ export default function globalSetup() {
   exportHtml(widePath, 'wide-ids');
 
   const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
+  const savedViews = structuredClone(building);
+  savedViews.Scene.Models[2].Name = savedViews.Scene.Models[1].Name;
+  savedViews.Scene.Models[2].Path = savedViews.Scene.Models[1].Path;
+  const elementId = (name) => savedViews.Scene.Elements.find((element) => element.Name === name).Id;
+  const [planeView, boxView, cameraOnly, clearView] = savedViews.Scene.Viewpoints;
+  planeView.Id = 'review-plane';
+  boxView.Id = 'review-box';
+  clearView.Id = 'clear-review';
+  savedViews.Scene.Viewpoints = [planeView, boxView, cameraOnly, clearView];
+  savedViews.ViewpointStates = {
+    [planeView.Id]: {
+      SectionPlanes: [{ Axis: 3, Normal: [0, 0, 1], Offset: 2, Enabled: true }],
+      HiddenElementIds: [elementId('Ground Slab')],
+      HiddenModelKeys: ['MEP.rvt'],
+    },
+    [boxView.Id]: {
+      SectionBox: { Min: [17.6, 5.6, -0.1], Max: [18.4, 6.4, 3.5], Inverted: true, Enabled: true },
+      HiddenElementIds: [elementId('Column A1 Level 1')],
+      HiddenModelKeys: [],
+    },
+    [clearView.Id]: { SectionPlanes: [], HiddenElementIds: [], HiddenModelKeys: [] },
+  };
+  const savedViewsPath = path.join(viewerDir, 'test-results', 'building-saved-views.json');
+  writeFileSync(savedViewsPath, JSON.stringify(savedViews));
+  exportHtml(savedViewsPath, 'building-saved-views');
+
   const noGrids = path.join(results, 'building-no-grids.json');
   writeFileSync(noGrids, JSON.stringify({ ...building, Scene: { ...building.Scene, Grids: [] } }));
   exportHtml(noGrids, 'building-no-grids');

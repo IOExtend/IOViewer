@@ -166,11 +166,18 @@ export class ModelScene {
     this._changed('visibility');
   }
 
-  isolate(indices) {
-    const keep = new Uint8Array(this._visible.length);
-    for (const index of indices) {
-      for (const i of this.instancesOf(index)) keep[i] = 1;
+  // A saved view replaces the user's layer, including when it supplies an empty list.
+  setHiddenElements(indices) {
+    const hidden = this._instanceMask(indices);
+    for (let i = 0; i < hidden.length; i++) {
+      const visible = hidden[i] === 0;
+      if (visible !== (this._visible[i] === 1)) this._setInstanceVisible(i, visible);
     }
+    this._changed('visibility');
+  }
+
+  isolate(indices) {
+    const keep = this._instanceMask(indices);
     for (let i = 0; i < keep.length; i++) this._setInstanceVisible(i, keep[i] === 1);
     this._changed('visibility');
   }
@@ -220,6 +227,24 @@ export class ModelScene {
     for (let i = 0; i < flags.length; i++) this._setLayerFlag(flags, i, false);
     this._layers.delete(layer);
     this._changed('visibility');
+  }
+
+  // Replace a whole named layer before notifying listeners that use the new visibility.
+  replaceLayerHidden(layer, indices) {
+    if (!indices.length) return this.clearLayer(layer);
+    const hidden = this._instanceMask(indices);
+    let flags = this._layers.get(layer);
+    if (!flags) this._layers.set(layer, (flags = new Uint8Array(this._visible.length)));
+    for (let i = 0; i < hidden.length; i++) this._setLayerFlag(flags, i, hidden[i] === 1);
+    this._changed('visibility');
+  }
+
+  _instanceMask(indices) {
+    const mask = new Uint8Array(this._visible.length);
+    for (const index of indices) {
+      for (const i of this.instancesOf(index)) mask[i] = 1;
+    }
+    return mask;
   }
 
   // Which instances are drawn now (1 = drawn), all layers combined.

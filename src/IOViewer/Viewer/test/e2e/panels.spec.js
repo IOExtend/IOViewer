@@ -150,6 +150,61 @@ test.describe('clashes', () => {
 });
 
 test.describe('views', () => {
+  test('clicking views and running the tour restore clipping and independent visibility', async ({ page }) => {
+    const errors = await open(page, 'building-saved-views');
+    const slab = await indexOf(page, 'Ground Slab');
+    const duct = await indexOf(page, 'Supply Duct SA-1');
+    const column = await indexOf(page, 'Column A1 Level 1');
+    const twin = await indexOf(page, 'Column Twin');
+    await page.evaluate(({ twin, column }) => {
+      const { scene } = window.__ioviewer;
+      scene.setLayerHidden('test-schedule', [twin], true);
+      scene.setVisible([column], false);
+    }, { twin, column });
+
+    const views = sidePanel(page, 'views');
+    const rows = views.locator('.ioviewer-view');
+    const [structure, mep] = [0, 1].map((index) => sidePanel(page, 'links').getByRole('checkbox').nth(index));
+    const state = () => page.evaluate(({ slab, duct, column, twin }) => {
+      const { sections, scene } = window.__ioviewer;
+      const { planes, intersection } = sections.clipping();
+      return {
+        mode: sections.mode,
+        planes: planes.length,
+        intersection,
+        visible: [slab, duct, column, twin].map(i => scene.isVisible(i)),
+      };
+    }, { slab, duct, column, twin });
+    const first = { mode: 'planes', planes: 1, intersection: false, visible: [false, false, true, false] };
+    const second = { mode: 'box', planes: 6, intersection: true, visible: [true, true, false, false] };
+
+    await rail(page, 'views').click();
+    await rows.nth(0).click();
+    expect(await state()).toEqual(first);
+    await rail(page, 'links').click();
+    await expect(structure).toBeChecked();
+    await expect(mep).not.toBeChecked();
+    await rail(page, 'views').click();
+    await rows.nth(1).click();
+    expect(await state()).toEqual(second);
+    await rail(page, 'links').click();
+    await expect(structure).toBeChecked();
+    await expect(mep).toBeChecked();
+
+    await rail(page, 'views').click();
+    await rows.nth(2).click();
+    expect(await state()).toEqual(second);
+    await rows.nth(3).click();
+    expect(await state()).toEqual({ mode: 'off', planes: 0, intersection: false, visible: [true, true, true, false] });
+
+    const tour = views.locator('.ioviewer-tour');
+    await tour.click();
+    expect(await state()).toEqual(first);
+    await expect.poll(state, { timeout: 7000 }).toEqual(second);
+    await tour.click();
+    expect(errors).toEqual([]);
+  });
+
   test('a view flies the camera there and switches back to perspective', async ({ page }) => {
     const errors = await open(page);
     const { viewpoints } = await meta(page);

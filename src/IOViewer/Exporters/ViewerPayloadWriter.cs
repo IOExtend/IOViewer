@@ -43,8 +43,8 @@ internal sealed class ViewerPayloadWriter
     private readonly List<uint> _instanceMaterial = [];
     private readonly List<int> _instanceElement = [];
     private readonly List<float> _instanceMatrix = [];
-    private readonly List<(string Axis, Vector3d Normal, double Offset, bool Flipped)> _sectionPlanes = [];
-    private (BoundingBox3d Bounds, bool Inverted)? _sectionBox;
+    private readonly Dictionary<string, PreparedViewpoint> _viewpointStates = new(StringComparer.Ordinal);
+    private SectionState _sections;
     private BoundingBox3d _bounds;
     private Vector3d _rtcOffset;
     private int _drawable;
@@ -64,15 +64,17 @@ internal sealed class ViewerPayloadWriter
     public static ViewerPayloadWriter Create(ViewerDocument doc, HtmlViewerOptions options)
     {
         var writer = new ViewerPayloadWriter(doc, options);
-        writer.Build();
-        writer.BuildSections(doc);
+        var elementIndex = writer.Build();
+        writer._sections = writer.BuildSections(doc.SectionPlanes, doc.SectionBox);
+        writer.BuildViewpointStates(doc.ViewpointStates, elementIndex);
         writer.ValidateMetadata();
         return writer;
     }
 
-    private void BuildSections(ViewerDocument doc)
+    private SectionState BuildSections(List<ViewerSectionPlane>? planes, ViewerSectionBox? sectionBox)
     {
-        foreach (var plane in doc.SectionPlanes ?? [])
+        var output = new List<(string Axis, Vector3d Normal, double Offset, bool Flipped)>();
+        foreach (var plane in planes ?? [])
         {
             if (plane is not { Enabled: true }) continue;
             var (axis, normal) = plane.Axis switch
@@ -91,15 +93,47 @@ internal sealed class ViewerPayloadWriter
             // n·p = offset in scene coordinates, and p = rtcPoint + rtcOffset.
             double offset = plane.Offset - Vector3d.Dot(normal, _rtcOffset);
             if (!double.IsFinite(offset)) throw new InvalidDataException("The section plane offset must be finite in viewer coordinates.");
-            _sectionPlanes.Add((axis, normal, offset, plane.Inverted));
-            if (_sectionPlanes.Count == MaxSectionPlanes) break;
+            output.Add((axis, normal, offset, plane.Inverted));
+            if (output.Count == MaxSectionPlanes) break;
         }
 
-        if (doc.SectionBox is not { Enabled: true } box) return;
+        if (sectionBox is not { Enabled: true } box) return new(output, null);
         var bounds = new BoundingBox3d(box.Min - _rtcOffset, box.Max - _rtcOffset);
         if (bounds.IsEmpty || !IsFinite(bounds.Min) || !IsFinite(bounds.Max))
             throw new InvalidDataException("The section box must have finite bounds with Min at or below Max on each axis.");
-        _sectionBox = (bounds, box.Inverted);
+        return new(output, (bounds, box.Inverted));
+    }
+
+    private void BuildViewpointStates(Dictionary<string, ViewerViewpointState>? states, Dictionary<long, int> elementIndex)
+    {
+        if (!_options.IncludeViewpoints || states is not { Count: > 0 }) return;
+
+        var linkedKeys = _scene.Models.Skip(1).Select(model => model.Key).ToHashSet(StringComparer.Ordinal);
+        foreach (var view in _scene.Viewpoints)
+        {
+            if (view.Id is not { } id || !states.TryGetValue(id, out var state)) continue;
+            if (state is null) throw new InvalidDataException($"Viewpoint '{id}' has a null state.");
+            if (_viewpointStates.ContainsKey(id))
+                throw new InvalidDataException($"Viewpoint state '{id}' matches more than one saved camera.");
+
+            SectionState? sections = state.SectionPlanes is not null || state.SectionBox is not null
+                ? BuildSections(state.SectionPlanes, state.SectionBox)
+                : null;
+            int[]? hiddenElements = state.HiddenElementIds?.Select(elementId =>
+                elementIndex.TryGetValue(elementId, out int index)
+                    ? index
+                    : throw new InvalidDataException($"Viewpoint '{id}' references unknown element {elementId}.")).ToArray();
+            string[]? hiddenModels = state.HiddenModelKeys?.ToArray();
+            if (hiddenModels?.Any(key => !linkedKeys.Contains(key)) == true)
+                throw new InvalidDataException($"Viewpoint '{id}' references an unknown linked model or the host.");
+            _viewpointStates.Add(id, new(sections, hiddenElements, hiddenModels));
+        }
+
+        foreach (string id in states.Keys)
+        {
+            if (!_viewpointStates.ContainsKey(id))
+                throw new InvalidDataException($"Viewpoint state '{id}' has no saved camera.");
+        }
     }
 
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
@@ -154,7 +188,7 @@ internal sealed class ViewerPayloadWriter
         return scene.Instances.Count(i => topology.TryGetValue(i.GeometryId, out var t) && t != SceneTopology.Triangles);
     }
 
-    private void Build()
+    private Dictionary<long, int> Build()
     {
         var geometries = new Dictionary<int, SceneGeometry>();
         foreach (var geometry in _scene.Geometries)
@@ -263,6 +297,7 @@ internal sealed class ViewerPayloadWriter
             _blob.Add(CollectionsMarshal.AsSpan(_instanceMaterial)),
             _blob.Add(CollectionsMarshal.AsSpan(_instanceElement)),
             _blob.Add(CollectionsMarshal.AsSpan(_instanceMatrix)));
+        return elementIndex;
     }
 
     private static void CheckIndices(IReadOnlyList<int> indices, int vertexCount, string owner)
@@ -699,7 +734,7 @@ internal sealed class ViewerPayloadWriter
         }
         w.WriteEndArray();
 
-        WriteSections(w);
+        if (_sections.Planes.Count > 0 || _sections.Box is not null) WriteSections(w, _sections);
         WriteViewpoints(w);
         WriteGrids(w);
         WriteTimeLiner(w);
@@ -709,12 +744,11 @@ internal sealed class ViewerPayloadWriter
         w.WriteEndObject();
     }
 
-    private void WriteSections(Utf8JsonWriter w)
+    private static void WriteSections(Utf8JsonWriter w, SectionState sections)
     {
-        if (_sectionPlanes.Count == 0 && _sectionBox is null) return;
         w.WriteStartObject("sections");
         w.WriteStartArray("planes");
-        foreach (var plane in _sectionPlanes)
+        foreach (var plane in sections.Planes)
         {
             w.WriteStartObject();
             w.WriteString("axis", plane.Axis);
@@ -724,7 +758,7 @@ internal sealed class ViewerPayloadWriter
             w.WriteEndObject();
         }
         w.WriteEndArray();
-        if (_sectionBox is { } box)
+        if (sections.Box is { } box)
         {
             WriteBox(w, "box", box.Bounds, Vector3d.Zero);
             w.WriteBoolean("cutInside", box.Inverted);
@@ -747,6 +781,17 @@ internal sealed class ViewerPayloadWriter
                 // A projection this version does not know is perspective (the enum is open).
                 w.WriteString("projection", vp.Camera.Projection == SceneProjection.Orthographic ? "orthographic" : "perspective");
                 w.WriteEndObject();
+                if (vp.Id is { } id && _viewpointStates.TryGetValue(id, out var state))
+                {
+                    if (state.Sections is { } sections) WriteSections(w, sections);
+                    if (state.HiddenElements is { } elements) WriteIndices(w, "hiddenElements", elements);
+                    if (state.HiddenModels is { } models)
+                    {
+                        w.WriteStartArray("hiddenModelKeys");
+                        foreach (string key in models) w.WriteStringValue(key);
+                        w.WriteEndArray();
+                    }
+                }
                 w.WriteEndObject();
             }
         }
@@ -827,12 +872,23 @@ internal sealed class ViewerPayloadWriter
     private void WriteLinkedFiles(Utf8JsonWriter w)
     {
         w.WriteStartArray("linkedFiles");
+        if (_scene.Models.Count < 2)
+        {
+            w.WriteEndArray();
+            return;
+        }
+        int host = _scene.Models[0].Id;
+        var members = _scene.Elements.Select((element, index) => (element.ModelId, index))
+            .Where(member => member.ModelId != host)
+            .ToLookup(member => member.ModelId, member => member.index);
         foreach (var model in _scene.Models.Skip(1))
         {
             w.WriteStartObject();
+            w.WriteString("key", model.Key);
             w.WriteString("name", model.Name);
             w.WriteString("path", model.Path ?? string.Empty);
             w.WriteBoolean("visible", !_hiddenModels.Contains(model.Key));
+            WriteIndices(w, "members", members[model.Id]);
             w.WriteEndObject();
         }
         w.WriteEndArray();
@@ -889,6 +945,17 @@ internal sealed class ViewerPayloadWriter
         else w.WriteNullValue();
     }
 
+    private static void WriteIndices(Utf8JsonWriter w, string name, IEnumerable<int> values)
+    {
+        w.WriteStartArray(name);
+        foreach (int index in values)
+        {
+            w.WriteNumberValue(index);
+            FlushIfLarge(w);
+        }
+        w.WriteEndArray();
+    }
+
     private static void WriteVector(Utf8JsonWriter w, string name, Vector3d v)
     {
         if (!IsFinite(v)) throw new InvalidDataException($"The '{name}' vector is not finite in viewer coordinates.");
@@ -912,6 +979,11 @@ internal sealed class ViewerPayloadWriter
     {
         if (w.BytesPending > FlushThreshold) w.Flush();
     }
+
+    private readonly record struct SectionState(
+        List<(string Axis, Vector3d Normal, double Offset, bool Flipped)> Planes, (BoundingBox3d Bounds, bool Inverted)? Box);
+
+    private sealed record PreparedViewpoint(SectionState? Sections, int[]? HiddenElements, string[]? HiddenModels);
 
     private readonly record struct MaterialKey(byte R, byte G, byte B, double Opacity, int? Texture);
 

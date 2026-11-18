@@ -25,22 +25,23 @@ export class Sections extends EventTarget {
     this.boxMode = 'keepInside';
     this.gizmoVisible = true;
     this._mode = 'off';
-    if (!initial || modelBox.isEmpty()) return;
+    if (initial) this.restore(initial);
+  }
 
-    this.planes = initial.planes.map(({ axis, normal: components, offset, flipped }) => {
+  // Replace the clipping snapshot from the same format as the initial section.
+  restore({ planes, box, cutInside }) {
+    if (this.modelBox.isEmpty()) return;
+    this.planes = planes.map(({ axis, normal: components, offset, flipped }) => {
       const normal = new THREE.Vector3().fromArray(components);
       const quaternion = new THREE.Quaternion().setFromUnitVectors(Z, normal);
       // The payload measures from the RTC origin. The controls measure from the model centre.
       return { axis, quaternion, offset: offset - normal.dot(this.center), flipped, enabled: true, rotated: false };
     });
-    if (this.planes.length) this.active = 0;
-    if (initial.box) {
-      const { min, max } = initial.box;
-      this.box = new THREE.Box3(new THREE.Vector3().fromArray(min), new THREE.Vector3().fromArray(max));
-      this.boxMode = initial.cutInside ? 'cutInside' : 'keepInside';
-    }
+    this.active = this.planes.length ? 0 : -1;
+    this.box = box ? new THREE.Box3(new THREE.Vector3().fromArray(box.min), new THREE.Vector3().fromArray(box.max)) : null;
+    this.boxMode = cutInside ? 'cutInside' : 'keepInside';
     this.gizmoVisible = false;
-    this.setMode(this.box ? 'box' : 'planes');
+    this.setMode(this.box ? 'box' : this.planes.length ? 'planes' : 'off');
   }
 
   get mode() {
