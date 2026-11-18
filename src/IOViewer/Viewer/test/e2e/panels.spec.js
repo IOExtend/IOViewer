@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { viewerDir } from './global-setup.js';
+import { LARGE_CLASHES, viewerDir } from './global-setup.js';
 
 const SHOTS = path.resolve(viewerDir, '../../../.superpowers/sdd/2026-11-11-viewer-redesign-plan');
 
@@ -37,6 +37,43 @@ const colorOf = (page, i) =>
 const css = (page, color) => page.evaluate((c) => window.__ioviewer.scene.instance(0).mesh.material.color.clone().set(c).toArray(), color);
 
 test.describe('clashes', () => {
+  test('a large clash list renders only nearby rows and keeps the chosen clash after scrolling', async ({ page }) => {
+    const errors = await open(page, 'large-clashes');
+    const panel = sidePanel(page, 'clashes');
+    const rows = panel.locator('.ioviewer-clash');
+    await expect(rows).toHaveCount(0);
+    await rail(page, 'clashes').click();
+    await expect(panel.locator('.ioviewer-clash-header').first()).toHaveText(`Large test (${LARGE_CLASHES})`);
+    const top = rows.filter({ has: page.getByText('Clash 1', { exact: true }) });
+    const bottom = rows.filter({ has: page.getByText(`Clash ${LARGE_CLASHES}`, { exact: true }) });
+    await expect(top).toBeVisible();
+    expect(await rows.count()).toBeLessThan(100);
+
+    // Tab through the viewport. When the next native button scrolls into view its neighbours are added.
+    await panel.locator('.ioviewer-clash-header').first().focus();
+    for (let i = 0; i < 45; i++) await page.keyboard.press('Tab');
+    await expect(rows.filter({ has: page.getByText('Clash 45', { exact: true }) })).toBeFocused();
+
+    const viewport = panel.locator('.ioviewer-panel-body');
+    const scrollDown = () => viewport.evaluate((body) => (body.scrollTop = body.scrollHeight));
+    await scrollDown();
+    await expect(bottom).toBeVisible();
+    await expect(panel.getByText('Tail clash', { exact: true })).toBeVisible();
+    await expect(top).toHaveCount(0);
+    expect(await rows.count()).toBeLessThan(100);
+    await bottom.click();
+    await expect(bottom).toHaveAttribute('aria-current', 'true');
+
+    await viewport.evaluate((body) => (body.scrollTop = 0));
+    await expect(bottom).toHaveCount(0);
+    expect(await page.evaluate(() => window.__ioviewer.clashes.group.visible)).toBe(true);
+    await scrollDown();
+    await expect(bottom).toHaveAttribute('aria-current', 'true');
+    await rail(page, 'clashes').click();
+    expect(await page.evaluate(() => window.__ioviewer.clashes.group.visible)).toBe(false);
+    expect(errors).toEqual([]);
+  });
+
   test('clicking Clash 1 selects the duct and the beam, flies to the point and marks it until the panel closes', async ({ page }) => {
     const errors = await open(page);
     const { clashTests } = await meta(page);

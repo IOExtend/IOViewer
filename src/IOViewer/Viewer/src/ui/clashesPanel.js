@@ -5,8 +5,11 @@ import { formatDistance } from '../tools/measure.js';
 import { icons } from './icons.js';
 import { el } from './dom.js';
 import { rowButton } from './viewsPanel.js';
+import { visibleRange } from './tree.js';
 
 const STATUSES = ['New', 'Active', 'Reviewed', 'Approved', 'Resolved'];
+const ROW_STRIDE = 27; // 26 px row plus the panel's 1 px gap
+const OVERSCAN = 8;
 const MARKER_PX = 14;
 const MIN_DISTANCE = 2; // m from the clash point
 const FALLBACK_DIRECTION = new THREE.Vector3(1, -1, 0.8).normalize();
@@ -29,11 +32,13 @@ export function mountClashes({ shell, tests, elements, scene, controls, selectio
   group.add(marker);
   group.visible = false;
   let activeRow = null;
+  let activeClash = null;
 
   function hideMarker() {
     group.visible = false;
     activeRow?.removeAttribute('aria-current');
     activeRow = null;
+    activeClash = null;
     controls.setExtraBounds('clash', null); // also renders
   }
 
@@ -58,6 +63,7 @@ export function mountClashes({ shell, tests, elements, scene, controls, selectio
     group.visible = true;
     activeRow?.removeAttribute('aria-current');
     activeRow = row;
+    activeClash = clash;
     row.setAttribute('aria-current', 'true');
     controls.setExtraBounds('clash', new THREE.Box3(point.clone(), point.clone()));
   }
@@ -71,11 +77,15 @@ export function mountClashes({ shell, tests, elements, scene, controls, selectio
     // A distance the source does not report is null: nothing is shown.
     const distance = typeof clash.distance === 'number' ? formatDistance(clash.distance) : '';
     row.append(status, el('span', 'ioviewer-clash-distance', distance));
+    if (clash === activeClash) {
+      activeRow = row;
+      row.setAttribute('aria-current', 'true');
+    }
     row.addEventListener('click', () => show(clash, row));
     return row;
   }
 
-  function testGroup(test) {
+  function testGroup(test, refresh) {
     const box = el('div', 'ioviewer-clash-test');
     const header = el('button', 'ioviewer-row ioviewer-clash-header');
     header.type = 'button';
@@ -84,21 +94,62 @@ export function mountClashes({ shell, tests, elements, scene, controls, selectio
     header.setAttribute('title', title);
     header.insertAdjacentHTML('afterbegin', icons.chevron); // static icon markup
     header.append(el('span', 'ioviewer-row-name', title));
-    const list = el('div', 'ioviewer-row-list');
-    list.append(...test.clashes.map(clashRow));
+    const list = el('div', 'ioviewer-clash-list');
+    list.style.height = `${Math.max(0, test.clashes.length * ROW_STRIDE - 1)}px`;
     header.addEventListener('click', () => {
       list.hidden = !list.hidden;
       header.setAttribute('aria-expanded', String(!list.hidden));
+      refresh();
     });
     box.append(header, list);
-    return box;
+    return { box, list, clashes: test.clashes, rows: new Map() };
+  }
+
+  function renderRows({ list, clashes, rows }, { start, end }) {
+    for (const [index, row] of rows) {
+      if (index < start || index >= end) {
+        row.remove();
+        rows.delete(index);
+      }
+    }
+    let next = null;
+    for (let i = end - 1; i >= start; i--) {
+      let row = rows.get(i);
+      if (!row) {
+        row = clashRow(clashes[i]);
+        row.style.top = `${i * ROW_STRIDE}px`;
+        list.insertBefore(row, next);
+        rows.set(i, row);
+      }
+      next = row;
+    }
+  }
+
+  function renderPanel(body) {
+    if (!tests.length) return;
+    body.classList.add('ioviewer-clashes-body');
+    const groups = tests.map((test) => testGroup(test, refresh));
+    for (const entry of groups) body.append(entry.box);
+
+    function refresh() {
+      const top = body.scrollTop;
+      const height = body.clientHeight;
+      // Read every offset before replacing any rows so each scroll has one layout read.
+      const ranges = groups.map(({ list, clashes }) => height && !list.hidden
+        ? visibleRange(top - list.offsetTop, ROW_STRIDE, height, clashes.length, OVERSCAN)
+        : { start: 0, end: 0 });
+      groups.forEach((entry, i) => renderRows(entry, ranges[i]));
+    }
+
+    body.addEventListener('scroll', refresh);
+    new ResizeObserver(refresh).observe(body);
   }
 
   shell.registerPanel('clashes', {
     icon: icons.clashes,
     title: t('panel.clashes'),
     visible: tests.length > 0,
-    render: (body) => body.append(...tests.map(testGroup)),
+    render: renderPanel,
     onClose: () => group.visible && hideMarker(),
   });
 

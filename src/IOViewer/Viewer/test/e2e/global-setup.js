@@ -5,6 +5,7 @@ import path from 'node:path';
 export const viewerDir = path.resolve(import.meta.dirname, '../..');
 export const fixturesDir = path.resolve(viewerDir, '../../../tests/fixtures/viewer');
 export const LARGE_ELEMENTS = 20000;
+export const LARGE_CLASHES = 130000;
 
 // Exports a JSON document to test-results/<name>.html with the CLI, as a user would; `options` are extra CLI flags.
 function exportHtml(jsonPath, name, options = []) {
@@ -97,4 +98,22 @@ export default function globalSetup() {
   const bin = /(<script id="ioviewer-bin" type="application\/octet-stream">)([^<]*)/;
   if (!bin.test(html)) throw new Error('building.html has no BIN block.');
   writeFileSync(path.join(results, 'damaged.html'), html.replace(bin, (_, open, data) => open + data.slice(0, (data.length >> 1) & ~3)));
+
+  const metaBlock = /(<script id="ioviewer-meta" type="application\/json">)([^<]*)/;
+  const meta = JSON.parse(html.match(metaBlock)[2]);
+  const withMeta = (changes) => html.replace(metaBlock, (_, open) => open + JSON.stringify({ ...meta, ...changes }));
+  writeFileSync(path.join(results, 'malformed-meta.html'), withMeta({ instances: [] }));
+  writeFileSync(path.join(results, 'missing-geometry.html'), withMeta({ geometries: [] }));
+  writeFileSync(path.join(results, 'zero-vertices.html'), withMeta({
+    geometries: meta.geometries.map((g) => ({ ...g, positions: { ...g.positions, n: 0 }, indices: { ...g.indices, n: 0 } })),
+  }));
+  const invalidMatrices = Buffer.from(html.match(bin)[2], 'base64');
+  const { o, n } = meta.instances.matrix;
+  for (let i = 0; i < n; i += 12) invalidMatrices.writeFloatLE(NaN, o + i * 4);
+  writeFileSync(path.join(results, 'non-finite-instances.html'), html.replace(bin, (_, open) => open + invalidMatrices.toString('base64')));
+  const clash = meta.clashTests[0].clashes[0];
+  const clashes = Array.from({ length: LARGE_CLASHES }, (_, i) => ({ ...clash, id: String(i), name: `Clash ${i + 1}` }));
+  writeFileSync(path.join(results, 'large-clashes.html'), withMeta({
+    clashTests: [{ name: 'Large test', clashes }, { name: 'Tail test', clashes: [{ ...clash, name: 'Tail clash' }] }],
+  }));
 }

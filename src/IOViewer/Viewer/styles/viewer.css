@@ -831,6 +831,17 @@ label.ioviewer-row:hover {
 }
 
 /* Clashes: test headers fold their clashes; the status is a coloured chip */
+.ioviewer-clashes-body,
+.ioviewer-clash-list {
+  position: relative;
+}
+
+.ioviewer-clash-list > .ioviewer-clash {
+  position: absolute;
+  left: 0;
+  height: 26px;
+}
+
 .ioviewer-clash-header {
   color: var(--text);
   font-weight: 600;

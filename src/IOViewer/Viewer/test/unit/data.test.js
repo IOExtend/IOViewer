@@ -2,6 +2,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadModelData, ModelDataError } from '../../src/data.js';
 
+const emptyMeta = {
+  format: 2,
+  elements: [],
+  materials: [],
+  geometries: [],
+  instances: {
+    count: 0,
+    geometry: { o: 0, n: 0, t: 'u32' },
+    material: { o: 0, n: 0, t: 'u32' },
+    element: { o: 0, n: 0, t: 'i32' },
+    matrix: { o: 0, n: 0, t: 'f32' },
+  },
+};
+const emptyMetaBlock = { textContent: JSON.stringify(emptyMeta) };
+
 // A data block as the DOM has it: its text in text nodes (`pieces` of it, one node each), read with substringData.
 function textBlock(text, pieces = 1) {
   const size = Math.ceil(text.length / pieces);
@@ -19,7 +34,7 @@ function fakeDocument(propsJson) {
   [1.5, -2, 3.25].forEach((v, i) => view.setFloat32(i * 4, v, true));
   [7, 65535, 0].forEach((v, i) => view.setUint16(12 + i * 2, v, true));
   const meta = {
-    format: 2,
+    ...emptyMeta,
     title: 'Fake',
     positions: { o: 0, n: 3, t: 'f32' },
     indices: { o: 12, n: 3, t: 'u16' },
@@ -56,7 +71,7 @@ test('decodes i32 and u32 views', () => {
   new DataView(bytes.buffer).setInt32(0, -1, true);
   new DataView(bytes.buffer).setUint32(4, 4000000000, true);
   const blocks = {
-    'ioviewer-meta': { textContent: '{}' },
+    'ioviewer-meta': emptyMetaBlock,
     'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64')),
     'ioviewer-props': { textContent: '{}' },
   };
@@ -70,7 +85,7 @@ test('decodes i16 views (format 3 octahedral normals)', () => {
   new DataView(bytes.buffer).setInt16(0, -32767, true);
   new DataView(bytes.buffer).setInt16(2, 12345, true);
   const blocks = {
-    'ioviewer-meta': { textContent: '{"format":3}' },
+    'ioviewer-meta': { textContent: JSON.stringify({ ...emptyMeta, format: 3 }) },
     'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64')),
     'ioviewer-props': { textContent: '{}' },
   };
@@ -84,7 +99,7 @@ test('decodes BIN larger than one 4 MB chunk', () => {
   const bytes = new Uint8Array(3 * 1024 * 1024 + 8);
   for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31 + (i >> 8)) & 0xff;
   const blocks = {
-    'ioviewer-meta': { textContent: '{}' },
+    'ioviewer-meta': emptyMetaBlock,
     'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64')),
     'ioviewer-props': { textContent: '{}' },
   };
@@ -105,7 +120,7 @@ test('parses PROPS only on the first props() call', () => {
 
 test('empty BIN gives empty views', () => {
   const blocks = {
-    'ioviewer-meta': { textContent: '{"format":2}' },
+    'ioviewer-meta': emptyMetaBlock,
     'ioviewer-bin': textBlock(''),
     'ioviewer-props': { textContent: '{}' },
   };
@@ -116,7 +131,7 @@ test('empty BIN gives empty views', () => {
 test('decodes BIN split over several text nodes at any character, with whitespace around it', () => {
   const bytes = Uint8Array.from({ length: 1000 }, (_, i) => (i * 7) & 0xff);
   const blocks = {
-    'ioviewer-meta': { textContent: '{}' },
+    'ioviewer-meta': emptyMetaBlock,
     'ioviewer-bin': textBlock(`
  ${Buffer.from(bytes).toString('base64')}
 `, 7),
@@ -136,7 +151,7 @@ test('releaseBinary frees BIN: views throw afterwards, META and PROPS stay', () 
 });
 
 test('BIN without its padding decodes as atob does', () => {
-  const blocks = { 'ioviewer-meta': { textContent: '{}' }, 'ioviewer-bin': textBlock('QUJDRA'), 'ioviewer-props': { textContent: '{}' } };
+  const blocks = { 'ioviewer-meta': emptyMetaBlock, 'ioviewer-bin': textBlock('QUJDRA'), 'ioviewer-props': { textContent: '{}' } };
   const data = loadModelData({ getElementById: (id) => blocks[id] });
   assert.deepEqual(new Uint8Array(data.view({ o: 0, n: 1, t: 'u32' }).buffer, 0, 4), new Uint8Array([65, 66, 67, 68]));
 });
@@ -156,7 +171,7 @@ test('uses the native Uint8Array.setFromBase64 where there is one, with the same
   try {
     const bytes = Uint8Array.from({ length: 5 * 1024 * 1024 }, (_, i) => (i * 13) & 0xff);
     const blocks = {
-      'ioviewer-meta': { textContent: '{}' },
+      'ioviewer-meta': emptyMetaBlock,
       'ioviewer-bin': textBlock(Buffer.from(bytes).toString('base64'), 3),
       'ioviewer-props': { textContent: '{}' },
     };
@@ -172,8 +187,22 @@ test('uses the native Uint8Array.setFromBase64 where there is one, with the same
 test('damaged data blocks throw ModelDataError: bad JSON, bad base64, a missing block', () => {
   const blocks = (meta, bin) => ({ getElementById: (id) => ({ 'ioviewer-meta': meta, 'ioviewer-bin': bin })[id] ?? null });
   assert.throws(() => loadModelData(blocks({ textContent: '{"format": 3,' }, textBlock(''))), ModelDataError);
-  assert.throws(() => loadModelData(blocks({ textContent: '{}' }, textBlock('A*B$'))), ModelDataError);
-  assert.throws(() => loadModelData(blocks({ textContent: '{}' }, undefined)), ModelDataError);
+  assert.throws(() => loadModelData(blocks(emptyMetaBlock, textBlock('A*B$'))), ModelDataError);
+  assert.throws(() => loadModelData(blocks(emptyMetaBlock, undefined)), ModelDataError);
+});
+
+test('wrong META structure fails before reading the binary block', () => {
+  for (const meta of [[], {}, { ...emptyMeta, instances: { ...emptyMeta.instances, count: 1 } },
+    { ...emptyMeta, elements: [null] }, { ...emptyMeta, geometries: [{}] },
+    { ...emptyMeta, clashTests: [{ clashes: {} }] }]) {
+    const doc = {
+      getElementById(id) {
+        assert.equal(id, 'ioviewer-meta');
+        return { textContent: JSON.stringify(meta) };
+      },
+    };
+    assert.throws(() => loadModelData(doc), ModelDataError);
+  }
 });
 
 test('views outside BIN, misaligned or of an unknown type throw ModelDataError (a truncated file)', () => {

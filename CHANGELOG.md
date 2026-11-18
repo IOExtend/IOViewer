@@ -18,6 +18,8 @@ API between minor releases.
 - Report the required byte count and the limit when an HTML export exceeds its binary buffer capacity.
 - Save HTML to a temporary sibling file and replace the destination after a complete write. Report invalid coordinates,
   duplicate element IDs, missing textures and conflicting legacy mesh arrays before publishing the output.
+- Virtualize long clash lists. Show the existing localized messages for malformed model metadata and scenes without
+  drawable geometry, and set the model title when WebGL 2 is unavailable.
 
 ## [0.3.1] - 2026-11-13
 

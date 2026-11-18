@@ -40,12 +40,76 @@ function decodeInto(bytes, offset, text) {
 // The page's data blocks are missing, malformed or do not fit together, as in a truncated or damaged file.
 export class ModelDataError extends Error {}
 
-export function loadModelData(doc = document, startup) {
-  let meta, bin;
+const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const records = (value) => Array.isArray(value) && value.every(object);
+const vector = (value) => Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number');
+const box = (value) => object(value) && vector(value.min) && vector(value.max);
+
+function validateMeta(meta) {
+  if (!object(meta) || !records(meta.elements) || !records(meta.geometries) || !records(meta.materials) || !object(meta.instances)) {
+    throw new ModelDataError('META must describe elements, geometries, materials and instances.');
+  }
+  if (meta.title != null && typeof meta.title !== 'string') throw new ModelDataError('Invalid META title.');
+  const { instances } = meta;
+  if (!Number.isSafeInteger(instances.count) || instances.count < 0) throw new ModelDataError('Invalid META instance count.');
+  for (const [name, type, length] of [
+    ['geometry', 'u32', instances.count], ['material', 'u32', instances.count],
+    ['element', 'i32', instances.count], ['matrix', 'f32', instances.count * 12],
+  ]) {
+    if (instances[name]?.t !== type || instances[name].n !== length) {
+      throw new ModelDataError(`Invalid META instance ${name} view.`);
+    }
+  }
+  for (const g of meta.geometries) {
+    const q = g.q;
+    if (!box(g.bbox) || !['u16', 'u32'].includes(g.indices?.t)
+      || g.positions?.t !== (q ? 'u16' : 'f32')
+      || (q && (!vector(q.o) || typeof q.s !== 'number'))
+      || (g.normals != null && !['f32', 'i16'].includes(g.normals.t))
+      || (g.uvs != null && g.uvs.t !== 'f32')) {
+      throw new ModelDataError('Invalid META geometry.');
+    }
+  }
+  for (const name of ['textures', 'grids', 'viewpoints', 'clashTests', 'linkedFiles']) {
+    if (meta[name] != null && !records(meta[name])) throw new ModelDataError(`Invalid META ${name} list.`);
+  }
+  for (const material of meta.materials) {
+    const index = material.texture;
+    if (!vector(material.color) || typeof material.opacity !== 'number'
+      || (index != null && (!Number.isInteger(index) || index < 0 || index >= (meta.textures?.length ?? 0)))) {
+      throw new ModelDataError('Invalid META material.');
+    }
+  }
+  if (meta.grids?.some((grid) => !vector(grid.start) || !vector(grid.end))
+    || meta.viewpoints?.some((view) => !vector(view.camera?.position) || !vector(view.camera?.target))
+    || meta.clashTests?.some((test) => !records(test.clashes) || test.clashes.some((clash) => !vector(clash.point)))) {
+    throw new ModelDataError('Invalid META grids, viewpoints or clashes.');
+  }
+  const { sections } = meta;
+  if (sections != null && (!object(sections) || !records(sections.planes)
+    || sections.planes.some((plane) => !vector(plane.normal) || typeof plane.offset !== 'number')
+    || (sections.box != null && !box(sections.box)))) {
+    throw new ModelDataError('Invalid META sections.');
+  }
+}
+
+export function readModelMeta(doc = document, startup) {
+  let meta;
+  startup?.('metadataStart');
   try {
-    startup?.('metadataStart');
     meta = JSON.parse(block(doc, 'ioviewer-meta'));
-    startup?.('metadataEnd');
+  } catch (error) {
+    throw new ModelDataError(error.message, { cause: error });
+  }
+  validateMeta(meta);
+  startup?.('metadataEnd');
+  return meta;
+}
+
+export function loadModelData(doc = document, startup, meta = readModelMeta(doc, startup)) {
+  let bin;
+  try {
+    startup?.('binaryStart');
     const binElement = doc.getElementById('ioviewer-bin');
     if (!binElement) throw new Error("Data block 'ioviewer-bin' is missing.");
     bin = decodeBase64(binElement);
@@ -58,8 +122,8 @@ export function loadModelData(doc = document, startup) {
     meta,
     view(v) {
       if (!bin) throw new Error('The binary data has been released.');
-      const Type = VIEW_TYPES[v.t];
-      if (!Type) throw new ModelDataError(`Unknown view type '${v.t}'.`);
+      const Type = VIEW_TYPES[v?.t];
+      if (!Type) throw new ModelDataError(`Unknown view type '${v?.t}'.`);
       const size = Type.BYTES_PER_ELEMENT;
       if (!(Number.isInteger(v.o) && Number.isInteger(v.n) && v.o >= 0 && v.n >= 0 && v.o % size === 0 && v.o + v.n * size <= bin.length)) {
         throw new ModelDataError(`View ${JSON.stringify(v)} is outside the ${bin.length} bytes of binary data.`);
