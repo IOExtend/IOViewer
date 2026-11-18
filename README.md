@@ -44,6 +44,10 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
 | Middle or right drag | Pan |
 | Wheel | Zoom towards the cursor |
 | Right click | Context menu |
+| Menu key / Shift+F10 | Open the context menu. In the model tree, use the focused element |
+| Up / Down, Enter in the context menu | Move between actions and run the focused action |
+| Up / Down, Left / Right in the model tree | Move between rows, collapse or expand a category, or move to a parent or child |
+| Home / End, Enter in the model tree | Jump to the first or last row, or select and zoom to the focused element |
 | H / I / Shift+H | Hide selected / isolate selected / show all |
 | F | Zoom to the selection, or fit the whole model when nothing is selected |
 | Esc | Close the open menu or popup, or clear the measurement; otherwise clear the selection |

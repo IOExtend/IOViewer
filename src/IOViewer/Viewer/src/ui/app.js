@@ -57,6 +57,7 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
         elements: meta.elements,
         selection,
         scene,
+        openKeyboardMenu,
         activate: (i) => {
           selection.set([i]);
           controls.zoomToBox(scene.elementBox(i));
@@ -97,6 +98,17 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   }
 
   const contextMenu = createContextMenu(root);
+  function openKeyboardMenu(anchor, index = null, restore = () => anchor.focus({ preventScroll: true })) {
+    if (contextMenu.isOpen) return;
+    const fromCanvas = anchor === document.body;
+    const rect = (fromCanvas ? controls.dom : anchor).getBoundingClientRect();
+    if (index !== null && !selection.has(index)) selection.set([index]);
+    const [first] = selection.values();
+    const target = index ?? first ?? null;
+    const x = fromCanvas ? rect.left + rect.width / 2 : rect.left;
+    const y = fromCanvas ? rect.top + rect.height / 2 : rect.bottom;
+    contextMenu.open(target === null ? 'empty' : 'element', x, y, target, restore);
+  }
   contextMenu.setItem('properties', { handler: (i) => selection.set([i]) });
   for (const id of ['hide', 'isolate', 'showAll', 'zoomTo', 'fitAll']) contextMenu.setItem(id, { handler: actions[id] });
   contextMenu.setItem('copyId', {
@@ -123,6 +135,7 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   const escapeHandlers = [];
   installHotkeys(window, {
     ...actions,
+    contextMenu: () => openKeyboardMenu(document.activeElement ?? document.body),
     // Esc closes an open menu and keeps the selection; otherwise a feature may use it; otherwise it clears the selection.
     escape: () => {
       if (contextMenu.isOpen) return contextMenu.close();

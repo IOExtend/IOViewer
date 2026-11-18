@@ -10,7 +10,7 @@ const shortcuts = { hide: 'H', isolate: 'I', showAll: 'Shift+H', zoomTo: 'F' };
 const MARGIN = 4; // px kept free between the menu and the window edge
 
 /**
- * Right-click menu. open(kind, x, y, target) shows menus[kind] at client (x, y), kept inside the window;
+ * Context menu. open(kind, x, y, target) shows menus[kind] at client (x, y), kept inside the window;
  * an item calls its handler with `target` and closes the menu. setItem(id, { enabled, handler }) configures
  * an item; items without a handler are shown disabled. Closes on wheel, resize, page scroll (not on scrolling inside
  * the UI panels, which cannot move the menu) and on a press outside it; that press only dismisses the menu,
@@ -19,18 +19,23 @@ const MARGIN = 4; // px kept free between the menu and the window edge
 export function createContextMenu(root) {
   const menu = el('div', 'ioviewer-context-menu');
   menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', t('contextMenu'));
   menu.hidden = true;
   root.append(menu);
   const items = new Map(Object.values(menus).flat().filter((id) => id !== '-').map((id) => [id, { enabled: false, handler: null }]));
+  let returnFocus = null;
 
   function close() {
     if (menu.hidden) return;
+    const restore = menu.contains(document.activeElement) ? returnFocus : null;
+    returnFocus = null;
     menu.hidden = true;
     menu.replaceChildren();
     window.removeEventListener('pointerdown', outside, true);
     window.removeEventListener('wheel', close, true);
     window.removeEventListener('scroll', pageScroll, true);
     window.removeEventListener('resize', close);
+    restore?.();
   }
 
   function pageScroll(e) {
@@ -44,23 +49,28 @@ export function createContextMenu(root) {
     swallowPress(e);
   }
 
-  function open(kind, x, y, target) {
+  function open(kind, x, y, target, restoreFocus = null) {
     const layout = menus[kind];
     if (!layout) throw new RangeError(`Unknown menu: ${kind}`);
     close();
+    returnFocus = restoreFocus;
     for (const id of layout) {
       if (id === '-') {
-        menu.append(el('div', 'ioviewer-menu-separator'));
+        const separator = el('div', 'ioviewer-menu-separator');
+        separator.setAttribute('role', 'separator');
+        menu.append(separator);
         continue;
       }
       const item = items.get(id);
       const button = el('button', 'ioviewer-menu-item');
       button.type = 'button';
+      button.tabIndex = -1;
       button.dataset.item = id;
       button.setAttribute('role', 'menuitem');
-      button.disabled = !item.enabled;
+      button.setAttribute('aria-disabled', String(!item.enabled));
       button.append(el('span', '', t(`menu.${id}`)), el('kbd', '', shortcuts[id] ?? ''));
       button.addEventListener('click', () => {
+        if (!item.enabled) return;
         close();
         item.handler(target);
       });
@@ -74,7 +84,41 @@ export function createContextMenu(root) {
     window.addEventListener('wheel', close, true);
     window.addEventListener('scroll', pageScroll, true);
     window.addEventListener('resize', close);
+    if (restoreFocus) menu.querySelector('button')?.focus({ preventScroll: true });
   }
+
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      close();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+      return;
+    }
+    const buttons = [...menu.querySelectorAll('button')];
+    const current = buttons.indexOf(document.activeElement);
+    let next;
+    switch (e.key) {
+      case 'ArrowDown':
+        next = (current + 1) % buttons.length;
+        break;
+      case 'ArrowUp':
+        next = (current + buttons.length - 1) % buttons.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = buttons.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    buttons[next]?.focus({ preventScroll: true });
+  });
 
   function setItem(id, { enabled = true, handler }) {
     const item = items.get(id);
