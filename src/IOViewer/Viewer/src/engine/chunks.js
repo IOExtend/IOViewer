@@ -143,6 +143,36 @@ function spread(m, centres) {
   return Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2;
 }
 
+// A single drawable box may at most double the diagonal used to size cells. Keep the runner-up at each edge
+// so all six checks after the scan can exclude the same box on every axis.
+export function cellLayoutDiagonal(boxes, weight) {
+  const first = new Float64Array(6).fill(-Infinity);
+  const second = new Float64Array(6).fill(-Infinity);
+  const owner = new Int32Array(6);
+  for (let i = 0; i < weight.length; i++) {
+    if (weight[i] === 0) continue;
+    for (let edge = 0; edge < 6; edge++) {
+      const coord = boxes[i * 6 + edge];
+      const outside = edge < 3 ? -coord : coord;
+      if (outside > first[edge]) {
+        second[edge] = first[edge];
+        first[edge] = outside;
+        owner[edge] = i;
+      } else if (outside > second[edge]) second[edge] = outside;
+    }
+  }
+  if (first[0] === -Infinity) return 0;
+  let diagonal = Math.hypot(first[0] + first[3], first[1] + first[4], first[2] + first[5]);
+  if (second[0] === -Infinity) return diagonal;
+
+  for (const excluded of owner) {
+    const edge = (k) => owner[k] === excluded ? second[k] : first[k];
+    const trimmed = Math.hypot(edge(0) + edge(3), edge(1) + edge(4), edge(2) + edge(5));
+    diagonal = Math.min(diagonal, 2 * trimmed);
+  }
+  return diagonal;
+}
+
 export const MERGED_CAP = 384 * 2 ** 20; // merged GPU bytes above which the repeated shapes are drawn instanced
 
 /**

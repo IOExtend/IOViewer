@@ -489,6 +489,18 @@ test('over the cap, cells are bounded in extent: one shape spread along 190 m ta
   for (const unit of scene._units) assert.ok(unit.sphere[3] <= cap + 1e-9, `${unit.sphere[3]} > ${cap}`);
 });
 
+test('one remote placement cannot inflate the bounds of every instanced cell', () => {
+  const local = Array.from({ length: 20 }, (_, i) => ({ x: i * 10 }));
+  const scene = model([...local, { x: 500_000 }], { options: { mergedCap: 0, minRepeats: 1 } });
+  assert.equal(scene.memory().instancedInstances, 21);
+  assert.equal(new Set(Array.from({ length: 21 }, (_, i) => scene.instance(i).slot)).size, 21);
+  const remote = scene.instance(20).mesh;
+  assert.equal(remote.count, 1);
+  const cap = Math.hypot(191, 1, 1) * 0.2 + Math.sqrt(3) / 2;
+  for (const unit of scene._units) assert.ok(unit.sphere[3] <= cap + 1e-9, `${unit.sphere[3]} > ${cap}`);
+  assert.equal(scene.visibleBox().max.x, 500_000.5);
+});
+
 test('a unit the detail cut leaves empty is hidden for that frame, counted in view, and shown again after', () => {
   // Two chunks: a 10 m cube and a 0.1 m cube beside it.
   const scene = model([{ x: 0, scale: 10 }, { x: 8, scale: 0.1 }], { options: { chunkVertices: 36 } });
