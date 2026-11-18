@@ -811,6 +811,36 @@ public class HtmlViewerExporterTests
         Assert.Equal("Active", StatusOf(doc));
     }
 
+    [Theory]
+    [InlineData(long.MinValue, true)]
+    [InlineData(-9007199254740992L, true)]
+    [InlineData(-9007199254740991L, false)]
+    [InlineData(9007199254740991L, false)]
+    [InlineData(9007199254740992L, true)]
+    [InlineData(9007199254740993L, true)]
+    [InlineData(long.MaxValue, true)]
+    public void ElementIds_KeepPrecisionInElementsAndReferences(long id, bool asString)
+    {
+        var doc = GeoreferencedModel();
+        doc.Scene.Elements[0].Id = id;
+        doc.Scene.Instances[0].ElementId = id;
+        doc.Scene.Schedules[0].Tasks[0].ElementIds = [id];
+        var clash = doc.Scene.ClashTests[0].Clashes[0];
+        clash.Element1Id = id;
+        clash.Element2Id = id;
+
+        var view = ViewerHtml.Export(doc);
+        var written = view.Meta.GetProperty("clashTests")[0].GetProperty("clashes")[0];
+        string key = id.ToString(CultureInfo.InvariantCulture);
+        string expected = asString ? $"\"{key}\"" : key;
+
+        Assert.Equal(expected, view.Meta.GetProperty("elements")[0].GetProperty("id").GetRawText());
+        Assert.Equal(expected, view.Meta.GetProperty("timeliner").GetProperty("tasks")[0].GetProperty("attachedElements")[0].GetRawText());
+        Assert.Equal(expected, written.GetProperty("element1Id").GetRawText());
+        Assert.Equal(expected, written.GetProperty("element2Id").GetRawText());
+        Assert.Equal("300 mm", view.Props.GetProperty(key).GetProperty("Dimensions").GetProperty("Thickness").GetString());
+    }
+
     [Fact]
     public void ClashDistance_IsNullWhenNotReported()
     {

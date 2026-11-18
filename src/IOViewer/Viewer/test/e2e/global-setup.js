@@ -63,6 +63,15 @@ export default function globalSetup() {
   exportHtml(shear, 'shear');
 
   const results = path.join(viewerDir, 'test-results');
+  const wide = largeModel(2);
+  for (const [i, id] of ['9007199254740992', '9007199254740993'].entries()) {
+    wide.Elements[i].Id = wide.Meshes[i].ElementId = JSON.rawJSON(id);
+    wide.Elements[i].Properties = { 'Identity Data': { Mark: `Wide ${i}` } };
+  }
+  const widePath = path.join(results, 'wide-ids.json');
+  writeFileSync(widePath, JSON.stringify(wide));
+  exportHtml(widePath, 'wide-ids');
+
   const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
   const planes = [{ Axis: 3, Normal: [0, 0, 2], Offset: 2 }, { Axis: 0, Offset: -100, Enabled: false }];
   for (const [name, box] of [

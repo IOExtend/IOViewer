@@ -38,6 +38,7 @@ The model data is the IOScene scene model, referenced by the `IOViewer` package.
 ### Exporters (`IOViewer.Exporters`)
 
 - `HtmlViewerExporter`: Generates self-contained, offline-ready 3D HTML viewers using packed Base64 binary buffers. Takes a `ViewerDocument` or a `SceneDocument`. The page is written to the output stream as it is produced.
+  Embedded element IDs and their clash and schedule references use decimal strings outside JavaScript's safe integer range.
 - `HtmlViewerOptions`: Title, which data to include (properties, viewpoints, grids, 4D schedule, clashes), the initial display mode (`InitialWireframe`, `InitialWhiteMode`), and `MaxMeshVertices`, which is unlimited by default; when a lower limit leaves meshes out, the viewer shows how many were written.
 - `JsonViewerExporter`: Writes a `ViewerDocument` as viewer JSON (`"Kind": "ioviewer"`, `"Format": 2`). A scene alone is written with IOScene's `SceneJson`.
 

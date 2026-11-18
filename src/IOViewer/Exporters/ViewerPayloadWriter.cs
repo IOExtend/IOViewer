@@ -24,6 +24,7 @@ internal sealed class ViewerPayloadWriter
 {
     private const int FlushThreshold = 1 << 16;
     private const int MaxSectionPlanes = 6; // Matches the viewer's MAX_PLANES.
+    private const long MaxSafeElementId = (1L << 53) - 1;
     private static readonly RgbaColor DefaultColor = new(200, 200, 200);
 
     private readonly SceneDocument _scene;
@@ -619,7 +620,8 @@ internal sealed class ViewerPayloadWriter
         foreach (var el in _scene.Elements)
         {
             w.WriteStartObject();
-            w.WriteNumber("id", el.Id);
+            w.WritePropertyName("id");
+            WriteElementId(w, el.Id);
             w.WriteString("name", el.Name);
             w.WriteString("category", string.IsNullOrEmpty(el.Category) ? "General" : el.Category);
             w.WriteString("type", el.TypeName);
@@ -747,7 +749,7 @@ internal sealed class ViewerPayloadWriter
             if (t.PlannedCost.HasValue) w.WriteNumber("cost", t.PlannedCost.Value);
             w.WriteNumber("progress", t.Progress);
             w.WriteStartArray("attachedElements");
-            foreach (var id in t.ElementIds) w.WriteNumberValue(id);
+            foreach (var id in t.ElementIds) WriteElementId(w, id);
             w.WriteEndArray();
             w.WriteEndObject();
             foreach (var child in t.Children) WriteTask(child);
@@ -788,8 +790,10 @@ internal sealed class ViewerPayloadWriter
                     w.WriteString("name", clash.Name);
                     w.WriteString("element1Name", clash.Element1Name);
                     w.WriteString("element2Name", clash.Element2Name);
-                    WriteNullableNumber(w, "element1Id", clash.Element1Id);
-                    WriteNullableNumber(w, "element2Id", clash.Element2Id);
+                    w.WritePropertyName("element1Id");
+                    WriteElementId(w, clash.Element1Id);
+                    w.WritePropertyName("element2Id");
+                    WriteElementId(w, clash.Element2Id);
                     WriteVector(w, "point", clash.Point - _rtcOffset);
                     // Null when the source does not report it.
                     if (clash.Distance is double distance) w.WriteNumber("distance", distance);
@@ -805,10 +809,12 @@ internal sealed class ViewerPayloadWriter
         w.WriteEndArray();
     }
 
-    private static void WriteNullableNumber(Utf8JsonWriter w, string name, long? value)
+    // Elements and their references use the same representation so the browser can match them exactly.
+    private static void WriteElementId(Utf8JsonWriter w, long? id)
     {
-        if (value is long v) w.WriteNumber(name, v);
-        else w.WriteNull(name);
+        if (id is not long value) w.WriteNullValue();
+        else if (value is >= -MaxSafeElementId and <= MaxSafeElementId) w.WriteNumberValue(value);
+        else w.WriteStringValue(value.ToString(CultureInfo.InvariantCulture));
     }
 
     private static void WriteView(Utf8JsonWriter w, string name, BlobView? view)

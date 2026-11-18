@@ -384,6 +384,25 @@ test('Copy Id falls back to execCommand when the clipboard API is refused', asyn
   expect(errors).toEqual([]);
 });
 
+test('adjacent 64-bit IDs stay distinct in properties and on the clipboard', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__copied = [];
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (text) => window.__copied.push(text) } });
+  });
+  const errors = await open(page, 'wide-ids');
+  const ids = ['9007199254740992', '9007199254740993'];
+  const properties = page.locator('#ioviewer-properties');
+  for (const [i, id] of ids.entries()) {
+    await page.mouse.click(...(await screenAt(page, i)), { button: 'right' });
+    expect(await selected(page)).toEqual([i]);
+    await expect(properties.getByRole('cell', { name: id, exact: true })).toBeVisible();
+    await expect(properties.locator('tr', { hasText: 'Mark' }).locator('td')).toHaveText(`Wide ${i}`);
+    await menuItem(page, 'Копировать Id').click();
+    await expect.poll(() => page.evaluate(() => window.__copied)).toEqual(ids.slice(0, i + 1));
+  }
+  expect(errors).toEqual([]);
+});
+
 test('Copy Id reports a failure when no way to copy works', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new DOMException('denied')) } });
