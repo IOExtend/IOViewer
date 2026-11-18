@@ -182,7 +182,13 @@ internal static class LegacySnapshot
             }
             scene.Textures.Add(new SceneTexture { Id = i + 1, MimeType = texture.MimeType ?? "image/png", Data = data, ScaleX = texture.ScaleX, ScaleY = texture.ScaleY });
         }
-        int? TextureOf(int? index) => index is int i && (uint)i < (uint)old.Textures.Count ? i + 1 : null;
+        int? TextureOf(int? index)
+        {
+            if (index is not int i) return null;
+            if ((uint)i >= (uint)old.Textures.Count)
+                throw new InvalidDataException($"Texture index {i} is outside the {old.Textures.Count} textures in the snapshot.");
+            return i + 1;
+        }
 
         // 0.2.0 drew a mesh with the first material of its id; the material opacity becomes the colour alpha.
         var materials = new Dictionary<int, (ViewerMaterial Old, SceneMaterial New)>();
@@ -234,6 +240,8 @@ internal static class LegacySnapshot
             if (mesh.GeometryId is int shared)
             {
                 if (mesh.Vertices.Count > 0) throw new InvalidDataException($"Mesh {mesh.Id} has both geometry {shared} and its own vertices.");
+                if (mesh.Indices.Count > 0 || mesh.Normals is { Count: > 0 } || mesh.UVs is { Count: > 0 })
+                    throw new InvalidDataException($"Mesh {mesh.Id} has both geometry {shared} and its own indices, normals or UVs.");
                 geometryId = shared;
             }
             else

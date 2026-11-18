@@ -66,6 +66,7 @@ internal sealed class ViewerPayloadWriter
         var writer = new ViewerPayloadWriter(doc, options);
         writer.Build();
         writer.BuildSections(doc);
+        writer.ValidateMetadata();
         return writer;
     }
 
@@ -103,6 +104,48 @@ internal sealed class ViewerPayloadWriter
 
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
 
+    private void ValidateMetadata()
+    {
+        if (_options.IncludeViewpoints)
+        {
+            foreach (var view in _scene.Viewpoints)
+            {
+                if (!IsFinite(view.Camera.Position - _rtcOffset) || !IsFinite(view.Camera.Target - _rtcOffset))
+                    throw new InvalidDataException($"Viewpoint '{view.Name}' has a non-finite camera position or target.");
+            }
+        }
+        if (_options.IncludeGrids)
+        {
+            foreach (var line in _scene.Grids.SelectMany(g => g.Lines))
+            {
+                if (!IsFinite(line.Start - _rtcOffset) || !IsFinite(line.End - _rtcOffset))
+                    throw new InvalidDataException($"Grid line '{line.Name}' has a non-finite endpoint.");
+            }
+        }
+        if (_options.IncludeClashes)
+        {
+            foreach (var clash in _scene.ClashTests.SelectMany(test => test.Clashes))
+            {
+                if (!IsFinite(clash.Point - _rtcOffset) || clash.Distance is double distance && !double.IsFinite(distance))
+                    throw new InvalidDataException($"Clash '{clash.Id}' has a non-finite point or distance.");
+            }
+        }
+        if (_options.IncludeTimeLiner)
+        {
+            foreach (var schedule in _scene.Schedules)
+            {
+                var pending = new Stack<SceneTask>(schedule.Tasks);
+                var visited = new HashSet<SceneTask>(ReferenceEqualityComparer.Instance);
+                while (pending.TryPop(out var task))
+                {
+                    if (!visited.Add(task)) throw new InvalidDataException($"Task '{task.Id}' occurs more than once in schedule '{schedule.Name}'.");
+                    if (!double.IsFinite(task.Progress)) throw new InvalidDataException($"Task '{task.Id}' has non-finite progress.");
+                    foreach (var child in task.Children) pending.Push(child);
+                }
+            }
+        }
+    }
+
     /// <summary>Counts the instances the viewer does not draw because their geometry is not made of triangles.</summary>
     public static int UndrawnInstances(SceneDocument scene)
     {
@@ -121,6 +164,9 @@ internal sealed class ViewerPayloadWriter
                 throw new InvalidDataException($"Geometry id {geometry.Id} is used by more than one geometry.");
             }
             if (geometry.Topology == SceneTopology.Triangles) CheckIndices(geometry.Indices, geometry.Vertices.Count, $"Geometry {geometry.Id}");
+            if (!geometry.Vertices.All(IsFinite) || geometry.Normals?.All(IsFinite) == false
+                || geometry.UVs?.All(uv => double.IsFinite(uv.X) && double.IsFinite(uv.Y)) == false)
+                throw new InvalidDataException($"Geometry {geometry.Id} has a non-finite vertex, normal or UV coordinate.");
         }
 
         // Instances per geometry, and the largest axis length of any of them: grid steps in local units grow by it.
@@ -135,17 +181,36 @@ internal sealed class ViewerPayloadWriter
             }
             uses[instance.GeometryId] = uses.GetValueOrDefault(instance.GeometryId) + 1;
             if (instance.Transform is not { } t) continue;
+            if (!IsFinite(t.XAxis) || !IsFinite(t.YAxis) || !IsFinite(t.ZAxis) || !IsFinite(t.Translation))
+                throw new InvalidDataException($"Instance of element {instance.ElementId} has a non-finite transform.");
             double scale = Math.Max(t.XAxis.Length, Math.Max(t.YAxis.Length, t.ZAxis.Length));
             maxScale[instance.GeometryId] = Math.Max(maxScale.GetValueOrDefault(instance.GeometryId), scale);
         }
 
-        foreach (var material in _scene.Materials) _materialsById.TryAdd(material.Id, material);
-        for (int i = 0; i < _scene.Textures.Count; i++) _textureIndex.TryAdd(_scene.Textures[i].Id, i);
+        for (int i = 0; i < _scene.Textures.Count; i++)
+        {
+            var texture = _scene.Textures[i];
+            if (!double.IsFinite(texture.ScaleX) || !double.IsFinite(texture.ScaleY))
+                throw new InvalidDataException($"Texture {texture.Id} has a non-finite scale.");
+            _textureIndex.TryAdd(texture.Id, i);
+        }
+        foreach (var material in _scene.Materials)
+        {
+            if (material.TextureId is int textureId && !_textureIndex.ContainsKey(textureId))
+                throw new InvalidDataException($"Material {material.Id} references missing texture {textureId}.");
+            _materialsById.TryAdd(material.Id, material);
+        }
         var elementIndex = new Dictionary<long, int>();
-        for (int i = 0; i < _scene.Elements.Count; i++) elementIndex.TryAdd(_scene.Elements[i].Id, i);
+        for (int i = 0; i < _scene.Elements.Count; i++)
+        {
+            long id = _scene.Elements[i].Id;
+            if (!elementIndex.TryAdd(id, i)) throw new InvalidDataException($"Element id {id} is used by more than one element.");
+        }
 
         _bounds = _scene.ComputeBounds();
         _rtcOffset = _bounds.IsEmpty ? Vector3d.Zero : _bounds.Center;
+        if (!IsFinite(_rtcOffset) || !_bounds.IsEmpty && (!IsFinite(_bounds.Min - _rtcOffset) || !IsFinite(_bounds.Max - _rtcOffset)))
+            throw new InvalidDataException("The scene bounds are not finite in viewer coordinates.");
 
         var sharedOutput = new Dictionary<int, (int Index, Vector3d Origin)>();
         long totalVertices = 0;
@@ -463,24 +528,17 @@ internal sealed class ViewerPayloadWriter
         {
             var sets = new Dictionary<int, ScenePropertySet>();
             foreach (var set in _scene.PropertySets) sets.TryAdd(set.Id, set);
-            // JSON.parse keeps only the last of equal member names, so no object here may repeat one. The page finds
-            // properties by element id, so elements that share an id (which Validate rejects) are one entry.
-            var setIds = new Dictionary<long, IEnumerable<int>>();
-            foreach (var el in _scene.Elements)
-            {
-                setIds[el.Id] = setIds.TryGetValue(el.Id, out var ids) ? ids.Concat(el.PropertySetIds) : el.PropertySetIds;
-            }
             var referenced = new HashSet<int>();
             var names = new HashSet<string>();
             var nextSuffix = new Dictionary<string, int>();
             foreach (var el in _scene.Elements)
             {
-                if (!setIds.Remove(el.Id, out var ids) || !ids.Any()) continue;
+                if (el.PropertySetIds.Count == 0) continue;
                 w.WriteStartObject(el.Id.ToString(CultureInfo.InvariantCulture));
                 // Sets with the same name are one group, in the order the element first references them; a property
                 // name used before in the group gets the first free suffix " (2)", " (3)", ...
                 referenced.Clear();
-                var groups = ids.Where(referenced.Add).Select(id => sets.GetValueOrDefault(id)).OfType<ScenePropertySet>().GroupBy(s => Written(s.Name));
+                var groups = el.PropertySetIds.Where(referenced.Add).Select(id => sets.GetValueOrDefault(id)).OfType<ScenePropertySet>().GroupBy(s => Written(s.Name));
                 foreach (var group in groups)
                 {
                     w.WriteStartObject(group.Key);
@@ -833,6 +891,7 @@ internal sealed class ViewerPayloadWriter
 
     private static void WriteVector(Utf8JsonWriter w, string name, Vector3d v)
     {
+        if (!IsFinite(v)) throw new InvalidDataException($"The '{name}' vector is not finite in viewer coordinates.");
         w.WriteStartArray(name);
         w.WriteNumberValue(v.X);
         w.WriteNumberValue(v.Y);

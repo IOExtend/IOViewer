@@ -1,3 +1,4 @@
+using System.Security.AccessControl;
 using System.Text;
 using System.Text.RegularExpressions;
 using IOScene;
@@ -22,16 +23,62 @@ public static class HtmlViewerExporter
     public static string ExportToString(SceneDocument scene, HtmlViewerOptions? options = null) =>
         ExportToString(new ViewerDocument(scene), options);
 
+    /// <summary>Writes a complete viewer page to a temporary file next to the destination before replacing it.</summary>
+    /// <exception cref="InvalidDataException">The document contains invalid viewer data.</exception>
     public static void Save(ViewerDocument doc, string filePath, HtmlViewerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(doc);
         ArgumentNullException.ThrowIfNull(doc.Scene);
         ArgumentNullException.ThrowIfNull(filePath);
 
-        // Validated before the file is opened, so invalid data never truncates an existing page.
         var payload = ViewerPayloadWriter.Create(doc, options ?? new HtmlViewerOptions());
-        using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        Write(payload, fs);
+        var target = new FileInfo(filePath);
+        if (target.LinkTarget is not null && target.ResolveLinkTarget(returnFinalTarget: true) is { } linked)
+            target = new FileInfo(linked.FullName);
+        bool replace = target.Exists;
+        if (replace)
+        {
+            // Check write access and sharing before the rename, which can ignore write permissions on Unix.
+            using var existing = target.Open(FileMode.Open, FileAccess.Write, FileShare.None);
+        }
+
+        var temporary = new FileInfo(Path.Combine(target.DirectoryName!, $".ioviewer-{Guid.NewGuid():N}.tmp"));
+        var stream = OpenTemporary(temporary, replace ? target : null);
+        bool moved = false;
+        try
+        {
+            using (stream)
+            {
+                Write(payload, stream);
+                if (replace && !OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(stream.SafeFileHandle, File.GetUnixFileMode(target.FullName));
+            }
+            File.Move(temporary.FullName, target.FullName, overwrite: replace);
+            moved = true;
+        }
+        finally
+        {
+            if (!moved) temporary.Delete();
+        }
+    }
+
+    private static FileStream OpenTemporary(FileInfo temporary, FileInfo? target)
+    {
+        if (target is null) return temporary.Open(FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        if (OperatingSystem.IsWindows())
+        {
+            var access = target.GetAccessControl(AccessControlSections.Access);
+            return temporary.Create(FileMode.CreateNew, FileSystemRights.Write, FileShare.None, 4096, FileOptions.None, access);
+        }
+
+        // A replacement may be more private than its parent directory.
+        return temporary.Open(new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+        });
     }
 
     public static void Export(ViewerDocument doc, Stream stream, HtmlViewerOptions? options = null)

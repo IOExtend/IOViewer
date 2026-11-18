@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using IOScene;
@@ -447,6 +449,101 @@ public class HtmlViewerExporterTests
         }
     }
 
+    [Theory]
+    [InlineData("vertex", "Geometry 1")]
+    [InlineData("viewpoint", "Viewpoint")]
+    [InlineData("grid", "Grid line")]
+    [InlineData("clash", "Clash")]
+    [InlineData("progress", "Task")]
+    [InlineData("texture", "Texture 9")]
+    public void NonFiniteData_IsRejectedBeforeWriting(string field, string diagnostic)
+    {
+        var doc = GeoreferencedModel();
+        switch (field)
+        {
+            case "vertex":
+                doc.Scene.Geometries[0].Vertices = [new(double.NaN, 0, 0), new(1, 0, 0), new(0, 1, 0), new(1, 1, 0)];
+                break;
+            case "viewpoint":
+                doc.Scene.Viewpoints[0].Camera.Target = new(0, double.PositiveInfinity, 0);
+                break;
+            case "grid":
+                doc.Scene.Grids[0].Lines[0].End = new(0, 0, double.NaN);
+                break;
+            case "clash":
+                doc.Scene.ClashTests[0].Clashes[0].Distance = double.NegativeInfinity;
+                break;
+            case "progress":
+                doc.Scene.Schedules[0].Tasks[0].Progress = double.NaN;
+                break;
+            case "texture":
+                doc.Scene.Textures.Add(new SceneTexture { Id = 9, ScaleX = double.PositiveInfinity });
+                break;
+        }
+        using var stream = new MemoryStream();
+        var error = Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.Export(doc, stream));
+        Assert.Contains(diagnostic, error.Message, StringComparison.Ordinal);
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Fact]
+    public void Save_ReplacesACompletePage_AndKeepsFilePermissions()
+    {
+        var folder = Directory.CreateTempSubdirectory();
+        var target = new FileInfo(Path.Combine(folder.FullName, "viewer.html"));
+        try
+        {
+            File.WriteAllText(target.FullName, "Previous page");
+            const UnixFileMode mode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            if (OperatingSystem.IsWindows())
+            {
+                using var identity = WindowsIdentity.GetCurrent();
+                var access = new FileSecurity();
+                access.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                access.AddAccessRule(new FileSystemAccessRule(identity.User!, FileSystemRights.FullControl, AccessControlType.Allow));
+                target.SetAccessControl(access);
+            }
+            else File.SetUnixFileMode(target.FullName, mode);
+
+            HtmlViewerExporter.Save(GeoreferencedModel(), target.FullName);
+
+            Assert.True(ViewerHtml.Parse(File.ReadAllText(target.FullName)).InstanceCount > 0);
+            Assert.Single(folder.EnumerateFileSystemInfos());
+            if (OperatingSystem.IsWindows())
+            {
+                using var identity = WindowsIdentity.GetCurrent();
+                var access = target.GetAccessControl(AccessControlSections.Access);
+                Assert.True(access.AreAccessRulesProtected);
+                var rule = Assert.Single(access.GetAccessRules(true, true, typeof(SecurityIdentifier)).OfType<FileSystemAccessRule>());
+                Assert.Equal(identity.User, rule.IdentityReference);
+                Assert.Equal(FileSystemRights.FullControl, rule.FileSystemRights);
+                Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+            }
+            else Assert.Equal(mode, File.GetUnixFileMode(target.FullName));
+        }
+        finally
+        {
+            folder.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Save_WhenPublishFails_RemovesTheTemporaryFile()
+    {
+        var folder = Directory.CreateTempSubdirectory();
+        try
+        {
+            var target = folder.CreateSubdirectory("viewer.html");
+            var error = Record.Exception(() => HtmlViewerExporter.Save(GeoreferencedModel(), target.FullName));
+            Assert.True(error is IOException or UnauthorizedAccessException, error?.ToString());
+            Assert.Equal(target.Name, Assert.Single(folder.EnumerateFileSystemInfos()).Name);
+        }
+        finally
+        {
+            folder.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public void SharedGeometryIndexOutOfRange_Throws()
     {
@@ -582,22 +679,23 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
-    public void Props_ElementsThatShareAnId_AreOneEntry()
+    public void DuplicateElementId_IsRejected()
     {
-        // A scene Validate rejects, but the page finds properties by element id.
         var scene = TestScenes.Empty();
         scene.Mesh([new(0, 0, 0), new(1, 0, 0), new(0, 1, 0)], [0, 1, 2]);
-        scene.Elements.Add(new SceneElement { Id = 1, ModelId = 1, Name = "Twin", PropertySetIds = [2] });
-        scene.PropertySets.Add(Set(1, "Dimensions", ("Height", "3000 mm")));
-        scene.PropertySets.Add(Set(2, "Identity Data", ("Mark", "D1")));
-        scene.Elements[0].PropertySetIds.Add(1);
+        scene.Elements.Add(new SceneElement { Id = 1, ModelId = 1, Name = "Twin" });
 
-        var view = ViewerHtml.Export(new ViewerDocument(scene));
+        var error = Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(scene));
+        Assert.Contains("Element id 1", error.Message, StringComparison.Ordinal);
+    }
 
-        AssertNoDuplicateMembers(view.Props);
-        var element = view.Props.GetProperty("1");
-        Assert.Equal([("Height", "3000 mm")], Members(element.GetProperty("Dimensions")));
-        Assert.Equal([("Mark", "D1")], Members(element.GetProperty("Identity Data")));
+    [Fact]
+    public void MissingMaterialTexture_IsRejected()
+    {
+        var scene = TestScenes.Empty();
+        scene.Materials.Add(new SceneMaterial { Id = 6, TextureId = 9 });
+        var error = Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(scene));
+        Assert.Contains("Material 6 references missing texture 9", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
