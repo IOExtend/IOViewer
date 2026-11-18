@@ -133,17 +133,45 @@ test('adaptive orbit compacts a cell on the GPU and full detail and picking stil
   expect(result.compact.stats).toEqual({ drawn: 24, inView: 48, draws: 1 });
   expect(result.far).toBe(0);
   expect(result.restored).toEqual(result.full);
+
+  await nextFrame(page);
+  await page.evaluate(() => {
+    const { scene, motionDetail } = window.__ioviewer;
+    // Exercise the render loop after the controller has budgeted for per-instance detail in a single cell.
+    motionDetail.budget = 34;
+    motionDetail._refine = true;
+    window.orbitFrames = [];
+    const end = motionDetail.end.bind(motionDetail);
+    motionDetail.end = (now) => {
+      window.orbitFrames.push({ threshold: motionDetail.minPixels, ...scene.drawStats() });
+      end(now);
+    };
+  });
+  const { width, height } = page.viewportSize();
+  await page.mouse.move(width / 2, height / 2);
+  await page.mouse.down();
+  await page.mouse.move(width / 2 + 14, height / 2);
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => window.orbitFrames.some((frame) => frame.threshold > 0 && frame.drawn < frame.inView))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.orbitFrames.at(-1))).toEqual({ threshold: 0, ...result.full.stats });
   expect(errors).toEqual([]);
 });
 
-test('empty document shows "no geometry"', async ({ page }) => {
-  const { errors, requests } = await open(page, 'empty');
-
-  await expect(page.getByText('Нет геометрии')).toBeVisible();
-  await expect(page.locator('#ioviewer-status')).toHaveText('Выбрано: 0 · Элементов: 0');
-  expect(errors).toEqual([]);
-  expect(requests).toEqual([]);
-});
+for (const [locale, message, status] of [
+  ['ru-RU', 'Нет геометрии', 'Выбрано: 0 · Элементов: 0'],
+  ['en-US', 'No geometry', 'Selected: 0 · Elements: 0'],
+]) {
+  test.describe(locale, () => {
+    test.use({ locale });
+    test('empty document shows the localized message and zero counts', async ({ page }) => {
+      const { errors, requests } = await open(page, 'empty');
+      await expect(page.getByText(message)).toBeVisible();
+      await expect(page.locator('#ioviewer-status')).toHaveText(status);
+      expect(errors).toEqual([]);
+      expect(requests).toEqual([]);
+    });
+  });
+}
 
 test('startup profiling samples load and first render once', async ({ page }) => {
   await page.addInitScript(() => {
@@ -192,6 +220,33 @@ test('ModelScene addresses elements by index across meshes and materials', async
   expect(errors).toEqual([]);
 });
 
+test('one material bucket draws and picks elements in several merged chunks and instanced cells', async ({ page }) => {
+  await page.addInitScript(() => { window.IOVIEWER_TEST = { mergedCap: 0, chunkVertices: 24 }; });
+  const { errors } = await open(page, 'building');
+  const indices = ['Ground Slab', 'Floor Slab Level 2', 'Column A1 Level 1', 'Column D2 Level 1']
+    .map((name) => building.Elements.findIndex((element) => element.Name === name));
+  const result = await page.evaluate((indices) => {
+    const { scene, controls, picker, camera } = window.__ioviewer;
+    const meshes = indices.map((i) => scene.instance(scene.instancesOf(i)[0]).mesh);
+    const rect = picker.renderer.domElement.getBoundingClientRect();
+    const hits = indices.map((i) => {
+      scene.isolate([i]);
+      controls.fitBox(scene.elementBox(i), false);
+      return picker.pick(rect.left + rect.width / 2, rect.top + rect.height / 2)?.element;
+    });
+    scene.showAll();
+    return {
+      sameMaterial: meshes.every((mesh) => mesh.material === meshes[0].material),
+      instanced: meshes.map((mesh) => mesh.isInstancedMesh === true),
+      meshCount: new Set(meshes).size,
+      hits,
+    };
+  }, indices);
+  expect(result).toEqual({ sameMaterial: true, instanced: [false, false, true, true], meshCount: 4, hits: indices });
+  await renderedCenter(page);
+  expect(errors).toEqual([]);
+});
+
 // Mean grey level (0..255) of the 4x4 screen pixels around (x, y); the PNG is decoded by the page itself.
 async function brightness(page, x, y) {
   const png = await page.screenshot({ clip: { x: x - 2, y: y - 2, width: 4, height: 4 } });
@@ -206,6 +261,39 @@ async function brightness(page, x, y) {
     for (let i = 0; i < data.length; i += 4) sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
     return sum / (data.length / 4);
   }, png.toString('base64'));
+}
+
+for (const instanced of [false, true]) {
+  test(`textures sample the expected checker squares (${instanced ? 'instanced' : 'merged'})`, async ({ page }) => {
+    if (instanced) await page.addInitScript(() => { window.IOVIEWER_TEST = { mergedCap: 0, minRepeats: 1 }; });
+    const { errors } = await open(page, 'textured');
+    expect(await page.evaluate(() => window.__ioviewer.scene.instance(0).mesh.isInstancedMesh === true)).toBe(instanced);
+    const coords = await page.evaluate(() => {
+      const { scene, controls, camera } = window.__ioviewer;
+      const { rtcOffset } = JSON.parse(document.getElementById('ioviewer-meta').textContent);
+      const rtc = camera.position.clone().fromArray(rtcOffset);
+      const center = camera.position.clone().set(0, -2, 1.5).sub(rtc);
+      controls._set(center.clone().addScaledVector(camera.position.clone().set(0, -1, 0), 3), center);
+      camera.updateMatrixWorld();
+      scene.setDisplayMode('textures');
+      const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
+      // The 48-sided cylinder has radius 2 and UVs (arc length, height) in metres. Sample the centres of
+      // checker squares 1/16 m wide on the first facet after -Y, interpolating between its endpoints.
+      const a = 3 * Math.PI / 2, b = a + Math.PI / 24;
+      const first = center.clone().set(2 * Math.cos(a), 2 * Math.sin(a), 0);
+      const last = center.clone().set(2 * Math.cos(b), 2 * Math.sin(b), 0);
+      return [[9.53125, 1.53125], [9.59375, 1.53125], [9.65625, 1.53125], [9.53125, 1.59375]]
+        .map(([u, z]) => {
+          const p = first.clone().lerp(last, (u / 2 - a) / (b - a)).setZ(z).sub(rtc).project(camera);
+          return [Math.round(rect.left + (p.x + 1) * rect.width / 2), Math.round(rect.top + (1 - p.y) * rect.height / 2)];
+        });
+    });
+    await expect.poll(async () => {
+      const [light, darkU, repeatU, darkV] = await Promise.all(coords.map(([x, y]) => brightness(page, x, y)));
+      return Math.min(light, repeatU) - Math.max(darkU, darkV);
+    }).toBeGreaterThan(35);
+    expect(errors).toEqual([]);
+  });
 }
 
 test('a mirrored instance is shaded like its unmirrored twin', async ({ page }) => {
@@ -376,27 +464,33 @@ test('context lost shows the reload message', async ({ page }) => {
   await expect(page.locator('#ioviewer-message')).toBeVisible();
 });
 
-test('pick element with index > 4096 (large fixture)', async ({ page }) => {
-  const { errors } = await open(page, 'large');
-  for (const element of [4097, 15123, 19999]) {
-    // Zoomed onto the element (it is 0.3 m among 20000), the centre of its top face.
-    const hit = await page.evaluate((element) => {
-      const { scene, controls, picker, camera } = window.__ioviewer;
-      const box = scene.elementBox(element);
-      controls.fitBox(box, false);
-      camera.updateMatrixWorld();
-      const top = box.getCenter(box.min.clone());
-      top.z = box.max.z;
-      const p = top.clone().project(camera);
-      const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
-      const found = picker.pick(rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height);
-      return found && { element: found.element, distance: found.point.distanceTo(top), slot: scene.instance(scene.instancesOf(element)[0]).slot };
-    }, element);
-    expect(hit.element).toBe(element);
-    expect(hit.distance).toBeLessThan(0.01);
-  }
-  expect(errors).toEqual([]);
-});
+for (const pickFloat of [true, false]) {
+  test(`picking round-trips high slots and surface points (pickFloat: ${pickFloat})`, async ({ page }) => {
+    await page.addInitScript((value) => { window.IOVIEWER_TEST = { pickFloat: value }; }, pickFloat);
+    const { errors } = await open(page, 'large');
+    if (!pickFloat) expect(await page.evaluate(() => window.__ioviewer.picker._float)).toBe(false);
+    for (const element of [4097, 15123, 19999]) {
+      // Zoomed onto the element (it is 0.3 m among 20000), the centre of its top face.
+      const hit = await page.evaluate((element) => {
+        const { scene, controls, picker, camera } = window.__ioviewer;
+        const box = scene.elementBox(element);
+        controls.fitBox(box, false);
+        camera.updateMatrixWorld();
+        const top = box.getCenter(box.min.clone());
+        top.z = box.max.z;
+        const p = top.clone().project(camera);
+        const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
+        const found = picker.pick(rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height);
+        return found && { element: found.element, distance: found.point.distanceTo(top), slot: scene.instance(scene.instancesOf(element)[0]).slot };
+      }, element);
+      expect(hit).not.toBeNull();
+      expect(hit.slot).toBeGreaterThanOrEqual(256);
+      expect(hit.element).toBe(element);
+      expect(hit.distance).toBeLessThan(0.01);
+    }
+    expect(errors).toEqual([]);
+  });
+}
 
 test('a restored context keeps the reload message and nothing throws: no render, no pick', async ({ page }) => {
   const { errors } = await open(page, 'building');

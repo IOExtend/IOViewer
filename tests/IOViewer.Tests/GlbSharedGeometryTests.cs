@@ -12,6 +12,12 @@ public class GlbSharedGeometryTests
     // One triangle mesh (first vertex configurable, others (1,0,0), (0,1,0)) plus the given nodes and scene roots.
     internal static ViewerDocument Import(string nodesJson, string rootNodes, float[]? vertex0 = null)
     {
+        using var glb = BuildGlb(nodesJson, $$""" "scenes": [{ "nodes": [{{rootNodes}}] }] """, vertex0);
+        return GlbViewerImporter.Load(glb, "Test");
+    }
+
+    internal static MemoryStream BuildGlb(string nodesJson, string sceneProperties, float[]? vertex0 = null)
+    {
         var bin = new byte[44];
         float[] pos = [vertex0?[0] ?? 0, vertex0?[1] ?? 0, vertex0?[2] ?? 0, 1, 0, 0, 0, 1, 0];
         for (int i = 0; i < 9; i++) BinaryPrimitives.WriteSingleLittleEndian(bin.AsSpan(i * 4, 4), pos[i]);
@@ -31,7 +37,7 @@ public class GlbSharedGeometryTests
           ],
           "meshes": [{ "name": "Tri", "primitives": [{ "attributes": { "POSITION": 0 }, "indices": 1 }] }],
           "nodes": [{{nodesJson}}],
-          "scenes": [{ "nodes": [{{rootNodes}}] }]
+          {{sceneProperties}}
         }
         """;
 
@@ -40,8 +46,8 @@ public class GlbSharedGeometryTests
         Array.Fill(paddedJson, (byte)0x20);
         jsonBytes.CopyTo(paddedJson, 0);
 
-        using var ms = new MemoryStream();
-        using var bw = new BinaryWriter(ms);
+        var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
         bw.Write(0x46546C67u);
         bw.Write(2u);
         bw.Write((uint)(12 + 8 + paddedJson.Length + 8 + bin.Length));
@@ -53,7 +59,7 @@ public class GlbSharedGeometryTests
         bw.Write(bin);
         bw.Flush();
         ms.Position = 0;
-        return GlbViewerImporter.Load(ms, "Test");
+        return ms;
     }
 
     private static void AssertNear(Vector3d expected, Vector3d actual)
@@ -99,9 +105,34 @@ public class GlbSharedGeometryTests
     [Fact]
     public void NestedNodes_ComposeParentThenChild()
     {
-        var doc = Import("""{ "translation": [0,5,0], "children": [1] }, { "mesh": 0, "translation": [1,0,0] }""", "0");
+        var doc = Import("""
+            { "translation": [5,7,11], "rotation": [0,0,0.7071068,0.7071068], "scale": [2,3,4], "children": [1] },
+            { "mesh": 0, "translation": [1,2,3], "rotation": [0,0.7071068,0,0.7071068], "scale": [2,3,4] }
+            """, "0", [1, 1, 1]);
 
-        AssertNear(new Vector3d(1, 0, 5), World(doc, 0));
+        // Child takes (1,1,1) to (5,5,1), then parent to (-10,17,15) before Y-up to Z-up.
+        AssertNear(new Vector3d(-10, -15, 17), World(doc, 0));
+    }
+
+    [Fact]
+    public void DefaultScene_SelectsTheReferencedScene()
+    {
+        using var glb = BuildGlb("""{ "mesh": 0 }""", """ "scene": 1, "scenes": [{}, { "nodes": [0] }] """);
+        Assert.Single(GlbViewerImporter.Load(glb).Scene.Instances);
+    }
+
+    [Theory]
+    [InlineData("\"scene\": -1, \"scenes\": [{ \"nodes\": [0] }]")]
+    [InlineData("\"scene\": 1, \"scenes\": [{ \"nodes\": [0] }]")]
+    [InlineData("\"scene\": 0, \"scenes\": []")]
+    [InlineData("\"scene\": 0")]
+    [InlineData("\"scene\": 2147483648, \"scenes\": [{}]")]
+    [InlineData("\"scene\": \"0\", \"scenes\": [{}]")]
+    public void DefaultScene_RejectsInvalidReference(string sceneProperties)
+    {
+        using var glb = BuildGlb("""{ "mesh": 0 }""", sceneProperties);
+        var error = Assert.Throws<InvalidDataException>(() => GlbViewerImporter.Load(glb));
+        Assert.Contains("glTF default scene index", error.Message);
     }
 
     [Fact]

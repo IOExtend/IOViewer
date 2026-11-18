@@ -1071,7 +1071,7 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
-    public void Export_200kElements_DoesNotBuildWholeString()
+    public void Export_200kElements_WritesCompletePayloadWithSharedGeometry()
     {
         const int count = 200_000;
         var scene = TestScenes.Empty();

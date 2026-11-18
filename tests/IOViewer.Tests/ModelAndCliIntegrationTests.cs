@@ -61,6 +61,29 @@ public class ModelAndCliIntegrationTests
         """;
 
     [Fact]
+    public void Cli_MissingInputAndUnknownOption_ReportTheCorrectExitCodes()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"missing_{Guid.NewGuid():N}.obj");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            Console.SetError(errors);
+            Assert.Equal(1, Program.Main(["--unknown-option"]));
+            Assert.Contains("--unknown-option", errors.ToString());
+            errors.GetStringBuilder().Clear();
+
+            Assert.Equal(2, Program.Main([input]));
+            Assert.Contains($"File not found: '{input}'", errors.ToString());
+            Assert.False(File.Exists(Path.ChangeExtension(input, ".html")));
+        }
+        finally
+        {
+            Console.SetError(origErr);
+        }
+    }
+
+    [Fact]
     public void Cli_AnOutputThatCannotBeWritten_GivesExitCode3()
     {
         string root = Path.Combine(Path.GetTempPath(), $"test_cli_{Guid.NewGuid():N}");
@@ -197,6 +220,32 @@ public class ModelAndCliIntegrationTests
             Console.SetError(origErr);
             if (File.Exists(tempObj)) File.Delete(tempObj);
             if (File.Exists(tempHtml)) File.Delete(tempHtml);
+        }
+    }
+
+    [Fact]
+    public void Cli_InvalidGlbDefaultScene_FailsAtLoadAndKeepsExistingOutput()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.glb");
+        string output = Path.ChangeExtension(input, ".html");
+        using var errors = new StringWriter();
+        var origErr = Console.Error;
+        try
+        {
+            using var glb = GlbSharedGeometryTests.BuildGlb("""{ "mesh": 0 }""", """ "scene": 1, "scenes": [{ "nodes": [0] }] """);
+            File.WriteAllBytes(input, glb.ToArray());
+            File.WriteAllText(output, "previous export");
+            Console.SetError(errors);
+
+            Assert.Equal(3, Program.Main([input, "-o", output]));
+            Assert.Contains($"Failed to load '{input}': glTF default scene index 1", errors.ToString());
+            Assert.Equal("previous export", File.ReadAllText(output));
+        }
+        finally
+        {
+            Console.SetError(origErr);
+            File.Delete(input);
+            File.Delete(output);
         }
     }
 

@@ -78,6 +78,15 @@ public static class GlbViewerImporter
 
         using var jsonDoc = JsonDocument.Parse(jsonText);
         var root = jsonDoc.RootElement;
+        bool hasScenes = root.TryGetProperty("scenes", out var scenes);
+        int sceneIndex = 0;
+        if (root.TryGetProperty("scene", out var defaultScene))
+        {
+            if (defaultScene.ValueKind != JsonValueKind.Number || !defaultScene.TryGetInt32(out sceneIndex))
+                throw new InvalidDataException("glTF default scene index must be a 32-bit integer.");
+            if (sceneIndex < 0 || !hasScenes || scenes.ValueKind != JsonValueKind.Array || sceneIndex >= scenes.GetArrayLength())
+                throw new InvalidDataException($"glTF default scene index {sceneIndex} does not reference a scene.");
+        }
 
         // Parse accessors & bufferViews
         if (!root.TryGetProperty("accessors", out var accessorsEl) ||
@@ -212,13 +221,10 @@ public static class GlbViewerImporter
             }
         }
 
-        if (root.TryGetProperty("scenes", out var scenesEl) && root.TryGetProperty("nodes", out var nodesEl))
+        if (hasScenes && root.TryGetProperty("nodes", out var nodesEl))
         {
             var nodes = nodesEl.EnumerateArray().ToArray();
-            var scenes = scenesEl.EnumerateArray().ToArray();
-            int sceneIndex = root.TryGetProperty("scene", out var sceneProp) ? sceneProp.GetInt32() : 0;
-            if (sceneIndex >= 0 && sceneIndex < scenes.Length &&
-                scenes[sceneIndex].TryGetProperty("nodes", out var rootNodes))
+            if (scenes.GetArrayLength() > 0 && scenes[sceneIndex].TryGetProperty("nodes", out var rootNodes))
             {
                 // glTF node hierarchy is a strict tree: reaching a node twice (shared child, repeated root, cycle) is invalid.
                 var visited = new HashSet<int>();
