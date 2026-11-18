@@ -40,13 +40,16 @@ function decodeInto(bytes, offset, text) {
 // The page's data blocks are missing, malformed or do not fit together, as in a truncated or damaged file.
 export class ModelDataError extends Error {}
 
-export function loadModelData(doc = document) {
+export function loadModelData(doc = document, startup) {
   let meta, bin;
   try {
+    startup?.('metadataStart');
     meta = JSON.parse(block(doc, 'ioviewer-meta'));
+    startup?.('metadataEnd');
     const binElement = doc.getElementById('ioviewer-bin');
     if (!binElement) throw new Error("Data block 'ioviewer-bin' is missing.");
     bin = decodeBase64(binElement);
+    startup?.('binaryEnd');
   } catch (error) {
     throw new ModelDataError(error.message, { cause: error });
   }
