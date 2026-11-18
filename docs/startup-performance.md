@@ -14,6 +14,8 @@ HTML parsing and browser startup work. On browsers with Long Tasks reporting, bl
 50 ms for each reported task before `ready`. The heap figure is the largest JavaScript heap sample at the phase
 boundaries. Brief allocations between samples and GPU memory are outside that measurement.
 
+See the [viewer GPU baseline](viewer-performance-baseline.md) for the full orbit and picking measurements.
+
 ## Reference workloads
 
 - Generate the deterministic 200,000-element fixture with `PERF_LADDER=200000`. It has 200,000 instances and

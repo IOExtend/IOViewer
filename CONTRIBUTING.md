@@ -93,6 +93,7 @@ system dependencies with `npx playwright install --with-deps chromium firefox` a
 window (for example `PERF_LADDER=25000,200000` measures synthetic models made
 by `tools/SyntheticModel`); its settings are described at the top of
 `test/perf/orbit.perf.js`. Set `PERF_STARTUP_ONLY=1` to [measure the first frame](docs/startup-performance.md).
+For repeatable GPU comparisons, use the [reference workloads and measurements](docs/viewer-performance-baseline.md).
 The harness runs outside CI. Include its numbers in the
 pull request when a change can affect rendering speed. npm dependencies are
 pinned to exact versions. When updating three.js (for example a Dependabot pull
