@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -414,8 +415,14 @@ internal sealed class ViewerPayloadWriter
     private bool Same<T>(T[]? values, BlobView? view) where T : struct =>
         values is null ? view is null : view is { } v && Bytes(values).SequenceEqual(_blob.Bytes(v));
 
-    private static ReadOnlySpan<byte> Bytes<T>(T[]? values) where T : struct =>
-        values is null ? default : MemoryMarshal.AsBytes(values.AsSpan());
+    private static ReadOnlySpan<byte> Bytes<T>(T[]? values) where T : struct
+    {
+        if (values is null) return default;
+
+        // Hashing needs a byte span before the geometry can be deduplicated and appended.
+        BinaryBlobBuilder.CheckByteCount((long)values.Length * Unsafe.SizeOf<T>(), int.MaxValue);
+        return MemoryMarshal.AsBytes(values.AsSpan());
+    }
 
     // The instance colour overrides the material colour; the alpha of the colour drawn is the only opacity, and the
     // texture is the material's.

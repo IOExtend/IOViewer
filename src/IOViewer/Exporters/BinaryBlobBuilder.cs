@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Text;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -33,15 +34,15 @@ internal sealed class BinaryBlobBuilder
         }
     }
 
-    public BlobView Add(ReadOnlySpan<float> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "f32");
+    public BlobView Add(ReadOnlySpan<float> values) => Add(values, "f32");
 
-    public BlobView Add(ReadOnlySpan<ushort> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "u16");
+    public BlobView Add(ReadOnlySpan<ushort> values) => Add(values, "u16");
 
-    public BlobView Add(ReadOnlySpan<short> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "i16");
+    public BlobView Add(ReadOnlySpan<short> values) => Add(values, "i16");
 
-    public BlobView Add(ReadOnlySpan<uint> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "u32");
+    public BlobView Add(ReadOnlySpan<uint> values) => Add(values, "u32");
 
-    public BlobView Add(ReadOnlySpan<int> values) => Add(MemoryMarshal.AsBytes(values), values.Length, "i32");
+    public BlobView Add(ReadOnlySpan<int> values) => Add(values, "i32");
 
     /// <summary>Returns the bytes of a previously added array.</summary>
     public ReadOnlySpan<byte> Bytes(BlobView view)
@@ -72,13 +73,35 @@ internal sealed class BinaryBlobBuilder
         }
     }
 
-    private BlobView Add(ReadOnlySpan<byte> bytes, int count, string type)
+    private BlobView Add<T>(ReadOnlySpan<T> values, string type) where T : unmanaged
     {
-        int padding = (4 - _buffer.WrittenCount % 4) % 4;
-        _buffer.GetSpan(padding)[..padding].Clear();
-        _buffer.Advance(padding);
-        var view = new BlobView(_buffer.WrittenCount, count, type);
-        _buffer.Write(bytes);
-        return view;
+        int written = _buffer.WrittenCount;
+        var (offset, end) = CheckAppend(written, values.Length, Unsafe.SizeOf<T>());
+        int added = end - written;
+        if (added > 0)
+        {
+            int padding = offset - written;
+            var target = _buffer.GetSpan(added);
+            target[..padding].Clear();
+            MemoryMarshal.AsBytes(values).CopyTo(target[padding..]);
+            _buffer.Advance(added);
+        }
+        return new BlobView(offset, values.Length, type);
+    }
+
+    internal static (int Offset, int End) CheckAppend(int written, int count, int elementSize)
+    {
+        long offset = (written + 3L) & ~3L;
+        int end = CheckByteCount(offset + (long)count * elementSize, Array.MaxLength);
+        return ((int)offset, end);
+    }
+
+    internal static int CheckByteCount(long required, int limit)
+    {
+        if (required > limit)
+        {
+            throw new InvalidDataException($"The HTML viewer binary buffer requires {required} bytes, exceeding the limit of {limit} bytes.");
+        }
+        return (int)required;
     }
 }
