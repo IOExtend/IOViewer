@@ -290,6 +290,10 @@ export class ModelScene {
     return this._elementOf[this._slotInstance[slot]];
   }
 
+  slotInstance(slot) {
+    return this._slotInstance[slot];
+  }
+
   // Runs fn with `material` on every chunk's triangles (and triangles shown in wireframe mode), e.g. for picking.
   withMaterial(material, fn) {
     this._picking = true;

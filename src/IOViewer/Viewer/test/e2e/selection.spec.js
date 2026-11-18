@@ -256,11 +256,20 @@ test('a mesh without an element is picked for navigation and measuring, but clic
   // The distance tool measures from the marker to a point on the ground slab.
   const slabPoint = [2, -0.9, 0];
   await page.locator('.ioviewer-tool[data-tool="distance"]').click();
+  const slab = await screenOfWorld(page, slabPoint);
+  await page.mouse.move(...point);
+  await expect(page.locator('.ioviewer-measure-preview')).toBeVisible();
+  const preview = await page.evaluate(() => window.__ioviewer.measure.preview.point.toArray());
   await page.mouse.click(...point);
-  await page.mouse.click(...(await screenOfWorld(page, slabPoint)));
-  const measured = await page.evaluate(() => ({ count: window.__ioviewer.measure.points.length, distance: window.__ioviewer.measure.distance }));
-  expect(measured.count).toBe(2);
-  expect(Math.abs(measured.distance - Math.hypot(wx - slabPoint[0], wy - slabPoint[1], wz - slabPoint[2]))).toBeLessThan(0.05);
+  await page.mouse.click(...slab);
+  const measured = await page.evaluate(() => {
+    const { points } = window.__ioviewer.measure;
+    const offset = JSON.parse(document.getElementById('ioviewer-meta').textContent).rtcOffset;
+    return { points: points.map((p) => p.toArray()), slabElevation: points[1]?.z + offset[2] };
+  });
+  expect(measured.points).toHaveLength(2);
+  expect(measured.points[0]).toEqual(preview);
+  expect(measured.slabElevation).toBeCloseTo(0, 3);
   expect(await selected(page)).toEqual([]);
   expect(errors).toEqual([]);
 });

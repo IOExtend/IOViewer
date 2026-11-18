@@ -835,11 +835,36 @@ input:focus-visible {
 
 /* Screen-space labels over the scene: measured distance, grid axis names */
 .ioviewer-measure-label,
+.ioviewer-measure-preview,
 .ioviewer-grid-label {
   position: absolute;
   transform: translate(-50%, -50%);
   pointer-events: none;
   white-space: nowrap;
+}
+
+.ioviewer-measure-preview {
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
+  border: 2px solid #facc15;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #111317;
+}
+
+.ioviewer-measure-preview[data-kind="vertex"],
+.ioviewer-measure-preview[data-kind="midpoint"] {
+  border-radius: 0;
+}
+
+.ioviewer-measure-preview[data-kind="midpoint"] {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.ioviewer-measure-preview[data-kind="edge"] {
+  width: 13px;
+  height: 5px;
+  border-radius: 2px;
 }
 
 .ioviewer-measure-label {

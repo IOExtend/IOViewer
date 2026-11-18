@@ -198,6 +198,25 @@ test('releaseBinary frees BIN: views throw afterwards, META and PROPS stay', () 
   assert.deepEqual(data.props(42), {});
 });
 
+test('reads a scoped typed view after releasing BIN, across text node and base64 boundaries', () => {
+  const bytes = Uint8Array.from({ length: 23 }, (_, i) => i);
+  const encoded = Buffer.from(bytes).toString('base64');
+  const bin = 'ioviewer-bin';
+  const blocks = { 'ioviewer-meta': emptyMetaBlock, 'ioviewer-props': { textContent: '{}' } };
+  const view = { o: 4, n: 9, t: 'u16' };
+  for (const text of [encoded, ` \n${encoded.slice(0, 9)}\t${encoded.slice(9)}\r\n`]) {
+    blocks[bin] = textBlock(text, 7);
+    const data = loadModelData({ getElementById: (id) => blocks[id] });
+    const expected = Array.from(data.view(view));
+    const tail = Array.from(data.view({ o: 20, n: 1, t: 'u16' }));
+    data.releaseBinary();
+    assert.deepEqual(Array.from(data.readView(view)), expected);
+    assert.deepEqual(Array.from(data.readView({ o: 20, n: 1, t: 'u16' })), tail);
+    assert.throws(() => data.readView({ ...view, o: 6 }), ModelDataError);
+    assert.throws(() => data.view(view), /released/);
+  }
+});
+
 test('BIN without its padding decodes as atob does', () => {
   const blocks = { 'ioviewer-meta': emptyMetaBlock, 'ioviewer-bin': textBlock('QUJDRA'), 'ioviewer-props': { textContent: '{}' } };
   const data = loadModelData({ getElementById: (id) => blocks[id] });

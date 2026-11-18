@@ -67,9 +67,15 @@ test('distance: two clicks on the slab top 6 m apart measure 6.00 m; the selecti
 
   // The label sits at the projected midpoint.
   await frame(page);
+  const midpoint = await page.evaluate(() => {
+    const [a, b] = window.__ioviewer.measure.points;
+    const rtc = JSON.parse(document.getElementById('ioviewer-meta').textContent).rtcOffset;
+    return a.clone().lerp(b, 0.5).toArray().map((v, i) => v + rtc[i]);
+  });
+  const [mx, my] = await screenOfWorld(page, midpoint);
   const label = await page.locator('.ioviewer-measure-label').boundingBox();
-  expect(Math.abs(label.x + label.width / 2 - (a[0] + b[0]) / 2)).toBeLessThan(2);
-  expect(Math.abs(label.y + label.height / 2 - (a[1] + b[1]) / 2)).toBeLessThan(2);
+  expect(Math.abs(label.x + label.width / 2 - mx)).toBeLessThan(2);
+  expect(Math.abs(label.y + label.height / 2 - my)).toBeLessThan(2);
 
   // A drag still orbits and does not place a point.
   const before = await page.evaluate(() => window.__ioviewer.camera.position.toArray());
