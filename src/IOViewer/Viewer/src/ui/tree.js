@@ -38,20 +38,23 @@ export function groupByCategory(elements) {
 
 /**
  * Model tree in `container`: collapsed categories with counts, then elements (name, muted type); a search flattens
- * matches. Rows in view and the focused row exist in the DOM. Activating an element calls activate(index);
+ * matches. Rows in view and the focused row exist in the DOM. Activating an element selects and zooms to it;
  * selecting elsewhere scrolls to and highlights the last selected row, expanding its category. Hidden elements are dimmed.
  */
-export function mountTree(container, { elements, selection, scene, activate, openKeyboardMenu }) {
+export function mountTree(container, { elements, selection, scene, zoomToElement, openContextMenu }) {
   const groups = groupByCategory(elements);
   const categoryOf = new Int32Array(elements.length);
   groups.forEach((group, c) => group.indices.forEach((i) => (categoryOf[i] = c)));
   const expanded = new Uint8Array(groups.length);
   const groupRows = new Int32Array(groups.length);
+  const selectedCounts = new Uint32Array(groups.length);
   const search = createSearch(elements);
   let query = '';
   let rows = new Int32Array(0); // element index, or -(category + 1) for a category header
   let tabRow = 0;
   let pendingRow = -1; // row to scroll to once the tree has a size (it is laid out only while its panel is open)
+  let rangeAnchor = null; // row value, stable across filtering, expansion and scrolling
+  let selectingInTree = false;
 
   const input = el('input', 'ioviewer-tree-search');
   input.type = 'search';
@@ -110,14 +113,17 @@ export function mountTree(container, { elements, selection, scene, activate, ope
 
   function row(r) {
     const value = rows[r];
+    const c = value < 0 ? -value - 1 : categoryOf[value];
+    const selected = value < 0 ? selectedCounts[c] === groups[c].indices.length : selection.has(value);
     const node = el('div', 'tree-row');
     node.style.top = `${r * ROW_HEIGHT}px`;
     node.style.height = `${ROW_HEIGHT}px`;
     node.dataset.row = r;
     node.tabIndex = r === tabRow ? 0 : -1;
     node.setAttribute('role', 'treeitem');
+    node.classList.toggle('selected', selected);
+    node.setAttribute('aria-selected', String(selected));
     if (value < 0) {
-      const c = -value - 1;
       node.classList.add('tree-category');
       node.setAttribute('aria-level', '1');
       node.setAttribute('aria-posinset', String(c + 1));
@@ -129,16 +135,12 @@ export function mountTree(container, { elements, selection, scene, activate, ope
       node.append(chevron, el('span', 'tree-name', name || t('noCategory')), el('span', 'tree-count', String(indices.length)));
     } else {
       const element = elements[value];
-      const selected = selection.has(value);
-      const c = categoryOf[value];
       node.classList.add('tree-element');
       node.setAttribute('aria-level', query ? '1' : '2');
       node.setAttribute('aria-posinset', String(query ? r + 1 : r - groupRows[c]));
       node.setAttribute('aria-setsize', String(query ? rows.length : groups[c].indices.length));
       node.classList.toggle('tree-child', !query);
-      node.classList.toggle('selected', selected);
       node.classList.toggle('tree-hidden', !scene.isVisible(value));
-      node.setAttribute('aria-selected', String(selected));
       node.append(el('span', 'tree-name', element.name || `#${element.id}`), el('span', 'tree-type', element.type ?? ''));
     }
     return node;
@@ -175,6 +177,51 @@ export function mountTree(container, { elements, selection, scene, activate, ope
     render();
   }
 
+  function selectInTree(indices) {
+    selectingInTree = true;
+    try {
+      selection.set(indices);
+    } finally {
+      selectingInTree = false;
+    }
+  }
+
+  function selectRange(r, additive) {
+    let anchor = rows.indexOf(rangeAnchor);
+    if (anchor < 0) {
+      anchor = r;
+      rangeAnchor = rows[r];
+    }
+    const range = rows.subarray(Math.min(anchor, r), Math.max(anchor, r) + 1).filter((value) => value >= 0);
+    if (range.length > 0) selectInTree(additive ? [...selection.values(), ...range] : range);
+  }
+
+  function toggleRow(value) {
+    rangeAnchor = value;
+    const c = -value - 1;
+    const targets = value < 0 ? groups[c].indices : [value];
+    const remove = value < 0 ? selectedCounts[c] === targets.length : selection.has(value);
+    const selected = new Set(selection.values());
+    for (const i of targets) {
+      if (remove) selected.delete(i);
+      else selected.add(i);
+    }
+    selectInTree(selected);
+  }
+
+  function openRowMenu(value, x, y) {
+    if (value >= 0 && !selection.has(value)) {
+      rangeAnchor = value;
+      selectInTree([value]);
+    }
+    const target = value >= 0 ? value : selection.values().next().value ?? null;
+    openContextMenu(x, y, target, () => {
+      const current = rows.indexOf(value);
+      if (current >= 0) focusRow(current);
+      else input.focus();
+    });
+  }
+
   // Tab can follow opening the panel before the ResizeObserver delivers its first visible size.
   input.addEventListener('focus', () => {
     if (!spacer.firstElementChild) syncLayout();
@@ -202,11 +249,16 @@ export function mountTree(container, { elements, selection, scene, activate, ope
     if (isContextMenuKey(e)) {
       e.preventDefault();
       if (!e.repeat) {
-        openKeyboardMenu(node, value >= 0 ? value : null, () => {
-          const current = rows.indexOf(value);
-          if (current >= 0) focusRow(current);
-          else input.focus();
-        });
+        const { left, bottom } = node.getBoundingClientRect();
+        openRowMenu(value, left, bottom);
+      }
+      return;
+    }
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (!e.repeat) {
+        if (e.shiftKey) selectRange(r, false);
+        else toggleRow(value);
       }
       return;
     }
@@ -253,7 +305,9 @@ export function mountTree(container, { elements, selection, scene, activate, ope
 
   function activateRow(value) {
     if (value >= 0) {
-      activate(value);
+      rangeAnchor = value;
+      selectInTree([value]);
+      zoomToElement(value);
       return;
     }
     expanded[-value - 1] ^= 1;
@@ -262,7 +316,18 @@ export function mountTree(container, { elements, selection, scene, activate, ope
 
   viewport.addEventListener('click', (e) => {
     const node = e.target.closest('.tree-row');
-    if (node) activateRow(rows[Number(node.dataset.row)]);
+    if (!node) return;
+    const r = Number(node.dataset.row);
+    const additive = e.ctrlKey || e.metaKey;
+    if (e.shiftKey) selectRange(r, additive);
+    else if (additive) toggleRow(rows[r]);
+    else activateRow(rows[r]);
+  });
+  viewport.addEventListener('contextmenu', (e) => {
+    const node = e.target.closest('.tree-row');
+    if (!node) return;
+    e.preventDefault();
+    openRowMenu(rows[Number(node.dataset.row)], e.clientX, e.clientY);
   });
   function syncLayout() {
     if (pendingRow >= 0 && viewport.clientHeight > 0) {
@@ -274,7 +339,16 @@ export function mountTree(container, { elements, selection, scene, activate, ope
   new ResizeObserver(syncLayout).observe(viewport);
   selection.addEventListener('change', () => {
     let last = -1;
-    for (const i of selection.values()) last = i;
+    selectedCounts.fill(0);
+    for (const i of selection.values()) {
+      selectedCounts[categoryOf[i]]++;
+      last = i;
+    }
+    if (selectingInTree) {
+      render();
+      return;
+    }
+    rangeAnchor = null;
     if (last >= 0) reveal(last);
     else render();
   });
