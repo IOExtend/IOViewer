@@ -147,7 +147,7 @@ var result = NwcSceneReader.Read("Tower.nwc");
 HtmlViewerExporter.Save(result.Document, "Tower.html");
 ```
 
-Check `result.Diagnostics` for conversion warnings and errors. For the adapter's supported inputs and limits, see the
+The adapter is in preview and can reject some NWC caches. Check `result.Diagnostics` for conversion warnings and errors. For supported inputs and limits, see the
 [NwcIO.Scene guide](https://github.com/IOExtend/NwcIO/blob/v0.13.0/docs/scene.md).
 
 For `IOViewer.Cli` 0.3.1, save the same scene with `IOScene.SceneJson.Save(result.Document, "Tower.scene.json")` and run

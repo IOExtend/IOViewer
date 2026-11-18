@@ -76,6 +76,10 @@ HtmlViewerExporter.Save(result.Document, "Tower.html");
 Inspect `result.Diagnostics` for warnings and errors. See the [NwcIO.Scene guide](https://github.com/IOExtend/NwcIO/blob/v0.13.0/docs/scene.md)
 for supported caches, diagnostics and conversion limits.
 
+The adapter is in preview. Some caches, including the IFC-derived office and terrain caches in the
+[Safe Software Navisworks example](https://support.safe.com/hc/en-us/articles/37510812360717-Getting-Started-with-Navisworks),
+fail to load with `NwcIO.Scene` 0.13.0. If you have the original IFC or Revit file, you can pass it directly to `ioviewer`.
+
 For the IOScene JSON handoff, save the scene with `IOScene.SceneJson.Save(result.Document, "Tower.scene.json")`.
 Then open it with the CLI, including `IOViewer.Cli` 0.3.1.
 
