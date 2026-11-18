@@ -73,6 +73,25 @@ and visibility.
 - `HtmlViewerOptions`: Title, which data to include (properties, viewpoints, grids, 4D schedule, clashes), the initial display mode (`InitialWireframe`, `InitialWhiteMode`), and `MaxMeshVertices`, which is unlimited by default; when a lower limit leaves meshes out, the viewer shows how many were written.
 - `JsonViewerExporter`: Writes a `ViewerDocument` as viewer JSON (`"Kind": "ioviewer"`, `"Format": 2`). A scene alone is written with IOScene's `SceneJson`.
 
+### Compute and export clash results
+
+Add [IOCoord](https://www.nuget.org/packages/IOCoord/0.1.0-preview.1) to the application alongside `IOViewer`. The
+queries take an IOScene document and two sets of scene element IDs and return a `SceneClashTest`.
+
+```csharp
+using IOCoord;
+using IOScene;
+using IOViewer.Exporters;
+
+var scene = SceneJson.Load("building.scene.json");
+long[] walls = scene.Elements.Where(e => e.Category == "Walls").Select(e => e.Id).ToArray();
+long[] floors = scene.Elements.Where(e => e.Category == "Floors").Select(e => e.Id).ToArray();
+
+scene.ClashTests.Add(SceneClash.FindHardClashes(scene, walls, floors));
+scene.ClashTests.Add(SceneClash.FindSurfaceClearances(scene, walls, floors, maxClearanceMetres: 0.05));
+HtmlViewerExporter.Save(scene, "clashes.html");
+```
+
 ### Importers (`IOViewer.Importers`)
 
 - `GlbViewerImporter`: Reads binary glTF 2.0 (`.glb`) files into a `ViewerDocument` with one model. Each glTF mesh primitive becomes one `SceneGeometry`, and each node that uses it a `SceneInstance` per primitive with the node's world transform, converted from glTF's Y-up to the viewer's Z-up. Each such node also becomes a `SceneElement` (category `GLB`, named after the node, else the mesh) that all its instances belong to. A material's base colour factor is linear in glTF and becomes an sRGB colour with the same alpha. A node hierarchy that is not a tree (a node referenced twice or a cycle) is rejected with `InvalidDataException`.

@@ -132,6 +132,17 @@ The archive limit is 64 MiB and 4,096 entries, with 2 MiB per XML file and 32 Mi
 The importer reads topic and viewpoint XML. Snapshots, attachments, markup lines and component
 colours are outside this import.
 
+Builds from this repository can check two categories for clashes after placing all source models. Use the exact
+category names displayed in the model tree:
+
+```sh
+ioviewer coordination.ifc --clash IFCWALL IFCSLAB -o review.html
+ioviewer building.rvt --clash Walls Floors --clash-clearance 0.05 -o clearance.html
+```
+
+The new test is appended to existing clash results. Open it in the HTML **Clashes** panel or save it in viewer JSON.
+See [clash check options and distance semantics](docs/getting-started.md#check-for-clashes).
+
 Export structured JSON snapshots:
 
 ```sh

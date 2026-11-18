@@ -4,6 +4,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using IfcIO.Scene;
+using IOCoord;
 using IOScene;
 using IOViewer.Exporters;
 using IOViewer.Importers;
@@ -38,6 +39,10 @@ internal static class Program
                              Repeat the pair for each model. Use 0,0,0,0 for an already aligned source.
           --title <title>     Page title shown in the browser tab.
           --bcf <file>        Import topics from a local BCF 2.1 archive in the scene's coordinates.
+          --clash <category-a> <category-b>
+                             Check two exact category names for hard clashes after placing all models.
+          --clash-clearance <metres>
+                             Check gaps up to this distance instead. Requires --clash.
           --wireframe         Enable wireframe display mode by default.
           --white-mode        Enable white/clay architectural rendering mode by default.
           --no-properties     Exclude element properties to reduce the file size.
@@ -81,6 +86,8 @@ internal static class Program
         string? customTitle = null;
         string? explicitJsonPath = null;
         string? bcfPath = null;
+        (string First, string Second)? clashCategories = null;
+        double? clashClearance = null;
         var additional = new List<(string Path, Transform3d Placement)>();
         bool wireframe = false;
         bool whiteMode = false;
@@ -119,6 +126,28 @@ internal static class Program
                         return 1;
                     }
                     bcfPath = args[++i];
+                    break;
+                case "--clash":
+                    if (clashCategories is not null || i + 2 >= args.Length
+                        || string.IsNullOrWhiteSpace(args[i + 1]) || args[i + 1].StartsWith('-')
+                        || string.IsNullOrWhiteSpace(args[i + 2]) || args[i + 2].StartsWith('-'))
+                    {
+                        Console.Error.WriteLine("Error: Specify two category names once with --clash <category-a> <category-b>.");
+                        return 1;
+                    }
+                    clashCategories = (args[i + 1], args[i + 2]);
+                    i += 2;
+                    break;
+                case "--clash-clearance":
+                    if (clashClearance is not null || i + 1 >= args.Length
+                        || !double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var metres)
+                        || !double.IsFinite(metres) || metres < 0)
+                    {
+                        Console.Error.WriteLine("Error: Specify one finite, nonnegative distance in metres with --clash-clearance.");
+                        return 1;
+                    }
+                    clashClearance = metres;
+                    i++;
                     break;
                 case "--add":
                     if (i + 3 >= args.Length || args[i + 1].StartsWith('-') || args[i + 2] != "--placement"
@@ -178,6 +207,12 @@ internal static class Program
             }
         }
 
+        if (clashClearance is not null && clashCategories is null)
+        {
+            Console.Error.WriteLine("Error: --clash-clearance requires --clash <category-a> <category-b>.");
+            return 1;
+        }
+
         if (string.IsNullOrEmpty(inputPath))
         {
             Console.Error.WriteLine("Error: Input file must be specified.");
@@ -233,6 +268,12 @@ internal static class Program
         {
             Console.Error.WriteLine($"Error: Failed to load '{Printable(sourcePath)}': {Printable(ex.Message)}");
             return 3;
+        }
+
+        if (clashCategories is { } categories)
+        {
+            int clashCode = CheckClashes(doc.Scene, categories, clashClearance);
+            if (clashCode != 0) return clashCode;
         }
 
         if (!string.IsNullOrEmpty(customTitle))
@@ -352,6 +393,37 @@ internal static class Program
 
     // Messages can quote names from the model file: control characters (escape sequences, line breaks) and format
     // characters (bidirectional overrides, invisible tag characters) become '?'. Runes, so characters above U+FFFF count too.
+    private static int CheckClashes(SceneDocument scene, (string First, string Second) categories, double? clearance)
+    {
+        long[] Select(string category) => scene.Elements.Where(element => element.Category == category)
+            .Select(element => element.Id).ToArray();
+
+        var first = Select(categories.First);
+        var second = Select(categories.Second);
+        if (first.Length == 0 || second.Length == 0)
+        {
+            string missing = first.Length == 0 ? categories.First : categories.Second;
+            Console.Error.WriteLine($"Error: The scene has no elements in clash category '{Printable(missing)}'.");
+            return 1;
+        }
+
+        try
+        {
+            var test = clearance is double metres
+                ? SceneClash.FindSurfaceClearances(scene, first, second, metres)
+                : SceneClash.FindHardClashes(scene, first, second);
+            test.Name += $" ({categories.First} / {categories.Second})";
+            scene.ClashTests.Add(test);
+            Console.Error.WriteLine($"Clash check found {test.Clashes.Count} element pairs.");
+            return 0;
+        }
+        catch (InvalidDataException ex)
+        {
+            Console.Error.WriteLine($"Error: Failed to check clashes: {Printable(ex.Message)}");
+            return 3;
+        }
+    }
+
     internal static string Printable(string text) =>
         string.Concat(text.EnumerateRunes().Select(r =>
             Rune.IsControl(r) || Rune.GetUnicodeCategory(r) == UnicodeCategory.Format ? "?" : r.ToString()));
