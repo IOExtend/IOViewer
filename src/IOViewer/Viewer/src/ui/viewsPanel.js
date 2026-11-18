@@ -49,7 +49,14 @@ export function mountViews({ shell, toolbar, controls, scene, sections, selectio
   // A press on the tour button, or Enter/Space on it, is left to its click, which toggles the tour.
   const onButton = (e) => tourButton.contains(e.target);
   const stopOnPress = (e) => !onButton(e) && stopTour();
-  const stopOnKey = (e) => !(onButton(e) && (e.key === 'Enter' || e.key === ' ')) && stopTour();
+  const stopOnKey = (e) => {
+    if (onButton(e) && (e.key === 'Enter' || e.key === ' ')) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    stopTour();
+  };
 
   function stopTour() {
     if (!tour) return;

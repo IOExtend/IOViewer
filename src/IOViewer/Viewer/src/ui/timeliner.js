@@ -7,7 +7,6 @@ import { segmented } from './sectionsPanel.js';
 const DAY_MS = 86400000;
 const SPEEDS = ['1', '5', '15']; // schedule days per second
 const COLORS = { construct: '#22c55e', demolish: '#ef4444', temporary: '#a855f7' };
-const PLAYER_SPACE = '156px'; // --toolbar-space while the player bar is open: panels end above it
 
 /**
  * «4D-график»: the task list and the 4D player, a bar above the toolbar with play/pause, a date slider across the
@@ -56,6 +55,11 @@ export function mountTimeliner({ root, shell, timeliner, elements, scene }) {
   close.addEventListener('click', closePlayer);
   bar.append(playButton, label, slider, speeds.element, close);
   root.append(bar);
+  const resize = new ResizeObserver(() => {
+    const space = bar.hidden ? 0 : bar.offsetHeight + 8;
+    root.style.setProperty('--player-space', `${space}px`);
+  });
+  resize.observe(bar);
 
   function apply() {
     const state = scheduleState(schedule.tasks, date);
@@ -87,7 +91,6 @@ export function mountTimeliner({ root, shell, timeliner, elements, scene }) {
     if (isOpen) return;
     isOpen = true;
     bar.hidden = false;
-    root.style.setProperty('--toolbar-space', PLAYER_SPACE);
     setDate(schedule.start);
   }
 
@@ -100,7 +103,6 @@ export function mountTimeliner({ root, shell, timeliner, elements, scene }) {
     hidden = new Set();
     scene.clearLayer('schedule');
     bar.hidden = true;
-    root.style.removeProperty('--toolbar-space');
   }
 
   function tick(now) {

@@ -371,7 +371,33 @@ test('view cube: from the load view «Сверху» faces the front, and the up
   await page.mouse.click(...(await cubePoint(page, [0, 0, 1]))); // the load heading is 45 degrees: a tie, front wins
   await expectView(page, [0, -tilt, lift]);
   await arrow(page, 'up').click();
+  await expect(arrow(page, 'up')).not.toBeFocused();
   await expectView(page, [0, 1, 0]);
+});
+
+test('view cube suppresses the browser menu and refreshes hover while the pointer stays still', async ({ page }) => {
+  await open(page);
+  const cube = await page.locator('.ioviewer-viewcube-canvas').boundingBox();
+  const x = cube.x + cube.width / 2;
+  const y = cube.y + cube.height / 2;
+  const hover = () => page.evaluate(() => window.__ioviewer.viewCube.hovered);
+  await page.mouse.move(x, y);
+  const before = await hover();
+  expect(before).not.toBeNull();
+  await page.evaluate(() => {
+    window.addEventListener('contextmenu', (e) => (window.__cubeMenuPrevented = e.defaultPrevented), { once: true });
+  });
+  await page.mouse.click(x, y, { button: 'right' });
+  expect(await page.evaluate(() => window.__cubeMenuPrevented)).toBe(true);
+  await page.evaluate(() => {
+    const { controls } = window.__ioviewer;
+    const { position } = controls.camera;
+    const distance = position.distanceTo(controls.target);
+    controls.animateTo({ position: position.clone().set(0, 1, 0).multiplyScalar(distance).add(controls.target) });
+  });
+  await expectView(page, [0, 1, 0]);
+  expect(await hover()).toBe('back');
+  expect(await hover()).not.toBe(before);
 });
 
 test('view cube arrows show only when aligned with a face and step between views', async ({ page }) => {
@@ -405,9 +431,14 @@ test('view cube home button restores the load view', async ({ page }) => {
   await page.mouse.click(...(await cubePoint(page, [0, 0, 1])));
   await expectView(page, [0, -tilt, lift]);
   await drag(page, 'right', [500, 400], [560, 380]); // pan moves the target too
-  await page.getByRole('button', { name: 'Исходный вид' }).click();
+  const home = page.getByRole('button', { name: 'Исходный вид' });
+  await home.click();
+  await expect(home).not.toBeFocused();
   await settle(page);
   expect(Math.max(...(await pose()).map((c, i) => Math.abs(c - load[i])))).toBeLessThan(1e-6);
+  await home.focus();
+  await page.keyboard.press('Enter');
+  await expect(home).toBeFocused();
 });
 
 test('the view cube takes no pointer events outside its box', async ({ page }) => {

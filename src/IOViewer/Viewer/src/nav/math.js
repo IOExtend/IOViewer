@@ -61,6 +61,31 @@ export function interpolateView(a, b, k) {
   return { position, target };
 }
 
+// For a cube arrow over the far edge of a pole view, take the direct arc and spread the change in roll
+// across the transition. World-up lookAt at the pole itself would flip the image in a single frame.
+export function poleCrossing(from, to, startUp, worldUp) {
+  const start = from.position.clone().sub(from.target);
+  const end = to.position.clone().sub(to.target);
+  const startDistance = start.length();
+  const endDistance = end.length();
+  start.normalize();
+  end.normalize();
+  const turn = new THREE.Quaternion().setFromUnitVectors(start, end);
+  const carriedUp = startUp.clone().applyQuaternion(turn);
+  const endUp = new THREE.Vector3().setFromMatrixColumn(new THREE.Matrix4().lookAt(to.position, to.target, worldUp), 1);
+  const sine = end.dot(new THREE.Vector3().crossVectors(carriedUp, endUp));
+  const roll = Math.atan2(Math.abs(sine) < 1e-9 ? 0 : sine, carriedUp.dot(endUp));
+  const rotation = new THREE.Quaternion();
+  return (k) => {
+    rotation.identity().slerp(turn, k);
+    const direction = start.clone().applyQuaternion(rotation);
+    const target = from.target.clone().lerp(to.target, k);
+    const position = direction.clone().multiplyScalar(THREE.MathUtils.lerp(startDistance, endDistance, k)).add(target);
+    const up = startUp.clone().applyQuaternion(rotation).applyAxisAngle(direction, roll * k);
+    return { position, target, up };
+  };
+}
+
 function polar(position, target) {
   const o = position.clone().sub(target);
   const distance = o.length();

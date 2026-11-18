@@ -4,7 +4,7 @@ import { createShell } from './shell.js';
 import { createToolbar, toolbarGroups } from './toolbar.js';
 import { mountTree } from './tree.js';
 import { createContextMenu } from './contextMenu.js';
-import { installHotkeys } from './hotkeys.js';
+import { hotkeyAction } from './hotkeys.js';
 import { mountStatusBar, mountTruncationBanner, showToast } from './statusBar.js';
 import { mountProperties } from './properties.js';
 
@@ -130,14 +130,18 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   });
 
   const escapeHandlers = [];
-  installHotkeys(window, {
-    ...actions,
-    contextMenu: () => openKeyboardMenu(document.activeElement ?? document.body),
-    // Esc closes an open menu and keeps the selection; otherwise a feature may use it; otherwise it clears the selection.
-    escape: () => {
-      if (contextMenu.isOpen) return contextMenu.close();
+  window.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented) return;
+    const action = hotkeyAction(e);
+    if (!action) return;
+    e.preventDefault();
+    if (action === 'contextMenu') return openKeyboardMenu(document.activeElement ?? document.body);
+    if (action === 'escape' && !contextMenu.isOpen) {
       if (!escapeHandlers.some((handle) => handle())) selection.clear();
-    },
+      return;
+    }
+    contextMenu.close();
+    if (action !== 'escape') actions[action]();
   });
   mountStatusBar(document.getElementById('ioviewer-status'), selection, scene.elementCount);
   mountTruncationBanner(root, meta.truncated);

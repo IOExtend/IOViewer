@@ -270,6 +270,25 @@ test.describe('views', () => {
     await page.keyboard.press('KeyA');
     await expect(tour).toHaveAttribute('aria-pressed', 'false');
     await tour.click();
+    await at(0);
+    const active = () => page.evaluate(() => {
+      const { measure, selection } = window.__ioviewer;
+      return [measure.points.length, selection.size];
+    });
+    await page.evaluate(() => {
+      const { measure, selection, controls } = window.__ioviewer;
+      selection.set([0]);
+      measure.setActive(true);
+      measure.add(controls.target);
+    });
+    await page.keyboard.press('Escape');
+    await expect(tour).toHaveAttribute('aria-pressed', 'false');
+    expect(await active()).toEqual([1, 1]);
+    await page.keyboard.press('Escape');
+    expect(await active()).toEqual([0, 1]);
+    await page.keyboard.press('Escape');
+    expect(await active()).toEqual([0, 0]);
+    await tour.click();
     await expect(tour).toHaveAttribute('aria-pressed', 'true');
     await tour.click();
     await expect(tour).toHaveAttribute('aria-pressed', 'false');

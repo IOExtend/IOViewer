@@ -148,6 +148,7 @@ test('keyboard can open the empty menu and unavailable actions stay disabled', a
   const reset = item(menu, 'resetSections');
   await expect(reset).toBeFocused();
   await expect(reset).toBeDisabled();
+  await expect(reset).toHaveAttribute('title', 'Недоступно для этой модели');
   await page.keyboard.press('Enter');
   await expect(menu).toBeVisible();
   await page.keyboard.press('Escape');

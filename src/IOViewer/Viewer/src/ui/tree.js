@@ -1,4 +1,4 @@
-import { t } from '../i18n.js';
+import { formatCount, t } from '../i18n.js';
 import { icons } from './icons.js';
 import { el } from './dom.js';
 import { isContextMenuKey } from './hotkeys.js';
@@ -145,7 +145,7 @@ export function mountTree(container, { elements, models, selection, scene, zoomT
       const chevron = el('span', 'tree-chevron');
       chevron.innerHTML = icons.chevron;
       const { name, indices } = groups[c];
-      node.append(chevron, el('span', 'tree-name', name || t('noCategory')), el('span', 'tree-count', String(indices.length)));
+      node.append(chevron, el('span', 'tree-name', name || t('noCategory')), el('span', 'tree-count', formatCount(indices.length)));
     } else {
       const element = elements[value];
       node.classList.add('tree-element');

@@ -41,6 +41,8 @@ export function createToolbar(root, groups) {
     bar.append(box);
   }
   root.append(bar);
+  const resize = new ResizeObserver(() => root.style.setProperty('--toolbar-height', `${bar.offsetHeight}px`));
+  resize.observe(bar);
 
   function get(id) {
     const entry = buttons.get(id);

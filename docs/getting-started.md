@@ -128,4 +128,5 @@ The model's up axis is +Z. The interface is in Russian when the browser language
 - Shift+left drag selects with a box: left to right selects objects fully inside, right to left selects objects it touches.
 - A right click without moving opens the context menu.
 - H hides the selection, I isolates it, Shift+H shows everything, F zooms to the selection (or fits the model), Esc
-  closes menus or clears the selection.
+  stops the viewpoint tour, closes the open menu or popup, clears the measurement, or clears the selection. Each
+  Esc press handles one action.

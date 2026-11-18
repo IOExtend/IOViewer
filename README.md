@@ -54,7 +54,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
 | Home / End, Enter in the model tree | Jump to the first or last row, or select and zoom to the focused element |
 | H / I / Shift+H | Hide selected / isolate selected / show all |
 | F | Zoom to the selection, or fit the whole model when nothing is selected |
-| Esc | Close the open menu or popup, or clear the measurement; otherwise clear the selection |
+| Esc | Stop the viewpoint tour, close the open menu or popup, clear the measurement, or clear the selection, one action per press |
 
 The model's up axis is +Z.
 

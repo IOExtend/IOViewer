@@ -22,14 +22,3 @@ export function hotkeyAction(e) {
       return null;
   }
 }
-
-// Calls actions[hotkeyAction(e)] for keydowns on `target` (window).
-export function installHotkeys(target, actions) {
-  target.addEventListener('keydown', (e) => {
-    if (e.defaultPrevented) return;
-    const action = hotkeyAction(e);
-    if (!action) return;
-    e.preventDefault();
-    actions[action]();
-  });
-}

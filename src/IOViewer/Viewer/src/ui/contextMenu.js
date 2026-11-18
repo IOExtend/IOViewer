@@ -68,6 +68,7 @@ export function createContextMenu(root) {
       button.dataset.item = id;
       button.setAttribute('role', 'menuitem');
       button.setAttribute('aria-disabled', String(!item.enabled));
+      if (!item.enabled) button.title = t('menu.unavailable');
       button.append(el('span', '', t(`menu.${id}`)), el('kbd', '', shortcuts[id] ?? ''));
       button.addEventListener('click', () => {
         if (!item.enabled) return;
