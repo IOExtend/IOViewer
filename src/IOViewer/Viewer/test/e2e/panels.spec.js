@@ -49,12 +49,20 @@ test.describe('clashes', () => {
     await expect(top).toBeVisible();
     expect(await rows.count()).toBeLessThan(100);
 
-    // Tab through the viewport. When the next native button scrolls into view its neighbours are added.
+    // Keyboard input can advance before the browser dispatches a scroll event.
+    const viewport = panel.locator('.ioviewer-panel-body');
+    const resumeScroll = await viewport.evaluateHandle((body) => {
+      const holdScroll = (event) => { if (event.target === body) event.stopPropagation(); };
+      window.addEventListener('scroll', holdScroll, true);
+      return () => window.removeEventListener('scroll', holdScroll, true);
+    });
     await panel.locator('.ioviewer-clash-header').first().focus();
     for (let i = 0; i < 45; i++) await page.keyboard.press('Tab');
     await expect(rows.filter({ has: page.getByText('Clash 45', { exact: true }) })).toBeFocused();
+    for (let i = 0; i < 44; i++) await page.keyboard.press('Shift+Tab');
+    await expect(top).toBeFocused();
+    await resumeScroll.evaluate((resume) => resume());
 
-    const viewport = panel.locator('.ioviewer-panel-body');
     const scrollDown = () => viewport.evaluate((body) => (body.scrollTop = body.scrollHeight));
     await scrollDown();
     await expect(bottom).toBeVisible();
