@@ -48,9 +48,7 @@ function shearModel() {
   return model;
 }
 
-// Exports every committed fixture, the building again opening in white mode, a generated large model for the
-// tree virtualization test, the sheared model, the building without the survey marker's element and a copy of the
-// building whose binary block is cut in half, as in a truncated file.
+// Exports the committed fixtures and variants for initial display, clipping, large scenes and damaged data.
 export default function globalSetup() {
   for (const file of readdirSync(fixturesDir).filter((f) => f.endsWith('.json'))) {
     exportHtml(path.join(fixturesDir, file), path.basename(file, '.json'));
@@ -63,14 +61,26 @@ export default function globalSetup() {
   const shear = path.join(viewerDir, 'test-results', 'shear.json');
   writeFileSync(shear, JSON.stringify(shearModel()));
   exportHtml(shear, 'shear');
-  // Its instance then names no element: Validate() rejects such a scene, but the page still draws it, as element -1.
-  const orphan = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
-  orphan.Scene.Elements = orphan.Scene.Elements.filter((e) => e.Name !== 'Survey Marker');
-  const orphanPath = path.join(viewerDir, 'test-results', 'orphan.json');
-  writeFileSync(orphanPath, JSON.stringify(orphan));
-  exportHtml(orphanPath, 'orphan');
 
   const results = path.join(viewerDir, 'test-results');
+  const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
+  const planes = [{ Axis: 3, Normal: [0, 0, 2], Offset: 2 }, { Axis: 0, Offset: -100, Enabled: false }];
+  for (const [name, box] of [
+    ['building-section-planes', null],
+    ['building-section-keep', { Min: [17.6, 5.6, -0.1], Max: [18.4, 6.4, 3.5], Inverted: false }],
+    ['building-section-cut', { Min: [17.6, 5.6, -0.1], Max: [18.4, 6.4, 3.5], Inverted: true }],
+  ]) {
+    const json = path.join(results, `${name}.json`);
+    writeFileSync(json, JSON.stringify({ ...building, SectionPlanes: planes, SectionBox: box }));
+    exportHtml(json, name);
+  }
+
+  // Its instance then names no element: Validate() rejects such a scene, but the page still draws it, as element -1.
+  building.Scene.Elements = building.Scene.Elements.filter((e) => e.Name !== 'Survey Marker');
+  const orphanPath = path.join(results, 'orphan.json');
+  writeFileSync(orphanPath, JSON.stringify(building));
+  exportHtml(orphanPath, 'orphan');
+
   const html = readFileSync(path.join(results, 'building.html'), 'utf8');
   const bin = /(<script id="ioviewer-bin" type="application\/octet-stream">)([^<]*)/;
   if (!bin.test(html)) throw new Error('building.html has no BIN block.');

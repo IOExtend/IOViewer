@@ -167,6 +167,60 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void Meta_ExportsEnabledSectionsInRtcCoordinates()
+    {
+        var doc = GeoreferencedModel();
+        doc.SectionPlanes =
+        [
+            new ViewerSectionPlane(ViewerSectionAxis.X, OffsetX + 1) { Normal = Vector3d.UnitZ },
+            new ViewerSectionPlane(ViewerSectionAxis.Z, double.NaN) { Enabled = false },
+            new ViewerSectionPlane(ViewerSectionAxis.Custom, 1_900_010, inverted: true) { Normal = new(3, 4, 0) },
+        ];
+        doc.SectionBox = new ViewerSectionBox(new(OffsetX, OffsetY + 2, -1), new(OffsetX + 8, OffsetY + 12, 3), inverted: true);
+
+        var sections = ViewerHtml.Export(doc).Meta.GetProperty("sections");
+        var planes = sections.GetProperty("planes");
+        Assert.Equal(2, planes.GetArrayLength());
+        Assert.Equal("x", planes[0].GetProperty("axis").GetString());
+        Assert.Equal([1, 0, 0], Vec(planes[0].GetProperty("normal")));
+        Assert.Equal(-4, planes[0].GetProperty("offset").GetDouble());
+        Assert.False(planes[0].GetProperty("flipped").GetBoolean());
+        Assert.Equal("custom", planes[1].GetProperty("axis").GetString());
+        Assert.Equal([0.6, 0.8, 0], Vec(planes[1].GetProperty("normal")));
+        Assert.Equal(1, planes[1].GetProperty("offset").GetDouble(), 8);
+        Assert.True(planes[1].GetProperty("flipped").GetBoolean());
+        Assert.Equal([-5, -5.5, -1], Vec(sections.GetProperty("box").GetProperty("min")));
+        Assert.Equal([3, 4.5, 3], Vec(sections.GetProperty("box").GetProperty("max")));
+        Assert.True(sections.GetProperty("cutInside").GetBoolean());
+    }
+
+    [Fact]
+    public void Meta_OmitsDisabledSectionsAndCapsEnabledPlanesAtSix()
+    {
+        var doc = GeoreferencedModel();
+        doc.SectionBox = new ViewerSectionBox(Vector3d.Zero, Vector3d.Zero, enabled: false);
+        doc.SectionPlanes = [new ViewerSectionPlane { Enabled = false }];
+        Assert.False(ViewerHtml.Export(doc).Meta.TryGetProperty("sections", out _));
+
+        doc.SectionPlanes.AddRange(Enumerable.Range(0, 7).Select(i => new ViewerSectionPlane(ViewerSectionAxis.Z, i)));
+        var sections = ViewerHtml.Export(doc).Meta.GetProperty("sections");
+        Assert.False(sections.TryGetProperty("box", out _));
+        Assert.Equal([0, 1, 2, 3, 4, 5], sections.GetProperty("planes").EnumerateArray().Select(p => p.GetProperty("offset").GetDouble()));
+    }
+
+    [Fact]
+    public void InvalidSectionGeometry_RejectsZeroNormalAndReversedBounds()
+    {
+        var doc = GeoreferencedModel();
+        doc.SectionPlanes = [new ViewerSectionPlane { Axis = ViewerSectionAxis.Custom, Normal = Vector3d.Zero }];
+        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(doc));
+
+        doc.SectionPlanes.Clear();
+        doc.SectionBox = new ViewerSectionBox(new(0, 1, 0), Vector3d.Zero);
+        Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.ExportToString(doc));
+    }
+
+    [Fact]
     public void Meta_WritesSourceIdOnlyWhenSet()
     {
         const string hostile = "\"></script><script>window.__xss=1</script>";

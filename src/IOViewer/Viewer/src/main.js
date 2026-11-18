@@ -75,7 +75,7 @@ function start(data, context) {
   const motionDetail = new MotionDetail(scene, requestRender, Math.min(scene.totalCost, 20e6));
   world.add(scene.root);
   // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
-  const sections = new Sections(scene, scene.visibleBox());
+  const sections = new Sections(scene, scene.visibleBox(), data.meta.sections);
   const sectionGizmo = new SectionGizmo(sections, canvas);
   world.add(sectionGizmo.group); // outside scene.root: the picking id pass renders only the model
   const uiRoot = document.getElementById('ioviewer-ui');

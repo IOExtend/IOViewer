@@ -77,6 +77,40 @@ async function drag(page, from, to, steps = 8) {
   await page.mouse.up();
 }
 
+test('exported HTML opens with the saved plane applied and the gizmo hidden', async ({ page }) => {
+  const errors = await open(page, 'building-section-planes');
+  await expect(tool(page, 'plane')).toHaveAttribute('aria-pressed', 'true');
+  const state = await page.evaluate(() => {
+    const { sections, sectionGizmo } = window.__ioviewer;
+    const { rtcOffset } = JSON.parse(document.getElementById('ioviewer-meta').textContent);
+    return { axes: sections.planes.map((plane) => plane.axis), z: sections.origin(0).z + rtcOffset[2], gizmo: sectionGizmo.planeGizmo.visible };
+  });
+  expect(state).toMatchObject({ axes: ['custom'], gizmo: false });
+  expect(state.z).toBeCloseTo(2, 9);
+  const roof = await indexOf(page, 'Roof Slab');
+  const ground = await indexOf(page, 'Ground Slab');
+  expect(await pickAt(page, await screenAt(page, roof, [0.5, 0.95, 1]))).not.toBe(roof);
+  expect(await pickAt(page, await screenAt(page, ground, [0.985, 0.5, 1]))).toBe(ground);
+  expect(errors).toEqual([]);
+});
+
+for (const inverted of [false, true]) {
+  test(`exported HTML opens in section box mode (${inverted ? 'cut inside' : 'keep inside'})`, async ({ page }) => {
+    const errors = await open(page, inverted ? 'building-section-cut' : 'building-section-keep');
+    await expect(tool(page, 'box')).toHaveAttribute('aria-pressed', 'true');
+    const state = await page.evaluate(() => {
+      const { sections, sectionGizmo } = window.__ioviewer;
+      return { mode: sections.mode, boxMode: sections.boxMode, planes: sections.planes.length, handles: sectionGizmo.boxHandles.some((h) => h.visible) };
+    });
+    expect(state).toEqual({ mode: 'box', boxMode: inverted ? 'cutInside' : 'keepInside', planes: 1, handles: false });
+    const inside = await indexOf(page, 'Column D2 Level 1');
+    const outside = await indexOf(page, 'Column D1 Level 1');
+    expect(await pickAt(page, await screenAt(page, inside)) === inside).toBe(!inverted);
+    expect(await pickAt(page, await screenAt(page, outside)) === outside).toBe(inverted);
+    expect(errors).toEqual([]);
+  });
+}
+
 test('a Z plane through the middle cuts the roof away; flipping it brings the roof back and cuts the ground slab; reset restores', async ({ page }) => {
   const errors = await open(page);
   await page.evaluate(() => window.__ioviewer.grids.setVisible(false)); // axis 2 runs across the sampled slab rim

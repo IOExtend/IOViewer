@@ -9,6 +9,7 @@ API between minor releases.
 ### Added
 
 - `ioviewer` reads Navisworks `.nwc` caches through `NwcIO.Scene` 0.13.0.
+- Standalone HTML opens with the section box or cutting planes saved in `ViewerDocument`.
 
 ## [0.3.1] - 2026-11-13
 

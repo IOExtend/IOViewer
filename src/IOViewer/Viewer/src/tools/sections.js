@@ -14,7 +14,7 @@ const Z = new THREE.Vector3(0, 0, 1);
  * Dispatches 'change' after every change.
  */
 export class Sections extends EventTarget {
-  constructor(scene, modelBox) {
+  constructor(scene, modelBox, initial) {
     super();
     this.scene = scene;
     this.modelBox = modelBox.clone();
@@ -25,6 +25,22 @@ export class Sections extends EventTarget {
     this.boxMode = 'keepInside';
     this.gizmoVisible = true;
     this._mode = 'off';
+    if (!initial || modelBox.isEmpty()) return;
+
+    this.planes = initial.planes.map(({ axis, normal: components, offset, flipped }) => {
+      const normal = new THREE.Vector3().fromArray(components);
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(Z, normal);
+      // The payload measures from the RTC origin. The controls measure from the model centre.
+      return { axis, quaternion, offset: offset - normal.dot(this.center), flipped, enabled: true, rotated: false };
+    });
+    if (this.planes.length) this.active = 0;
+    if (initial.box) {
+      const { min, max } = initial.box;
+      this.box = new THREE.Box3(new THREE.Vector3().fromArray(min), new THREE.Vector3().fromArray(max));
+      this.boxMode = initial.cutInside ? 'cutInside' : 'keepInside';
+    }
+    this.gizmoVisible = false;
+    this.setMode(this.box ? 'box' : 'planes');
   }
 
   get mode() {
@@ -69,7 +85,7 @@ export class Sections extends EventTarget {
     if (enabled !== undefined) plane.enabled = !!enabled;
     if (quaternion) {
       plane.quaternion.copy(quaternion).normalize();
-      plane.rotated = this.normal(i).angleTo(axisVector(plane.axis)) > 1e-6;
+      plane.rotated = plane.axis !== 'custom' && this.normal(i).angleTo(axisVector(plane.axis)) > 1e-6;
     }
     this._changed(true);
   }

@@ -151,7 +151,6 @@ The documentation site with API references and guides is at <https://ioextend.gi
 - `HtmlViewerOptions.MaxMeshVertices` is unlimited by default. When a lower limit cuts the model, the viewer shows a banner with the number of meshes written.
 - The viewer needs WebGL 2; without it the page says so. If the browser drops the graphics context, the page shows a message asking to reload it.
 - Transparent objects are sorted per chunk of merged geometry (or per cell of instanced copies), not per object, so overlapping transparent objects in the same chunk can blend in the wrong order.
-- Section planes and section boxes stored in `ViewerDocument` are kept in viewer JSON but are not applied by the HTML viewer when it opens.
 - The viewer draws triangles only. Instances of line or point geometry are skipped, and the CLI prints a warning with their number.
 - The OBJ importer reads geometry only; `.mtl` material files are not read.
 

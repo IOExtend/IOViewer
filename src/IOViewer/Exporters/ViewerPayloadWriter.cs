@@ -23,6 +23,7 @@ namespace IOViewer.Exporters;
 internal sealed class ViewerPayloadWriter
 {
     private const int FlushThreshold = 1 << 16;
+    private const int MaxSectionPlanes = 6; // Matches the viewer's MAX_PLANES.
     private static readonly RgbaColor DefaultColor = new(200, 200, 200);
 
     private readonly SceneDocument _scene;
@@ -40,6 +41,8 @@ internal sealed class ViewerPayloadWriter
     private readonly List<uint> _instanceMaterial = [];
     private readonly List<int> _instanceElement = [];
     private readonly List<float> _instanceMatrix = [];
+    private readonly List<(string Axis, Vector3d Normal, double Offset, bool Flipped)> _sectionPlanes = [];
+    private (BoundingBox3d Bounds, bool Inverted)? _sectionBox;
     private BoundingBox3d _bounds;
     private Vector3d _rtcOffset;
     private int _drawable;
@@ -60,8 +63,43 @@ internal sealed class ViewerPayloadWriter
     {
         var writer = new ViewerPayloadWriter(doc, options);
         writer.Build();
+        writer.BuildSections(doc);
         return writer;
     }
+
+    private void BuildSections(ViewerDocument doc)
+    {
+        foreach (var plane in doc.SectionPlanes ?? [])
+        {
+            if (plane is not { Enabled: true }) continue;
+            var (axis, normal) = plane.Axis switch
+            {
+                ViewerSectionAxis.X => ("x", Vector3d.UnitX),
+                ViewerSectionAxis.Y => ("y", Vector3d.UnitY),
+                ViewerSectionAxis.Z => ("z", Vector3d.UnitZ),
+                ViewerSectionAxis.Custom => ("custom", plane.Normal),
+                _ => throw new InvalidDataException($"Unknown section plane axis: {plane.Axis}."),
+            };
+            double scale = Math.Max(Math.Abs(normal.X), Math.Max(Math.Abs(normal.Y), Math.Abs(normal.Z)));
+            if (!double.IsFinite(scale) || scale == 0)
+                throw new InvalidDataException("The section plane normal must be finite and nonzero.");
+            normal = new Vector3d(normal.X / scale, normal.Y / scale, normal.Z / scale).Normalized();
+
+            // n·p = offset in scene coordinates, and p = rtcPoint + rtcOffset.
+            double offset = plane.Offset - Vector3d.Dot(normal, _rtcOffset);
+            if (!double.IsFinite(offset)) throw new InvalidDataException("The section plane offset must be finite in viewer coordinates.");
+            _sectionPlanes.Add((axis, normal, offset, plane.Inverted));
+            if (_sectionPlanes.Count == MaxSectionPlanes) break;
+        }
+
+        if (doc.SectionBox is not { Enabled: true } box) return;
+        var bounds = new BoundingBox3d(box.Min - _rtcOffset, box.Max - _rtcOffset);
+        if (bounds.IsEmpty || !IsFinite(bounds.Min) || !IsFinite(bounds.Max))
+            throw new InvalidDataException("The section box must have finite bounds with Min at or below Max on each axis.");
+        _sectionBox = (bounds, box.Inverted);
+    }
+
+    private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
 
     /// <summary>Counts the instances the viewer does not draw because their geometry is not made of triangles.</summary>
     public static int UndrawnInstances(SceneDocument scene)
@@ -594,12 +632,36 @@ internal sealed class ViewerPayloadWriter
         }
         w.WriteEndArray();
 
+        WriteSections(w);
         WriteViewpoints(w);
         WriteGrids(w);
         WriteTimeLiner(w);
         WriteLinkedFiles(w);
         WriteClashTests(w);
 
+        w.WriteEndObject();
+    }
+
+    private void WriteSections(Utf8JsonWriter w)
+    {
+        if (_sectionPlanes.Count == 0 && _sectionBox is null) return;
+        w.WriteStartObject("sections");
+        w.WriteStartArray("planes");
+        foreach (var plane in _sectionPlanes)
+        {
+            w.WriteStartObject();
+            w.WriteString("axis", plane.Axis);
+            WriteVector(w, "normal", plane.Normal);
+            w.WriteNumber("offset", plane.Offset);
+            w.WriteBoolean("flipped", plane.Flipped);
+            w.WriteEndObject();
+        }
+        w.WriteEndArray();
+        if (_sectionBox is { } box)
+        {
+            WriteBox(w, "box", box.Bounds, Vector3d.Zero);
+            w.WriteBoolean("cutInside", box.Inverted);
+        }
         w.WriteEndObject();
     }
 
