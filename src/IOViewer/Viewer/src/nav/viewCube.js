@@ -170,9 +170,10 @@ export class ViewCube {
       return button;
     });
     const home = iconButton('ioviewer-viewcube-home', icons.home, t('cube.home'));
-    home.addEventListener('click', () =>
-      controls.animateTo({ position: this.home.position.clone(), target: this.home.target.clone() }),
-    );
+    home.addEventListener('click', () => {
+      controls.resetCameraStyle();
+      controls.animateTo({ position: this.home.position.clone(), target: this.home.target.clone() });
+    });
     this.element.append(...this.arrows, home);
     container.append(this.element);
     this.update();

@@ -245,8 +245,43 @@ input:focus-visible {
   margin-top: 6px;
 }
 
+.ioviewer-bcf-topic {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ioviewer-bcf-topic summary {
+  padding: 4px 6px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.ioviewer-bcf-topic summary:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: -2px;
+}
+
+.ioviewer-bcf-topic p {
+  margin: 4px 6px;
+  overflow-wrap: anywhere;
+}
+
+.ioviewer-bcf-description {
+  white-space: pre-wrap;
+}
+
+.ioviewer-bcf-status {
+  color: var(--text-dim);
+}
+
+.ioviewer-bcf-topic .ioviewer-row {
+  width: 100%;
+  margin-top: 4px;
+}
+
 @media (max-width: 640px) {
-  .ioviewer-side-panel:has(.ioviewer-tree-filters[open]) {
+  .ioviewer-side-panel:has(.ioviewer-tree-filters[open]),
+  .ioviewer-side-panel[data-panel="bcf"] {
     z-index: 1;
   }
 }

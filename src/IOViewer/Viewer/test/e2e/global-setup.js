@@ -95,6 +95,17 @@ export default function globalSetup() {
   exportHtml(widePath, 'wide-ids');
 
   const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
+  const bcfModel = structuredClone(building);
+  const bcfElement = (name) => bcfModel.Scene.Elements.find((element) => element.Name === name);
+  bcfElement('Supply Duct SA-1').IfcGuid = '2xQ$n5SLP5MBLyL442paFx';
+  bcfElement('Ground Slab').IfcGuid = '1111111111111111111111';
+  bcfElement('Roof Slab').IfcGuid = bcfElement('Floor Slab Level 2').IfcGuid = '3333333333333333333333';
+  const native = bcfElement('Column A1 Level 1');
+  native.SourceId = '11111111-0000-4000-8000-000000000000-00000001';
+  bcfModel.Scene.Models.find((model) => model.Id === native.ModelId).SourceFormat = 'rvt';
+  const bcfInput = path.join(results, 'bcf-model.json');
+  writeFileSync(bcfInput, JSON.stringify(bcfModel));
+  exportHtml(bcfInput, 'bcf-model', ['--bcf', path.join(fixturesDir, '../bcf/review.bcfzip')]);
   const savedViews = structuredClone(building);
   savedViews.Scene.Models[2].Name = savedViews.Scene.Models[1].Name;
   savedViews.Scene.Models[2].Path = savedViews.Scene.Models[1].Path;

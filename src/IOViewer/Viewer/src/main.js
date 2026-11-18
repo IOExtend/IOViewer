@@ -165,7 +165,8 @@ function start(data, context) {
   mountSections({ root: uiRoot, ...ui, sections, selection });
   const { meta } = data;
   const restoreLinkedModels = mountLinks({ ...ui, files: meta.linkedFiles ?? [], elements: meta.elements, scene });
-  mountViews({ ...ui, controls, scene, sections, restoreLinkedModels, views: meta.viewpoints ?? [] });
+  mountViews({ ...ui, controls, scene, sections, selection, restoreLinkedModels,
+    views: meta.viewpoints ?? [], bcfTopics: meta.bcfTopics ?? [] });
   const clashes = mountClashes({ ...ui, tests: meta.clashTests ?? [], elements: meta.elements, scene, controls, selection });
   world.add(clashes.group); // overlay, like the measure
   const timeliner = mountTimeliner({ root: uiRoot, ...ui, timeliner: meta.timeliner, elements: meta.elements, scene });

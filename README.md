@@ -113,6 +113,24 @@ pair to add more inputs. The viewer lists all models in the Linked files panel w
 visibility controls. The first input supplies any startup clipping. Saved views from added sources
 are placed with their models. A saved section box requires a yaw that is a multiple of 90 degrees.
 
+Pass `--bcf` to include topics from a local [BCF 2.1 archive](https://github.com/buildingSMART/BCF-XML/tree/v2.1/Documentation).
+
+```sh
+ioviewer architecture.ifc --bcf review.bcfzip -o review.html
+```
+
+The archive uses the same metre, Z-up coordinates as the output scene. For combined models those are
+the first input's coordinates. In **BCF topics**, open a topic to see its status, description and
+available viewpoints. A viewpoint restores its camera, up to six clipping planes, and matched
+selection and visibility exceptions. The viewer interprets the BCF 2.1 camera scale as vertical.
+It matches IFC GlobalIds exactly. Without a GlobalId, it supports Revit UniqueId for component
+references whose originating system is `Autodesk Revit` or `Revit`. Missing or ambiguous references
+are reported without preventing the rest of the viewpoint from opening.
+
+The archive limit is 64 MiB and 4,096 entries, with 2 MiB per XML file and 32 MiB of imported XML.
+The importer reads topic and viewpoint XML. Snapshots, attachments, markup lines and component
+colours are outside this import.
+
 Export structured JSON snapshots:
 
 ```sh

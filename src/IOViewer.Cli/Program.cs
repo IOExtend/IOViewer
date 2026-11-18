@@ -37,6 +37,7 @@ internal static class Program
                              Add another model. Translation is in metres and yaw in degrees about +Z.
                              Repeat the pair for each model. Use 0,0,0,0 for an already aligned source.
           --title <title>     Page title shown in the browser tab.
+          --bcf <file>        Import topics from a local BCF 2.1 archive in the scene's coordinates.
           --wireframe         Enable wireframe display mode by default.
           --white-mode        Enable white/clay architectural rendering mode by default.
           --no-properties     Exclude element properties to reduce the file size.
@@ -79,6 +80,7 @@ internal static class Program
         string? outputPath = null;
         string? customTitle = null;
         string? explicitJsonPath = null;
+        string? bcfPath = null;
         var additional = new List<(string Path, Transform3d Placement)>();
         bool wireframe = false;
         bool whiteMode = false;
@@ -109,6 +111,14 @@ internal static class Program
                         return 1;
                     }
                     customTitle = args[++i];
+                    break;
+                case "--bcf":
+                    if (bcfPath is not null || i + 1 >= args.Length || args[i + 1].StartsWith('-'))
+                    {
+                        Console.Error.WriteLine("Error: Specify one local archive with --bcf <file>.");
+                        return 1;
+                    }
+                    bcfPath = args[++i];
                     break;
                 case "--add":
                     if (i + 3 >= args.Length || args[i + 1].StartsWith('-') || args[i + 2] != "--placement"
@@ -185,6 +195,11 @@ internal static class Program
             Console.Error.WriteLine($"Error: File not found: '{Printable(source.Path)}'.");
             return 2;
         }
+        if (bcfPath is not null && !File.Exists(bcfPath))
+        {
+            Console.Error.WriteLine($"Error: File not found: '{Printable(bcfPath)}'.");
+            return 2;
+        }
 
         outputPath ??= Path.ChangeExtension(inputPath, ".html");
 
@@ -206,6 +221,12 @@ internal static class Program
                     SceneFederation.Append(doc, input, sourcePath, source.Placement);
                     adapterCode = Math.Max(adapterCode, ExitCode(diagnostics));
                 }
+            }
+            if (bcfPath is not null)
+            {
+                sourcePath = bcfPath;
+                doc.BcfTopics.AddRange(BcfReader.Read(bcfPath, doc.Scene,
+                    warning => Console.Error.WriteLine($"Warning: BCF: {Printable(warning)}")));
             }
         }
         catch (Exception ex)
