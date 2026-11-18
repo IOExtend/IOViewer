@@ -346,15 +346,33 @@ for (const run of RUNS) {
       return null;
     });
     if (hit) {
-      result.pickMs = median(await page.evaluate(({ x, y }) => {
-        const times = [];
-        for (let k = 0; k < 10; k++) {
+      const samples = await page.evaluate(({ x, y }) => {
+        const { picker, measureSnap } = window.__ioviewer;
+        const pixels = [[x, y], [x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]
+          .filter(([px, py]) => picker.pick(px, py));
+        if (pixels.length < 2) return null;
+        const pick = [], snap = [];
+        const kinds = new Set();
+        // Warm the shaders and topology, then time distinct consecutive pixels on the same surface.
+        for (const pixel of pixels) measureSnap.target(...pixel);
+        for (let k = 0; k < 60; k++) {
+          const pixel = pixels[k % pixels.length];
           const start = performance.now();
-          window.__ioviewer.picker.pick(x + (k % 2), y); // another pixel each time: the picker reuses an unchanged pick
-          times.push(performance.now() - start);
+          picker.pick(...pixel);
+          const picked = performance.now();
+          const target = measureSnap.target(...pixel);
+          const snapped = performance.now();
+          pick.push(picked - start);
+          snap.push(snapped - picked);
+          if (target) kinds.add(target.kind);
         }
-        return times;
-      }, hit));
+        return { pick, snap, kinds: [...kinds] };
+      }, hit);
+      if (samples) {
+        result.pickMs = median(samples.pick);
+        result.pickP95Ms = quantile(samples.pick, 0.95);
+        result.measureSnap = { medianMs: median(samples.snap), p95Ms: quantile(samples.snap, 0.95), kinds: samples.kinds };
+      }
     }
 
     const step = async (label, name, arg) => {
@@ -437,7 +455,8 @@ test.afterAll(() => {
     ['hide to full frame ms', (r) => op(r.hide)],
     ['isolate to full frame ms', (r) => op(r.isolate)],
     ['show all to full frame ms', (r) => op(r.showAll)],
-    ['pick ms (home view)', (r) => n(r.pickMs)],
+    ['pick ms (fit scale), p50 / p95', (r) => r.pickMs == null ? '—' : `${n(r.pickMs)} / ${n(r.pickP95Ms)}`],
+    ['measurement hover ms (fit scale), p50 / p95', (r) => r.measureSnap ? `${n(r.measureSnap.medianMs)} / ${n(r.measureSnap.p95Ms)}` : '—'],
     ['scene.memory()', (r) => (r.memory ? JSON.stringify(r.memory) : '—')],
     ['JS heap after load / end MB', (r) => `${n(r.heapMB, 0)} / ${n(r.heapEndMB, 0)}`],
     ['page errors', (r) => String(r.errors.length)],
@@ -471,7 +490,8 @@ function table(r) {
     ['orbit full detail fps median / p95', run(r.orbitFull)],
     ['orbit zoomed fps median / p95', run(r.orbitZoomed)],
     ['orbit at 50 % opacity fps median / p95', run(r.orbitTransparent)],
-    ['pick', `${n(r.pickMs)} ms`],
+    ['pick p50 / p95', `${n(r.pickMs)} / ${n(r.pickP95Ms)} ms`],
+    ['measurement hover p50 / p95', r.measureSnap ? `${n(r.measureSnap.medianMs)} / ${n(r.measureSnap.p95Ms)} ms (${r.measureSnap.kinds.join(', ')})` : '—'],
     ...['clickSelectFirst', 'clickSelect', 'hide', 'showAll', 'isolate', 'showAllAfterIsolate', 'boxSelectAll', 'hideBoxSelected',
       'showAllAfterBoxHide', 'clearSelection', 'treeSearch', 'treeSelect', 'displayWhite', 'displayWireframe',
       'displayMaterials', 'opacityHalf', 'opacityFull', 'fourDOpen', 'fourDTick', 'fourDClose']

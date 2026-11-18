@@ -69,7 +69,7 @@ for ($trial = 1; $trial -le 3; $trial++) {
 
 Each `ladder-<label>.json` contains both workloads, with separate `perf-<label>-<model>.json` files for each page.
 Use `readyMs` for navigation to first frame submission, `orbit.p95Ms` and `orbitFull.p95Ms` for the p95 interval
-between animation frames, and `pickMs` for the median of ten picks near the home view. The adaptive orbit reports
+between animation frames, and `pickMs` for the median pick at the fitted scale. The adaptive orbit reports
 the median share of in-view instances drawn in `orbit.drawnMedian`. `memory.gpuBytes` counts the scene's GPU buffers
 and slot textures, and `heapMB` samples Chromium's JavaScript heap just after load. Divide byte counts by 1,048,576
 for MiB. The harness's `htmlMB` and `heapMB` fields already use MiB.
@@ -97,3 +97,18 @@ are medians across the three runs.
 When evaluating instancing and picking, compare full-detail p95 with the same renderer and workload, and read adaptive
 p95 alongside its drawn share. The RTX full-detail range on the synthetic scene is too wide to establish a regression
 threshold from these runs. [Instancing and picking issue](https://github.com/IOExtend/IOViewer/issues/12)
+
+## Distance measurement hover
+
+On the same machine and Synthetic-400k workload, the harness records 60 paired pick and measurement samples per GPU.
+Each pair uses the same pixel after the orbit returns to the fitted scale, and consecutive pairs use different
+pixels. The harness warms the picking shaders and geometry cache first. The timings cover the synchronous GPU
+readback and target computation. Every measured hover snapped to a vertex.
+
+| GPU | Pick p50 / p95, ms | Measurement hover p50 / p95, ms |
+| --- | ---: | ---: |
+| Radeon | 10.8 / 11.4 | 12.3 / 12.9 |
+| RTX 4080 | 1.7 / 2.0 | 2.0 / 2.4 |
+
+Set `PERF_MODELS` to the Synthetic-400k HTML exported with the current bundle and run the same harness. Read
+`pickMs` and `pickP95Ms` alongside `measureSnap.medianMs`, `measureSnap.p95Ms` and `measureSnap.kinds`.

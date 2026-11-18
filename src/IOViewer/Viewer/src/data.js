@@ -16,16 +16,48 @@ function decodeBase64(element) {
   for (const node of element.childNodes) total += node.length;
   const bytes = new Uint8Array(Math.ceil(total / 4) * 3); // at most; padding and whitespace make it less
   let offset = 0;
+  let canonical = true;
   let carry = ''; // characters past the last whole group of 4
   for (const node of element.childNodes) {
     for (let start = 0; start < node.length; start += CHUNK_CHARS) {
-      const text = carry + node.substringData(start, CHUNK_CHARS).trim();
+      const raw = node.substringData(start, CHUNK_CHARS);
+      const trimmed = raw.trim();
+      const text = carry + trimmed;
       const whole = text.length - (text.length % 4);
-      offset = decodeInto(bytes, offset, text.slice(0, whole));
+      const aligned = text.slice(0, whole);
+      const next = decodeInto(bytes, offset, aligned);
+      const padding = aligned.endsWith('==') ? 2 : aligned.endsWith('=') ? 1 : 0;
+      canonical &&= raw.length === trimmed.length && next - offset === whole * 3 / 4 - padding;
+      offset = next;
       carry = text.slice(whole);
     }
   }
-  return bytes.subarray(0, decodeInto(bytes, offset, carry)); // an unpadded tail, as atob accepts it
+  const end = decodeInto(bytes, offset, carry); // an unpadded tail, as atob accepts it
+  canonical &&= end - offset === Math.floor(carry.length * 3 / 4);
+  return { bytes: bytes.subarray(0, end), canonical };
+}
+
+// Decode just the aligned base64 groups spanning a view without retaining a decoded copy of the model.
+function readRange(element, offset, length) {
+  const group = Math.floor(offset / 3);
+  let start = group * 4;
+  const skip = offset - group * 3;
+  let remaining = Math.ceil((skip + length) / 3) * 4;
+  const encoded = [];
+  for (const node of element.childNodes) {
+    if (start >= node.length) {
+      start -= node.length;
+      continue;
+    }
+    const take = Math.min(remaining, node.length - start);
+    encoded.push(node.substringData(start, take));
+    remaining -= take;
+    start = 0;
+    if (!remaining) break;
+  }
+  const bytes = new Uint8Array(Math.ceil((skip + length) / 3) * 3);
+  if (decodeInto(bytes, 0, encoded.join('')) < skip + length) throw new ModelDataError('The binary data is truncated.');
+  return bytes.slice(skip, skip + length).buffer;
 }
 
 // Writes the bytes of base64 `text` into `bytes` at `offset`; returns the offset after them. Uses the native decoder
@@ -133,32 +165,46 @@ export function readModelMeta(doc = document, startup) {
 }
 
 export function loadModelData(doc = document, startup, meta = readModelMeta(doc, startup)) {
-  let bin;
+  let bin, binElement, canonical, legacyBin;
   try {
     startup?.('binaryStart');
-    const binElement = doc.getElementById('ioviewer-bin');
+    binElement = doc.getElementById('ioviewer-bin');
     if (!binElement) throw new Error("Data block 'ioviewer-bin' is missing.");
-    bin = decodeBase64(binElement);
+    ({ bytes: bin, canonical } = decodeBase64(binElement));
     startup?.('binaryEnd');
   } catch (error) {
     throw new ModelDataError(error.message, { cause: error });
+  }
+  const binaryLength = bin.length;
+  function viewType(v) {
+    const Type = VIEW_TYPES[v?.t];
+    if (!Type) throw new ModelDataError(`Unknown view type '${v?.t}'.`);
+    const size = Type.BYTES_PER_ELEMENT;
+    if (!(Number.isInteger(v.o) && Number.isInteger(v.n) && v.o >= 0 && v.n >= 0 && v.o % size === 0 && v.o + v.n * size <= binaryLength)) {
+      throw new ModelDataError(`View ${JSON.stringify(v)} is outside the ${binaryLength} bytes of binary data.`);
+    }
+    return Type;
   }
   let props = null;
   return {
     meta,
     view(v) {
       if (!bin) throw new Error('The binary data has been released.');
-      const Type = VIEW_TYPES[v?.t];
-      if (!Type) throw new ModelDataError(`Unknown view type '${v?.t}'.`);
-      const size = Type.BYTES_PER_ELEMENT;
-      if (!(Number.isInteger(v.o) && Number.isInteger(v.n) && v.o >= 0 && v.n >= 0 && v.o % size === 0 && v.o + v.n * size <= bin.length)) {
-        throw new ModelDataError(`View ${JSON.stringify(v)} is outside the ${bin.length} bytes of binary data.`);
-      }
+      const Type = viewType(v);
       return new Type(bin.buffer, v.o, v.n);
+    },
+    readView(v) {
+      const Type = viewType(v);
+      if (!v.n) return new Type(0);
+      if (!bin && !canonical) legacyBin ??= decodeBase64(binElement).bytes;
+      const bytes = bin ?? legacyBin;
+      return bytes ? new Type(bytes.buffer, v.o, v.n)
+        : new Type(readRange(binElement, v.o, v.n * Type.BYTES_PER_ELEMENT));
     },
     // Frees the decoded BIN once the scene holds its own copies; view() throws afterwards.
     releaseBinary() {
       bin = null;
+      legacyBin = null;
     },
     props(elementId) {
       props ??= JSON.parse(block(doc, 'ioviewer-props'));

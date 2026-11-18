@@ -22,6 +22,7 @@ export class Measure extends EventTarget {
     super();
     this.active = false;
     this.points = [];
+    this.preview = null;
     this.group = new THREE.Group();
     this.group.name = 'measure';
     const geometry = new THREE.BufferGeometry();
@@ -36,7 +37,10 @@ export class Measure extends EventTarget {
     }
     this.label = el('div', 'ioviewer-measure-label');
     this.label.hidden = true;
-    root.prepend(this.label); // under the panels and the toolbar
+    this._previewMarker = el('div', 'ioviewer-measure-preview');
+    this._previewMarker.hidden = true;
+    this._previewMarker.setAttribute('aria-hidden', 'true');
+    root.prepend(this.label, this._previewMarker); // under the panels and the toolbar
     this._sync();
   }
 
@@ -53,7 +57,10 @@ export class Measure extends EventTarget {
   // Turning the tool off clears the measurement.
   setActive(active) {
     this.active = !!active;
-    if (!this.active) this.points = [];
+    if (!this.active) {
+      this.points = [];
+      this.setPreview(null);
+    }
     this._sync();
   }
 
@@ -71,7 +78,16 @@ export class Measure extends EventTarget {
     return true;
   }
 
+  setPreview(target) {
+    if (!this.preview && !target) return;
+    this.preview = target;
+    this._previewMarker.hidden = !target;
+    if (target) this._previewMarker.dataset.kind = target.kind;
+    this.dispatchEvent(new Event('previewchange'));
+  }
+
   update(camera, rect) {
+    if (this.preview) placeLabel(this._previewMarker, this.preview.point, camera, rect);
     if (this.distance === null) return;
     placeLabel(this.label, this.points[0].clone().lerp(this.points[1], 0.5), camera, rect);
   }

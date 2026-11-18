@@ -72,6 +72,17 @@ export default function globalSetup() {
   writeFileSync(shear, JSON.stringify(shearModel()));
   exportHtml(shear, 'shear');
 
+  const snap = largeModel(2);
+  const v = (X, Y, Z) => ({ X, Y, Z });
+  snap.Geometries[0].Vertices = [v(0, 0, 0), v(4, 0, 0), v(4, 4, 0), v(0, 4, 0)];
+  snap.Geometries[0].Indices = [0, 1, 2, 0, 2, 3];
+  Object.assign(snap.Meshes[1].Transform, {
+    XAxis: v(0.09, 0, 0), YAxis: v(0, 0.175, 0), Translation: v(-0.35, -0.35, 1),
+  });
+  const snapPath = path.join(viewerDir, 'test-results', 'measure-snap.json');
+  writeFileSync(snapPath, JSON.stringify(snap));
+  exportHtml(snapPath, 'measure-snap');
+
   const results = path.join(viewerDir, 'test-results');
   const sources = ['Architecture', 'Services'].map((name) => {
     const doc = largeModel(2);

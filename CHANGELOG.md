@@ -18,6 +18,7 @@ API between minor releases.
 - Filter the model tree by source model, level and category, and optionally isolate the matches in 3D.
 - Export explicitly placed source models together in one standalone HTML viewer with independent visibility.
 - Import BCF 2.1 topics and open their cameras, clipping and matched components in the offline viewer.
+- Preview distance measurement points and snap to visible vertices, edge midpoints and edges near the pointer.
 
 ### Fixed
 

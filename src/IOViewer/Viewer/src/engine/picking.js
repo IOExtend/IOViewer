@@ -89,8 +89,11 @@ export class Picker {
     // The last pick and what it depends on: the pixel, the canvas size, the camera and what is shown and cut away
     // (picks come on every wheel notch and pointer press, and each draws the model; colours do not matter).
     this._last = null;
+    this._lastTile = null;
     this._key = new Float64Array(36);
-    modelScene.root.addEventListener('change', (e) => e.detail.kind !== 'appearance' && (this._last = null));
+    modelScene.root.addEventListener('change', (e) => {
+      if (e.detail.kind !== 'appearance') this._last = this._lastTile = null;
+    });
     const uniforms = modelScene.slotUniforms;
     this._float = options.pickFloat !== false && renderer.extensions.has('EXT_color_buffer_float');
     if (this._float) {
@@ -112,17 +115,102 @@ export class Picker {
     const x = Math.floor(clientX - rect.left);
     const y = Math.floor(clientY - rect.top);
     if (this._lost || !(x >= 0 && y >= 0 && x < rect.width && y < rect.height)) return null;
+    const key = this._sampleKey(x, y, rect);
     const camera = this.camera;
-    camera.updateMatrixWorld();
-    const key = this._key;
-    key.set([x, y, rect.width, rect.height]);
-    key.set(camera.matrixWorld.elements, 4);
-    key.set(camera.projectionMatrix.elements, 20);
     const last = this._last;
     if (last && last.camera === camera && last.key.every((v, k) => v === key[k])) return copy(last.hit);
     const hit = this._pick(x, y, rect);
     this._last = { camera, key: key.slice(), hit };
     return copy(hit);
+  }
+
+  _sampleKey(x, y, rect) {
+    this.camera.updateMatrixWorld();
+    const key = this._key;
+    key.set([x, y, rect.width, rect.height]);
+    key.set(this.camera.matrixWorld.elements, 4);
+    key.set(this.camera.projectionMatrix.elements, 20);
+    return key;
+  }
+
+  // One small region replaces per-candidate GPU passes. The returned samples are used synchronously, before
+  // another region is read. Sample coordinates are CSS pixels relative to the canvas.
+  measureTile(clientX, clientY, radius) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const x = Math.floor(clientX - rect.left);
+    const y = Math.floor(clientY - rect.top);
+    if (this._lost || !(x >= 0 && y >= 0 && x < rect.width && y < rect.height)) return null;
+    const key = this._sampleKey(x, y, rect);
+    const camera = this.camera;
+    const last = this._lastTile;
+    if (last && last.camera === camera && last.radius === radius && last.key.every((v, k) => v === key[k]))
+      return last.tile;
+    const side = radius * 2 + 1;
+    if (!this._measure || this._measure.target.width !== side) {
+      this._measure?.target.dispose();
+      this._measure = {
+        target: new THREE.WebGLRenderTarget(side, side, this._float ? { type: THREE.FloatType } : {}),
+        ids: this._float ? new Float32Array(side * side * 4) : new Uint8Array(side * side * 4),
+        depths: this._float ? null : new Uint8Array(side * side * 4),
+      };
+    }
+    const { target, ids, depths } = this._measure;
+    const left = x - radius;
+    const top = y - radius;
+    this._render(this._material, left, top, rect, target, ids);
+    const index = (px, py) => {
+      const col = Math.floor(px) - left;
+      const row = Math.floor(py) - top;
+      return col >= 0 && col < side && row >= 0 && row < side ? (side - 1 - row) * side + col : -1;
+    };
+    const encoded = this._float ? null : new DataView(ids.buffer);
+    const slotAtIndex = (i) => (this._float ? Math.round(ids[i * 4 + 3]) : encoded.getUint32(i * 4, true)) - 1;
+    const slot = slotAtIndex(index(x, y));
+    let tile = null;
+    if (slot >= 0) {
+      if (depths) this._render(this._depthMaterial, left, top, rect, target, depths);
+      const encodedDepth = depths && new DataView(depths.buffer);
+      const m = camera.matrixWorldInverse.elements.slice();
+      const depth = (i) => {
+        if (encodedDepth) return encodedDepth.getFloat32(i * 4, true);
+        const start = i * 4;
+        return -(m[2] * ids[start] + m[6] * ids[start + 1] + m[10] * ids[start + 2] + m[14]);
+      };
+      const i = index(x, y);
+      const point = this._float ? new THREE.Vector3().fromArray(ids, i * 4) : this._depthPoint(x, y, rect, depth(i));
+      const slots = new Set([slot]);
+      const element = this.scene.slotElement(slot);
+      if (element >= 0) {
+        for (let j = 0; j < side * side; j++) {
+          const nearby = slotAtIndex(j);
+          if (nearby >= 0 && !slots.has(nearby) && this.scene.slotElement(nearby) === element) slots.add(nearby);
+        }
+      }
+      const perspective = camera.isPerspectiveCamera;
+      tile = { rect, point, element, slots, depthAt(px, py, candidateSlot) {
+        const j = index(px, py);
+        const front = j < 0 ? -1 : slotAtIndex(j);
+        if (front < 0) return Infinity;
+        if (front !== candidateSlot) return depth(j);
+        // Depth (reciprocal depth in perspective) is linear on a face. Correct for the distance
+        // between the exact projected target and the centres of the GPU pixels on its slot.
+        const linear = (k) => perspective ? 1 / depth(k) : depth(k);
+        const center = linear(j);
+        function correction(dx, dy, fraction) {
+          const direction = Math.sign(fraction);
+          const next = index(px + direction * dx, py + direction * dy);
+          if (next >= 0 && slotAtIndex(next) === front) return (linear(next) - center) * Math.abs(fraction);
+          const previous = index(px - direction * dx, py - direction * dy);
+          return previous >= 0 && slotAtIndex(previous) === front ? (center - linear(previous)) * Math.abs(fraction) : 0;
+        }
+        const sample = center + correction(1, 0, px - Math.floor(px) - 0.5)
+          + correction(0, 1, py - Math.floor(py) - 0.5);
+        return sample > 0 ? (perspective ? 1 / sample : sample) : depth(j);
+      } };
+    }
+    this._lastTile = { camera, key: key.slice(), radius, tile };
+    this._last = { camera, key: this._lastTile.key, hit: tile };
+    return tile;
   }
 
   _pick(x, y, rect) {
@@ -132,35 +220,38 @@ export class Picker {
     const element = this.scene.slotElement(slot);
     if (this._float) return { element, point: new THREE.Vector3(pixel[0], pixel[1], pixel[2]) };
     const bytes = this._render(this._depthMaterial, x, y, rect);
-    const depth = new DataView(bytes.buffer).getFloat32(0, true);
+    return { element, point: this._depthPoint(x, y, rect, new DataView(bytes.buffer).getFloat32(0, true)) };
+  }
+
+  _depthPoint(x, y, rect, depth) {
     // Recover the world point from view-space depth, independent of the depth buffer mapping.
     const camera = this.camera;
     const point = new THREE.Vector3(((x + 0.5) / rect.width) * 2 - 1, 1 - ((y + 0.5) / rect.height) * 2, -1)
       .applyMatrix4(camera.projectionMatrixInverse);
     if (camera.isPerspectiveCamera) point.multiplyScalar(-depth / point.z);
     else point.z = -depth;
-    return { element, point: point.applyMatrix4(camera.matrixWorld) };
+    return point.applyMatrix4(camera.matrixWorld);
   }
 
-  // Draws the model with `material` into the 1x1 target at pixel (x, y) and reads it back.
-  _render(material, x, y, rect) {
+  // Draws the model with `material` into the requested tile at pixel (x, y) and reads it back.
+  _render(material, x, y, rect, target = this._target, pixels = this._pixel) {
     const { renderer, camera } = this;
     const previous = { target: renderer.getRenderTarget(), color: renderer.getClearColor(new THREE.Color()), alpha: renderer.getClearAlpha() };
     const source = this.scene._buckets[0]?.material; // setClipping gives every bucket the same planes
     material.clippingPlanes = source?.clippingPlanes ?? null;
     material.clipIntersection = source?.clipIntersection ?? false;
     camera.updateMatrixWorld();
-    camera.setViewOffset(rect.width, rect.height, x, y, 1, 1);
+    camera.setViewOffset(rect.width, rect.height, x, y, target.width, target.height);
     try {
-      renderer.setRenderTarget(this._target);
+      renderer.setRenderTarget(target);
       renderer.setClearColor(0x000000, 0);
       this.scene.withMaterial(material, () => renderer.render(this.scene.root, camera));
-      renderer.readRenderTargetPixels(this._target, 0, 0, 1, 1, this._pixel);
+      renderer.readRenderTargetPixels(target, 0, 0, target.width, target.height, pixels);
     } finally {
       renderer.setRenderTarget(previous.target);
       renderer.setClearColor(previous.color, previous.alpha);
       camera.clearViewOffset();
     }
-    return this._pixel;
+    return pixels;
   }
 }

@@ -14,6 +14,7 @@ import { SectionGizmo } from './tools/sectionGizmo.js';
 import { boxFullyClipped } from './tools/sectionMath.js';
 import { mountSections } from './ui/sectionsPanel.js';
 import { Measure } from './tools/measure.js';
+import { MeasureSnap } from './tools/measureSnap.js';
 import { GridAxes } from './tools/grids.js';
 import { mountDisplay } from './tools/display.js';
 import { mountViews } from './ui/viewsPanel.js';
@@ -142,15 +143,39 @@ function start(data, context) {
   sections.addEventListener('change', requestRender);
   sectionGizmo.addEventListener('change', requestRender);
   measure.addEventListener('change', requestRender);
+  measure.addEventListener('previewchange', requestRender);
   grids.addEventListener('change', requestRender);
 
   const picker = new Picker(renderer, scene, camera, { pickFloat: testOptions.pickFloat });
+  const measureSnap = new MeasureSnap(picker, sections, data);
+  let measureFrame = 0, hoverX, hoverY;
+  function clearMeasurePreview() {
+    cancelAnimationFrame(measureFrame);
+    measureFrame = 0;
+    measure.setPreview(null);
+  }
+  canvas.addEventListener('pointermove', (e) => {
+    if (!measure.active || e.buttons) return clearMeasurePreview();
+    hoverX = e.clientX;
+    hoverY = e.clientY;
+    if (measureFrame) return;
+    measureFrame = requestAnimationFrame(() => {
+      measureFrame = 0;
+      measure.setPreview(measureSnap.target(hoverX, hoverY));
+    });
+  });
+  for (const event of ['pointerdown', 'pointerleave', 'pointercancel', 'webglcontextlost'])
+    canvas.addEventListener(event, clearMeasurePreview);
+  scene.root.addEventListener('change', (e) => {
+    if (e.detail.kind !== 'appearance') clearMeasurePreview();
+  });
   const controls = new NavigationControls(camera, canvas, {
     pick: (x, y) => picker.pick(x, y)?.point ?? null,
     visibleBox: () => scene.visibleBox(),
   });
   controls.addEventListener('change', () => {
     picker.camera = controls.camera; // swaps with the projection
+    clearMeasurePreview();
     requestRender();
   });
   scene.root.addEventListener('change', (e) => {
@@ -180,11 +205,16 @@ function start(data, context) {
   };
   for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta, grids, initialBackground, setBackground })) ui.onEscape(popover.close);
   ui.toolbar.setHandler('distance', () => {
+    clearMeasurePreview();
     measure.setActive(!measure.active);
+    if (!measure.active) measureSnap.release();
     ui.toolbar.setActive('distance', measure.active);
   });
   ui.toolbar.setActive('distance', false);
-  ui.onEscape(() => measure.clear());
+  ui.onEscape(() => {
+    clearMeasurePreview();
+    return measure.clear();
+  });
   // The overlays stay within the camera's near/far even when what is shown shrinks (isolate, hide).
   const overlayBounds = () => {
     controls.setExtraBounds('grids', grids.visible ? grids.box : null);
@@ -198,11 +228,14 @@ function start(data, context) {
   // held. With the distance tool on, a click on the model places a measure point instead and the selection stays.
   controls.addEventListener('click', (e) => {
     const { x, y, ctrl, shift } = e.detail;
+    if (measure.active) {
+      const target = measureSnap.target(x, y);
+      if (target) measure.add(target.point);
+      return;
+    }
     const hit = picker.pick(x, y);
     const element = hit?.element ?? -1;
-    if (measure.active) {
-      if (hit) measure.add(hit.point);
-    } else if (ctrl) {
+    if (ctrl) {
       if (element >= 0) selection.toggle(element);
     } else if (element >= 0) selection.set([element]);
     else if (!shift) selection.clear();
@@ -238,5 +271,6 @@ function start(data, context) {
     if (e.target === canvas || viewCube.element.contains(e.target)) document.activeElement?.blur();
   }, true);
 
-  window.__ioviewer = { scene, motionDetail, controls, picker, selection, ui, viewCube, sections, sectionGizmo, measure, grids, clashes, timeliner, ready, get camera() { return controls.camera; } };
+  window.__ioviewer = { scene, motionDetail, controls, picker, selection, ui, viewCube, sections, sectionGizmo,
+    measure, measureSnap, grids, clashes, timeliner, ready, get camera() { return controls.camera; } };
 }
