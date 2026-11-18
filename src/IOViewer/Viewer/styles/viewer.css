@@ -227,6 +227,12 @@ input:focus-visible {
   background: #262b33;
 }
 
+.tree-row:focus-visible,
+.ioviewer-menu-item:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: -2px;
+}
+
 .tree-child {
   padding-left: 26px;
 }
@@ -268,6 +274,14 @@ input:focus-visible {
 }
 
 .tree-hidden {
+  opacity: 0.45;
+}
+
+.tree-hidden:focus-visible {
+  opacity: 1;
+}
+
+.tree-hidden:focus-visible > * {
   opacity: 0.45;
 }
 
@@ -487,12 +501,12 @@ input:focus-visible {
   cursor: pointer;
 }
 
-.ioviewer-menu-item:hover:not(:disabled) {
+.ioviewer-menu-item:hover:not([aria-disabled="true"]) {
   background: var(--accent);
   color: #fff;
 }
 
-.ioviewer-menu-item:disabled {
+.ioviewer-menu-item[aria-disabled="true"] {
   color: #5b6575;
   cursor: default;
 }
@@ -503,7 +517,7 @@ input:focus-visible {
   color: #64748b;
 }
 
-.ioviewer-menu-item:hover:not(:disabled) kbd {
+.ioviewer-menu-item:hover:not([aria-disabled="true"]) kbd {
   color: #dbeafe;
 }
 

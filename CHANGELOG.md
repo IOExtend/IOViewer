@@ -13,6 +13,7 @@ API between minor releases.
 - Change or reset the viewport background color from the display menu.
 - Saved viewpoints can restore clipping, hidden elements and linked-file checkboxes. The viewpoint list and the
   tour both use the saved state.
+- Keyboard navigation and visible focus in the model tree and context menu.
 
 ### Fixed
 
