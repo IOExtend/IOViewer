@@ -37,10 +37,17 @@ for (const instanced of [false, true]) {
     const [vertex, midpoint, edge, face] = points;
     const distance = page.locator('.ioviewer-tool[data-tool="distance"]');
     const marker = page.locator('.ioviewer-measure-preview');
+    const canvas = page.locator('#ioviewer-canvas');
     await distance.click();
 
+    async function previewAt(x, y) {
+      // Hover is delivered to the canvas independently of the desktop pointer in headed workers.
+      await canvas.dispatchEvent('pointermove', { clientX: x, clientY: y, pointerType: 'mouse' });
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    }
+
     async function hover([x, y], dx, dy, kind) {
-      await page.mouse.move(x + dx, y + dy);
+      await previewAt(x + dx, y + dy);
       await expect(marker).toBeVisible();
       await expect(marker).toHaveAttribute('data-kind', kind);
     }
@@ -49,9 +56,11 @@ for (const instanced of [false, true]) {
     const preview = () => page.evaluate(() => window.__ioviewer.measure.preview?.point.toArray());
     const first = await preview();
     await page.mouse.click(vertex[0] + 5, vertex[1] - 3);
+    await distance.hover();
     await hover(midpoint, 0, -3, 'midpoint');
     const second = await preview();
     await page.mouse.click(midpoint[0], midpoint[1] - 3);
+    await distance.hover();
     expect(await page.evaluate(() => window.__ioviewer.measure.points.map((p) => p.toArray()))).toEqual([first, second]);
     expect(await page.evaluate(() => window.__ioviewer.measure.distance)).toBeCloseTo(2, 3);
     await hover(edge, 0, -3, 'edge');
@@ -91,7 +100,7 @@ for (const instanced of [false, true]) {
     });
     for (const dx of [-2.75, -1.5, 0, 1.25, 2.5]) await hover(oblique, dx, -4, 'edge');
     await page.evaluate(() => window.__ioviewer.scene.setVisible([0], false));
-    await page.mouse.move(640, 400);
+    await previewAt(640, 400);
     await expect(marker).toBeHidden();
   });
 }
