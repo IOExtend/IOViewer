@@ -231,12 +231,24 @@ public class LegacyFixtureTests
         Assert.Equal("Element 1", Assert.Single(scene.Elements).Name); // the first mesh has no name
     }
 
-    [Fact]
-    public void MeshWithGeometryAndOwnVertices_IsRejected()
+    [Theory]
+    [InlineData("vertices")]
+    [InlineData("indices")]
+    [InlineData("normals")]
+    [InlineData("uvs")]
+    public void MeshWithGeometryAndOwnArrays_IsRejected(string field)
     {
         var old = new Legacy.ViewerDocument();
         old.Geometries.Add(new Legacy.ViewerGeometry { Id = 1, Vertices = [new(0, 0, 0)] });
-        old.Meshes.Add(new Legacy.ViewerMesh { Id = 2, GeometryId = 1, Vertices = [new(0, 0, 0)] });
+        old.Meshes.Add(new Legacy.ViewerMesh
+        {
+            Id = 2,
+            GeometryId = 1,
+            Vertices = field == "vertices" ? [new(0, 0, 0)] : [],
+            Indices = field == "indices" ? [0] : [],
+            Normals = field == "normals" ? [new(0, 0, 1)] : [],
+            UVs = field == "uvs" ? [new(0, 0)] : [],
+        });
 
         var ex = Assert.Throws<InvalidDataException>(() => Map(old));
         Assert.Contains("Mesh 2 has both geometry 1", ex.Message, StringComparison.Ordinal);
@@ -265,5 +277,18 @@ public class LegacyFixtureTests
         old.Textures.Add(new Legacy.ViewerTexture { Base64Data = "not base64!" });
 
         Assert.Throws<InvalidDataException>(() => Map(old));
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(1, true)]
+    public void OutOfRangeTextureIndex_IsRejected(int index, bool onMaterial)
+    {
+        var old = new Legacy.ViewerDocument();
+        old.Textures.Add(new Legacy.ViewerTexture());
+        if (onMaterial) old.Materials.Add(new Legacy.ViewerMaterial { Id = 1, TextureIndex = index });
+        else old.Meshes.Add(new Legacy.ViewerMesh { Id = 1, TextureIndex = index });
+        var error = Assert.Throws<InvalidDataException>(() => Map(old));
+        Assert.Contains($"Texture index {index}", error.Message, StringComparison.Ordinal);
     }
 }
