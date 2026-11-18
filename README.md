@@ -80,9 +80,10 @@ ioviewer model.glb -o viewer.html
 # Convert Wavefront OBJ model to interactive HTML viewer
 ioviewer model.obj -o viewer.html
 
-# Convert an IFC model (.ifc or .ifczip, read with IfcIO) or a Revit model (.rvt, read with RvtIO)
+# Convert IFC, Revit or Navisworks models via the scene adapters
 ioviewer model.ifc
 ioviewer model.rvt -o viewer.html
+ioviewer model.nwc -o viewer.html
 
 # Convert and immediately preview in default web browser via built-in HTTP server
 ioviewer model.glb --serve
@@ -95,7 +96,7 @@ Export structured JSON snapshots:
 ioviewer model.glb -o model.json
 ```
 
-Diagnostics and progress go to standard error, including what IfcIO or RvtIO could not convert (one warning or error
+Diagnostics and progress go to standard error, including conversion diagnostics from the scene adapters (one warning or error
 per kind, with its count). When the engine reported an error, elements may be missing: the output is still written and
 the exit code is 4. An output that cannot be written gives exit code 3, and a `--serve` preview server that cannot start
 or fails gives exit code 5 after the output is written; codes 3 and 5 take precedence over 4. Run `ioviewer --help` for

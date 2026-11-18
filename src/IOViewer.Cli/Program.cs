@@ -8,6 +8,7 @@ using IOScene;
 using IOViewer.Exporters;
 using IOViewer.Importers;
 using IOViewer.Model;
+using NwcIO.Scene;
 using RvtIO.Scene;
 
 namespace IOViewer.Cli;
@@ -15,18 +16,18 @@ namespace IOViewer.Cli;
 internal static class Program
 {
     private const string UsageText = """
-        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.ifczip|input.rvt> [output.html] [options]
+        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.ifczip|input.rvt|input.nwc> [output.html] [options]
                ioviewer --help | --version
 
         Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
-        from 3D models (glTF/GLB, Wavefront OBJ, JSON, IFC, Revit). The HTML file
+        from 3D models (glTF/GLB, Wavefront OBJ, JSON, IFC, Revit, Navisworks). The HTML file
         has no external dependencies and works offline. JSON input is viewer JSON,
         an IOScene scene file or an IOViewer 0.1/0.2 snapshot. IFC (.ifc, .ifczip)
-        is read with IfcIO and Revit (.rvt) with RvtIO; what they could not convert
-        is reported as warnings or errors.
+        is read with IfcIO, Revit (.rvt) with RvtIO and Navisworks caches (.nwc)
+        with NwcIO. Conversion diagnostics are reported as warnings or errors.
 
         Arguments:
-          <input>            Path to input 3D model (.glb, .obj, .json, .ifc, .ifczip or .rvt).
+          <input>            Path to input 3D model (.glb, .obj, .json, .ifc, .ifczip, .rvt or .nwc).
           [output]           Destination path for exported file (.html or .json).
                              Default: <input-without-ext>.html.
 
@@ -48,7 +49,7 @@ internal static class Program
           1  Usage error (missing or invalid arguments)
           2  File not found
           3  Data format error, parsing failure, or an output that cannot be written
-          4  Output written, but IfcIO or RvtIO reported an error: elements may be missing
+          4  Output written, but the engine adapter reported an error: elements may be missing
           5  Output written, but the --serve preview server could not start or failed
           Codes 3 and 5 take precedence over 4.
         """;
@@ -180,7 +181,8 @@ internal static class Program
                 ".json" => JsonViewerImporter.Load(inputPath),
                 ".ifc" or ".ifczip" => FromIfc(inputPath, out diagnostics),
                 ".rvt" => FromRvt(inputPath, out diagnostics),
-                _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt.")
+                ".nwc" => FromNwc(inputPath, out diagnostics),
+                _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt, .nwc.")
             };
         }
         catch (Exception ex)
@@ -259,6 +261,13 @@ internal static class Program
     private static ViewerDocument FromRvt(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
     {
         var result = RvtSceneReader.Read(path);
+        diagnostics = result.Diagnostics;
+        return FromScene(path, result.Document, diagnostics);
+    }
+
+    private static ViewerDocument FromNwc(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
+    {
+        var result = NwcSceneReader.Read(path);
         diagnostics = result.Diagnostics;
         return FromScene(path, result.Document, diagnostics);
     }

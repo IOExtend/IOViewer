@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\IOViewer\IOViewer.csproj" />
     <PackageReference Include="IfcIO.Scene" />
+    <PackageReference Include="NwcIO.Scene" />
     <PackageReference Include="RvtIO.Scene" />
   </ItemGroup>
 
