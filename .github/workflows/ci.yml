@@ -26,6 +26,11 @@ jobs:
       - run: dotnet build IOViewer.slnx -c Release --no-restore
       - run: dotnet test IOViewer.slnx -c Release --no-build
       - run: dotnet pack IOViewer.slnx -c Release --no-build -o artifacts
+      - name: Check package dependencies
+        shell: pwsh
+        run: |
+          ./tools/check-packages.ps1 -PackageDirectory artifacts
+          ./tools/test-package-checks.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.os }}

@@ -134,9 +134,10 @@ Push a tag matching the package version, such as `v0.2.0`, to run `release.yml`.
 The workflow builds and tests the solution, publishes the NuGet packages through Trusted Publishing, and then attaches
 packages, symbols, source and checksums to a GitHub release, marked as a prerelease when the version has a hyphen
 (`v0.3.0-preview.1`). The release notes are the section of `CHANGELOG.md` for the version, so add that section before
-the tag; the workflow stops before publishing when it is missing. `tools/pack-release.ps1` also stops it when the
-`IOViewer` package would depend on a missing or preview IOScene lower bound, or on a dependency bound that nuget.org
-refuses (a bound with metadata, or a prerelease label of one part that does not start with a letter).
+the tag; the workflow stops before publishing when it is missing. CI and `tools/pack-release.ps1` both run
+`tools/check-packages.ps1` on the packed `.nupkg` files. It requires `IOScene` as the library package's only dependency,
+with a stable lower bound, and rejects dependency bounds that nuget.org refuses (a bound with metadata, or a
+prerelease label of one part that does not start with a letter).
 Before the tag, run the Revit test with a real Revit 2022 file, which CI does not have: set `IOVIEWER_RVT_FILE` to its path and run `dotnet test IOViewer.slnx -c Release --filter Cli_ConvertRvtToHtml`.
 The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
 
