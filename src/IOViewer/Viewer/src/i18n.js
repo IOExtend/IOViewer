@@ -53,6 +53,7 @@ const dictionaries = {
     'menu.copyId': 'Копировать Id',
     'menu.fitAll': 'Вписать всё',
     'menu.resetSections': 'Сбросить сечения',
+    'menu.unavailable': 'Недоступно для этой модели',
     searchPlaceholder: 'Поиск по имени, типу, Id…',
     noCategory: 'Без категории',
     noMatches: 'Ничего не найдено',
@@ -175,6 +176,7 @@ const dictionaries = {
     'menu.copyId': 'Copy Id',
     'menu.fitAll': 'Fit all',
     'menu.resetSections': 'Reset sections',
+    'menu.unavailable': 'Unavailable for this model',
     searchPlaceholder: 'Search by name, type, Id…',
     noCategory: 'No category',
     noMatches: 'No matches',
@@ -246,6 +248,7 @@ const dictionaries = {
 };
 
 export const lang = (globalThis.navigator?.language ?? '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+export const formatCount = new Intl.NumberFormat(lang).format;
 
 // `language` is for tests; the UI always uses `lang`.
 export function t(key, language = lang) {

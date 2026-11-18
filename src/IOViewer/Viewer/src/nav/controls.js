@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { isClick, orbit, zoomTowards, wheelZoomFactor, boxSelectMode, interpolateView } from './math.js';
+import { isClick, orbit, zoomTowards, wheelZoomFactor, boxSelectMode, interpolateView, poleCrossing } from './math.js';
 
 const ORBIT_SPEED = 0.005; // radians per pixel
 const DEFAULT_DIRECTION = new THREE.Vector3(1, -1, 0.8).normalize();
@@ -180,18 +180,21 @@ export class NavigationControls extends EventTarget {
   }
 
   // Swings the camera round the target (see interpolateView).
-  animateTo({ position, target, zoom = 1 }, ms = 400) {
+  animateTo({ position, target, zoom = 1, overPole = false }, ms = 400) {
     this._stopAnimation();
     const from = { position: this.camera.position.clone(), target: this.target.clone() };
     const to = { position: position ?? from.position, target: target ?? from.target };
     const fromZoom = this.camera.zoom;
+    const interpolate = overPole
+      ? poleCrossing(from, to, new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion), this.camera.up)
+      : (k) => interpolateView(from, to, k);
     const start = performance.now();
     const step = (now) => {
       const k = Math.min((now - start) / ms, 1);
       const eased = k * k * (3 - 2 * k);
-      const r = interpolateView(from, to, eased);
+      const r = interpolate(eased);
       if (this.camera.isOrthographicCamera) this.camera.zoom = THREE.MathUtils.lerp(fromZoom, zoom, eased);
-      this._set(r.position, r.target);
+      this._set(r.position, r.target, r.up);
       this._animation = k < 1 ? requestAnimationFrame(step) : 0;
     };
     this._animation = requestAnimationFrame(step);
@@ -207,10 +210,15 @@ export class NavigationControls extends EventTarget {
     this._animation = 0;
   }
 
-  _set(position, target) {
+  _set(position, target, screenUp) {
     this.camera.position.copy(position);
     this.target.copy(target);
-    this.camera.lookAt(target);
+    if (screenUp) {
+      const up = this.camera.up.clone();
+      this.camera.up.copy(screenUp);
+      this.camera.lookAt(target);
+      this.camera.up.copy(up);
+    } else this.camera.lookAt(target);
     this.resize();
   }
 

@@ -138,8 +138,7 @@ export function mountSections({ root, shell, toolbar, contextMenu, sections, sel
     open();
   });
   toolbar.setHandler('box', () => {
-    if (!(selection.size && fitSelection()) && !sections.fitBoxToShown()) return;
-    open();
+    if (sections.mode === 'box' || (selection.size && fitSelection()) || sections.fitBoxToShown()) open();
   });
   toolbar.setHandler('resetSections', () => sections.reset());
   contextMenu.setItem('sectionBox', {

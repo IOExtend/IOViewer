@@ -75,7 +75,7 @@ export function poleView(pole, offset) {
 // - left/right turn the view 90 degrees about +Z; from a side face that is the face on that side of the screen.
 // - up/down from a side face go to the top/bottom, keeping that face as the heading.
 // - From the top, the heading side is at the bottom of the screen: down goes to it, up goes over the far edge to
-//   the opposite side face (the camera keeps +Z up, so it swings round rather than rolling upside down). From the
+//   the opposite side face. From the
 //   bottom it is the other way round.
 export function arrowView(offset, arrow) {
   const face = alignedFace(offset);
@@ -153,9 +153,19 @@ export class ViewCube {
     this.scene.add(this.faces, edges, this.highlight);
     this._raycaster = new THREE.Raycaster();
     this.hovered = null;
+    this._pointer = null;
 
-    this.canvas.addEventListener('pointermove', (e) => this._hover(this.regionAtClient(e.clientX, e.clientY)));
-    this.canvas.addEventListener('pointerleave', () => this._hover(null));
+    this.element.addEventListener('contextmenu', (e) => e.preventDefault());
+    const hoverAtPointer = (e) => {
+      this._pointer = [e.clientX, e.clientY];
+      if (this._hover(this.regionAtClient(...this._pointer))) this._render();
+    };
+    this.canvas.addEventListener('pointerenter', hoverAtPointer);
+    this.canvas.addEventListener('pointermove', hoverAtPointer);
+    this.canvas.addEventListener('pointerleave', () => {
+      this._pointer = null;
+      if (this._hover(null)) this._render();
+    });
     this.canvas.addEventListener('click', (e) => {
       const region = this.regionAtClient(e.clientX, e.clientY);
       if (!region) return;
@@ -166,11 +176,15 @@ export class ViewCube {
     this.arrows = ['up', 'down', 'left', 'right'].map((arrow) => {
       const button = iconButton('ioviewer-viewcube-arrow', icons.chevron, t(`cube.${arrow}`));
       button.dataset.arrow = arrow;
-      button.addEventListener('click', () => this._arrow(arrow));
+      button.addEventListener('click', (e) => {
+        if (e.detail) button.blur();
+        this._arrow(arrow);
+      });
       return button;
     });
     const home = iconButton('ioviewer-viewcube-home', icons.home, t('cube.home'));
-    home.addEventListener('click', () => {
+    home.addEventListener('click', (e) => {
+      if (e.detail) home.blur();
       controls.resetCameraStyle();
       controls.animateTo({ position: this.home.position.clone(), target: this.home.target.clone() });
     });
@@ -217,11 +231,13 @@ export class ViewCube {
   update() {
     if (!this.renderer) return;
     const main = this.controls.camera;
+    const turned = !this.camera.quaternion.equals(main.quaternion);
     this.camera.quaternion.copy(main.quaternion);
     this.camera.position.set(0, 0, 5).applyQuaternion(main.quaternion);
     this.camera.updateMatrixWorld();
     const aligned = alignedFace(main.position.clone().sub(this.controls.target)) !== null;
     for (const button of this.arrows) button.hidden = !aligned;
+    if (turned && this._pointer) this._hover(this.regionAtClient(...this._pointer));
     this._render();
   }
 
@@ -235,7 +251,7 @@ export class ViewCube {
   }
 
   _hover(region) {
-    if (region === this.hovered) return;
+    if (region === this.hovered) return false;
     this.hovered = region;
     this.highlight.visible = !!region;
     if (region) {
@@ -246,24 +262,28 @@ export class ViewCube {
       this.highlight.scale.set(x[1] - x[0], y[1] - y[0], z[1] - z[0]);
       this.highlight.position.set((x[0] + x[1]) / 2, (y[0] + y[1]) / 2, (z[0] + z[1]) / 2);
     }
-    this._render();
+    return true;
   }
 
   _arrow(arrow) {
     const main = this.controls.camera;
     const offset = main.position.clone().sub(this.controls.target);
     const direction = arrowView(offset, arrow);
-    if (direction) this._look(direction);
+    if (!direction) return;
+    const face = alignedFace(offset);
+    const overPole = (face === 'top' && arrow === 'up') || (face === 'bottom' && arrow === 'down');
+    this._look(direction, overPole);
   }
 
   // Looks at the target from `direction`, at the current distance.
-  _look(direction) {
+  _look(direction, overPole = false) {
     const { controls } = this;
     const distance = controls.camera.position.distanceTo(controls.target);
     controls.animateTo({
       position: direction.clone().multiplyScalar(distance).add(controls.target),
       target: controls.target.clone(),
       zoom: controls.camera.zoom,
+      overPole,
     });
   }
 }

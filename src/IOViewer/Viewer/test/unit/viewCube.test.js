@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { viewDirection, regionAt, alignedFace, arrowView, headingSide, poleView } from '../../src/nav/viewCube.js';
-import { interpolateView } from '../../src/nav/math.js';
+import { interpolateView, poleCrossing } from '../../src/nav/math.js';
 
 const v = (x, y, z) => new THREE.Vector3(x, y, z);
 const close = (a, b, eps = 1e-9) => assert.ok(a.distanceTo(b) < eps, `${a.toArray()} != ${b.toArray()}`);
@@ -105,4 +105,26 @@ test('a diagonal top view (reached by orbiting) still gives whole faces for ever
   const diagonal = v(Math.sin(0.01) * Math.SQRT1_2, -Math.sin(0.01) * Math.SQRT1_2, Math.cos(0.01));
   close(arrowView(diagonal, 'up'), viewDirection('back'));
   close(arrowView(diagonal, 'right'), v(Math.sin(0.01), 0, Math.cos(0.01))); // the front heading turned to right
+});
+
+test('far-edge cube arrows cross the pole without swinging sideways or flipping camera up', () => {
+  const target = v(2, 3, 4);
+  const worldUp = v(0, 0, 1);
+  for (const sign of [1, -1]) {
+    const from = { position: v(0, -Math.sin(0.01), sign * Math.cos(0.01)).add(target), target };
+    const to = { position: v(0, 1, 0).add(target), target };
+    const up = v(0, sign * Math.cos(0.01), Math.sin(0.01));
+    const next = poleCrossing(from, to, up, worldUp);
+    close(next(0).position, from.position);
+    close(next(0).up, up);
+    close(next(1).position, to.position);
+    close(next(1).up, worldUp);
+    for (let i = 1; i <= 20; i++) {
+      const step = next(i / 20);
+      const offset = step.position.clone().sub(target);
+      assert.ok(Math.abs(offset.x) < 1e-9);
+      assert.ok(Math.abs(offset.dot(step.up)) < 1e-9);
+      assert.ok(step.up.angleTo(next((i - 1) / 20).up) < 0.2);
+    }
+  }
 });

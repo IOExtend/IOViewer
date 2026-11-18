@@ -4,6 +4,8 @@ import { closestOnLine, planeRect } from './sectionMath.js';
 
 const GIZMO_PX = 80; // plane gizmo: arrow length on screen
 const HANDLE_PX = 8; // box handle radius on screen
+const RING_RADIUS = 0.8;
+const RING_EDGE_SIN = Math.sin(THREE.MathUtils.degToRad(12));
 const COLOR = { x: '#ef4444', y: '#22c55e', z: '#3b82f6', centre: '#e2e8f0', hover: '#facc15', frame: '#93c5fd', fill: '#60a5fa' };
 const AXIS_KEYS = ['x', 'y', 'z'];
 // An arrow or face handle whose axis is within 12 degrees of the line of sight is hidden: it would sit on top of the
@@ -108,7 +110,7 @@ export class SectionGizmo extends EventTarget {
     arrow.name = 'arrow';
     this.arrow = arrow;
     const ring = (name, axis, turn) => {
-      const r = handle('rotate', COLOR[axis], [turn(new THREE.TorusGeometry(0.8, 0.018, 8, 64))], turn(new THREE.TorusGeometry(0.8, 0.09, 8, 48)));
+      const r = handle('rotate', COLOR[axis], [turn(new THREE.TorusGeometry(RING_RADIUS, 0.018, 8, 64))], turn(new THREE.TorusGeometry(RING_RADIUS, 0.09, 8, 48)));
       r.name = name;
       r.userData.axis = axis;
       return r;
@@ -193,7 +195,7 @@ export class SectionGizmo extends EventTarget {
     return this._raycaster.ray.clone();
   }
 
-  // The shown handle under the pointer, or null.
+  // The intersection with the shown handle under the pointer, or null.
   _hit(e) {
     if (!this.camera) return null;
     this.update(this.camera);
@@ -205,14 +207,15 @@ export class SectionGizmo extends EventTarget {
     const proxies = [];
     this.group.traverse((o) => o.userData.handle && shown(o) && proxies.push(o));
     this._ray(e);
-    const hit = this._raycaster.intersectObjects(proxies, false)[0];
-    return hit ? hit.object.userData.handle : null;
+    return this._raycaster.intersectObjects(proxies, false)[0] ?? null;
   }
 
   _down(e) {
     if (e.target !== this.dom || e.button !== 0) return;
-    const h = this._hit(e);
-    const start = h && this._start(h, this._ray(e));
+    const hit = this._hit(e);
+    if (!hit) return;
+    const h = hit.object.userData.handle;
+    const start = this._start(h, this._raycaster.ray, hit.point, e);
     if (!start) return; // nothing to drag: the press goes on to the navigation
     e.stopPropagation();
     e.preventDefault();
@@ -222,7 +225,7 @@ export class SectionGizmo extends EventTarget {
   }
 
   // What a drag of handle h needs from its start, or null when the ray gives no usable start.
-  _start(h, ray) {
+  _start(h, ray, point, e) {
     const s = this.sections;
     const { kind } = h.userData;
     if (kind === 'move' || kind === 'rotate') {
@@ -235,9 +238,19 @@ export class SectionGizmo extends EventTarget {
         return s0 === null ? null : { index, origin, normal, offset: s.planes[index].offset, s0 };
       }
       const axis = new THREE.Vector3().setComponent(AXIS_KEYS.indexOf(h.userData.axis), 1).applyQuaternion(quaternion);
+      const rotation = { index, origin, quaternion, axis };
+      if (Math.abs(axis.dot(ray.direction)) < RING_EDGE_SIN) {
+        // An edge-on ring projects to a line. The picked side supplies the direction along it.
+        const line = axis.clone().cross(ray.direction).normalize();
+        const tangent = axis.clone().cross(point.clone().sub(origin));
+        if (line.dot(tangent) < 0) line.negate();
+        line.applyQuaternion(this.camera.quaternion.clone().invert());
+        const screen = new THREE.Vector2(line.x, -line.y).normalize().divideScalar(RING_RADIUS * GIZMO_PX);
+        return { ...rotation, screen, x: e.clientX, y: e.clientY };
+      }
       const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(axis, origin);
       const from = ray.intersectPlane(plane, new THREE.Vector3())?.sub(origin);
-      return from ? { index, origin, quaternion, axis, plane, from } : null;
+      return from ? { ...rotation, plane, from } : null;
     }
     const box = s.box.clone();
     if (kind === 'face') {
@@ -258,16 +271,21 @@ export class SectionGizmo extends EventTarget {
     if (!d) return this._hover(e);
     if (e.pointerId !== d.id) return;
     if (e.buttons === 0) return this._end();
-    const ray = this._ray(e);
     const s = this.sections;
     const { kind } = d.handle.userData;
+    const ray = d.screen ? null : this._ray(e);
     if (kind === 'move') {
       const along = closestOnLine(ray, d.origin, d.normal);
       if (along !== null) s.updatePlane(d.index, { offset: d.offset + along - d.s0 });
     } else if (kind === 'rotate') {
-      const to = ray.intersectPlane(d.plane, new THREE.Vector3())?.sub(d.origin);
-      if (!to) return;
-      const angle = Math.atan2(d.axis.dot(new THREE.Vector3().crossVectors(d.from, to)), d.from.dot(to));
+      let angle;
+      if (d.screen) {
+        angle = d.screen.x * (e.clientX - d.x) + d.screen.y * (e.clientY - d.y);
+      } else {
+        const to = ray.intersectPlane(d.plane, new THREE.Vector3())?.sub(d.origin);
+        if (!to) return;
+        angle = Math.atan2(d.axis.dot(new THREE.Vector3().crossVectors(d.from, to)), d.from.dot(to));
+      }
       const quaternion = new THREE.Quaternion().setFromAxisAngle(d.axis, angle).multiply(d.quaternion);
       // Turn about the gizmo point: the plane keeps passing through it.
       const normal = Z.clone().applyQuaternion(quaternion);
@@ -300,7 +318,7 @@ export class SectionGizmo extends EventTarget {
 
   _hover(e) {
     if (e.buttons !== 0) return;
-    this._highlight(this._hit(e));
+    this._highlight(this._hit(e)?.object.userData.handle ?? null);
   }
 
   _highlight(h) {

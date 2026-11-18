@@ -450,6 +450,8 @@ test('box handles: the +Z and -X faces move only their side, the centre moves th
   expect(Math.hypot(...centre(b3).map((c, k) => c - centre(b2)[k]))).toBeGreaterThan(0.5);
   expect(await pose(page)).toEqual(start);
   expect(await selected(page)).toEqual([]);
+  await tool(page, 'box').click();
+  expect(await boxNow(page)).toEqual(b3);
   expect(errors).toEqual([]);
 });
 
@@ -486,4 +488,33 @@ test('orthographic: dragging the gizmo arrow moves the plane and not the camera'
   expect(await page.evaluate(() => window.__ioviewer.sections.planes[0].offset)).toBeGreaterThan(0.5);
   expect(await pose(page)).toEqual(start);
   expect(errors).toEqual([]);
+});
+
+test('an edge-on section ring rotates smoothly along its screen projection', async ({ page }) => {
+  await open(page);
+  await tool(page, 'projection').click();
+  await tool(page, 'plane').click();
+  await page.mouse.click(...(await cubePoint(page, [0, 0, 1])));
+  await settle(page);
+  const start = await pose(page);
+  const before = await page.evaluate(() => window.__ioviewer.sections.normal(0).toArray());
+  const at = await gizmoAt(page, [0, 0.48, 0.64]);
+  const ahead = await gizmoAt(page, [0, 0.64, 0.48]);
+  const length = Math.hypot(ahead[0] - at[0], ahead[1] - at[1]);
+  await page.mouse.move(...at);
+  expect(await page.evaluate(() => window.__ioviewer.sectionGizmo._hovered?.name)).toBe('ringX');
+  await page.mouse.down();
+  let previous = 0;
+  for (const pixels of [8, 16, 24, 32]) {
+    await page.mouse.move(at[0] + pixels * (ahead[0] - at[0]) / length, at[1] + pixels * (ahead[1] - at[1]) / length);
+    const angle = await page.evaluate((normal) => {
+      const { sections } = window.__ioviewer;
+      return sections.normal(0).angleTo(sections.center.clone().fromArray(normal));
+    }, before);
+    expect(angle - previous).toBeGreaterThan(0.08);
+    expect(angle - previous).toBeLessThan(0.18);
+    previous = angle;
+  }
+  await page.mouse.up();
+  expect(await pose(page)).toEqual(start);
 });

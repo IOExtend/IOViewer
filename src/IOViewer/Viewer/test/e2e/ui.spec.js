@@ -352,8 +352,48 @@ test('status bar counts the selection; the truncation banner shows and closes', 
   await open(page, 'truncated');
   const banner = page.locator('.ioviewer-banner');
   await expect(banner).toHaveText('Показано 40 из 67 мешей: модель обрезана настройкой MaxMeshVertices');
+  await rail(page, 'model').click();
+  for (const width of [1024, 480, 320]) {
+    await page.setViewportSize({ width, height: 768 });
+    await frame(page);
+    const layout = await page.evaluate(() => {
+      const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
+      const reachable = (selector) => {
+        const { left, top, width, height } = rect(selector);
+        return document.elementFromPoint(left + width / 2, top + height / 2)?.closest(selector) != null;
+      };
+      const bar = rect('.ioviewer-toolbar');
+      const panel = rect('.ioviewer-side-panel');
+      const warning = rect('.ioviewer-banner');
+      return {
+        toolbarFits: bar.left >= 0 && bar.right <= innerWidth && bar.bottom < rect('#ioviewer-status').top,
+        panelFits: panel.bottom < bar.top && panel.top > warning.bottom,
+        panelCloseReachable: reachable('.ioviewer-side-panel .ioviewer-panel-close'),
+        homeReachable: reachable('.ioviewer-viewcube-home'),
+      };
+    });
+    expect(layout).toEqual({ toolbarFits: true, panelFits: true, panelCloseReachable: true, homeReachable: true });
+  }
   await banner.getByRole('button').click();
   await expect(banner).toHaveCount(0);
+});
+
+test('viewer hotkeys apply their action and close the context menu', async ({ page }) => {
+  await open(page);
+  const d2 = await indexOf(page, 'Column D2 Level 1');
+  await page.mouse.click(...(await screenAt(page, d2)), { button: 'right' });
+  await expect(menu(page)).toBeVisible();
+  await page.keyboard.press('KeyH');
+  await expect(menu(page)).toBeHidden();
+  expect(await visible(page, d2)).toBe(false);
+});
+
+test('the status bar and model tree group large counts in the viewer language', async ({ page }) => {
+  await open(page, 'large');
+  await rail(page, 'model').click();
+  const count = (value) => new Intl.NumberFormat('ru').format(value);
+  await expect(page.locator('#ioviewer-status')).toHaveText('Выбрано: 0 · Элементов: ' + count(LARGE_ELEMENTS));
+  await expect(page.locator('.tree-count').first()).toHaveText(count(LARGE_ELEMENTS / 4));
 });
 
 test('Copy Id writes the Id to the clipboard and confirms', async ({ page }) => {

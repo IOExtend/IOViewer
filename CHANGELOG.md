@@ -32,6 +32,9 @@ API between minor releases.
 - Keep close geometry visible and pickable in kilometre-scale models. Orthographic wheel zoom changes the
   magnification around the cursor while keeping the camera at the same depth.
 - Speed up picking in large instanced models by skipping the trailing instances outside the pick tile.
+- Keep the toolbar and model warning usable in narrow windows. Localize element counts and label unavailable menu actions.
+- Close the context menu on viewer shortcuts and let Esc stop a viewpoint tour without clearing the current work.
+- Preserve an active section box when reopening its controls, stabilize edge-on plane rotation, and fix view cube interaction.
 
 ## [0.3.1] - 2026-11-13
 

@@ -10,8 +10,6 @@
   --text: #cbd5e1;
   --text-dim: #a8b3c3;
   --muted: #6b7686;
-  /* Space kept clear above the bottom edge for the toolbar, so panels never cover it. */
-  --toolbar-space: 104px;
 }
 
 html,
@@ -32,9 +30,17 @@ body {
 
 /* Overlay for UI; children opt back into pointer events. */
 #ioviewer-ui {
+  --banner-space: calc(var(--banner-height, 0px) + 8px);
+  --toolbar-bottom: 30px;
+  --above-toolbar: calc(var(--toolbar-height, 63px) + var(--toolbar-bottom) + 8px);
+  --toolbar-space: calc(var(--above-toolbar) + var(--player-space, 0px));
   position: fixed;
   inset: 0;
   pointer-events: none;
+}
+
+#ioviewer-ui:has(.ioviewer-banner) {
+  top: var(--banner-space);
 }
 
 [hidden] {
@@ -468,6 +474,19 @@ input:focus-visible {
   top: 0;
 }
 
+@media (max-width: 500px) {
+  .ioviewer-side-panel {
+    z-index: 1;
+    max-width: calc(100% - 100px);
+  }
+
+  .ioviewer-viewcube-home {
+    z-index: 2;
+    left: auto;
+    right: 0;
+  }
+}
+
 /* Properties of the selection, right, below the view cube. */
 #ioviewer-properties {
   right: 12px;
@@ -541,10 +560,15 @@ input:focus-visible {
 /* Bottom toolbar: groups of tools with a label under each */
 .ioviewer-toolbar {
   left: 50%;
-  bottom: 16px;
+  bottom: var(--toolbar-bottom);
   transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
+  justify-content: center;
+  row-gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 24px);
   padding: 6px 0;
 }
 
@@ -627,12 +651,14 @@ input:focus-visible {
 /* Truncation banner, toast, off-screen copy buffer */
 .ioviewer-banner {
   left: 50%;
-  top: 12px;
+  top: calc(12px - var(--banner-space));
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 260px);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  overflow-wrap: anywhere;
   padding: 6px 8px 6px 12px;
   border-color: #a16207;
   color: #fde68a;
@@ -1049,9 +1075,10 @@ label.ioviewer-row:hover {
 
 .ioviewer-player {
   left: 50%;
-  bottom: 102px;
+  bottom: var(--above-toolbar);
   transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   width: min(720px, calc(100% - 24px));
