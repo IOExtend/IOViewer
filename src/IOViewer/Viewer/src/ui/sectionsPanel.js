@@ -51,13 +51,14 @@ function planeRow(sections, i) {
   const update = () => {
     const plane = sections.planes[i];
     const rotated = plane.rotated ? ` (${t('sections.rotated')})` : '';
-    name.textContent = `${i + 1}. ${plane.axis.toUpperCase()}${rotated}`;
+    const axis = plane.axis === 'custom' ? t('sections.custom') : plane.axis.toUpperCase();
+    name.textContent = `${i + 1}. ${axis}${rotated}`;
     row.classList.toggle('active', sections.active === i);
     flip.setAttribute('aria-pressed', String(plane.flipped));
     enabled.input.checked = plane.enabled;
     const extent = sections.extent(i);
-    slider.min = String(-extent);
-    slider.max = String(extent);
+    slider.min = String(Math.min(-extent, plane.offset));
+    slider.max = String(Math.max(extent, plane.offset));
     slider.value = String(plane.offset);
   };
   return { element: row, update };
@@ -130,8 +131,6 @@ export function mountSections({ root, shell, toolbar, contextMenu, sections, sel
   update();
   updateFit();
 
-  toolbar.setActive('plane', false);
-  toolbar.setActive('box', false);
   if (sections.modelBox.isEmpty()) return;
   const open = () => shell.openPanel('sections');
   toolbar.setHandler('plane', () => {

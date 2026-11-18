@@ -28,8 +28,12 @@ The model data is the IOScene scene model, referenced by the `IOViewer` package.
 
 - `ViewerDocument`: a `Scene` plus what only the viewer uses: `SectionPlanes`, `SectionBox` and `HiddenModelKeys`, the
   keys of the linked models hidden at start. `Title` reads and writes `Scene.Title`.
-- `ViewerSectionPlane`: Cutting plane defined by axis or normal vector with offset and flip direction.
-- `ViewerSectionBox`: 6-sided 3D clipping volume. Section planes and boxes are kept in viewer JSON; the HTML viewer does not apply them when it opens.
+- `ViewerSectionPlane`: Cutting plane defined by axis or custom normal. `Offset` is the signed distance in metres
+  from the scene origin along its unit normal. By default the plane cuts the side the normal points to. `Inverted`
+  cuts the opposite side.
+- `ViewerSectionBox`: 6-sided clipping volume in scene coordinates. `Inverted` cuts inside the box.
+  Exported HTML opens in box mode when the box is enabled, or in planes mode with the first six enabled planes.
+  Both are available if the document supplies both. Editing handles start hidden.
 
 ### Exporters (`IOViewer.Exporters`)
 

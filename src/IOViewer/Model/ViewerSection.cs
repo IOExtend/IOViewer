@@ -16,9 +16,15 @@ public enum ViewerSectionAxis
 public sealed class ViewerSectionPlane
 {
     public ViewerSectionAxis Axis { get; set; } = ViewerSectionAxis.X;
+
+    /// <summary>The plane direction when <see cref="Axis"/> is <see cref="ViewerSectionAxis.Custom"/>.</summary>
     public Vector3d Normal { get; set; } = Vector3d.UnitX;
+
+    /// <summary>Signed distance in metres along the unit normal from the scene origin to the plane.</summary>
     public double Offset { get; set; }
     public bool Enabled { get; set; } = true;
+
+    /// <summary>Cut the side opposite the normal instead of the side it points to.</summary>
     public bool Inverted { get; set; }
 
     public ViewerSectionPlane() { }
@@ -46,6 +52,8 @@ public sealed class ViewerSectionBox
     public Vector3d Min { get; set; } = new(-10, -10, -10);
     public Vector3d Max { get; set; } = new(10, 10, 10);
     public bool Enabled { get; set; } = true;
+
+    /// <summary>Cut the inside of the box and keep the outside.</summary>
     public bool Inverted { get; set; }
 
     public ViewerSectionBox() { }
