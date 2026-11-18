@@ -274,7 +274,7 @@ test('tree: search by Id, type and name flattens the matches', async ({ page }) 
   await search.fill('2XQ$N5SLP');
   await expect(rows(page)).toHaveText(['Supply Duct SA-1Rectangular 600x400']);
   await search.fill('steel i');
-  await expect(rows(page)).toHaveCount(34);
+  await expect(rows(page).first()).toHaveAttribute('aria-setsize', '34');
   await search.fill('column d2');
   await expect(rows(page)).toHaveCount(2);
   await search.fill('nothing like this');

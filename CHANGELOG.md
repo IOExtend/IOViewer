@@ -15,6 +15,7 @@ API between minor releases.
   tour both use the saved state.
 - Keyboard navigation and visible focus in the model tree and context menu.
 - Select multiple elements in the model tree and open the viewer context menu from its rows.
+- Filter the model tree by source model, level and category, and optionally isolate the matches in 3D.
 
 ### Fixed
 

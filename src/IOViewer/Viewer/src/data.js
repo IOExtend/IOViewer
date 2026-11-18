@@ -76,8 +76,13 @@ function validateMeta(meta) {
       throw new ModelDataError('Invalid META geometry.');
     }
   }
-  for (const name of ['textures', 'grids', 'viewpoints', 'clashTests', 'linkedFiles']) {
+  for (const name of ['textures', 'grids', 'viewpoints', 'clashTests', 'linkedFiles', 'models']) {
     if (meta[name] != null && !records(meta[name])) throw new ModelDataError(`Invalid META ${name} list.`);
+  }
+  if (meta.models?.some(({ id, name }) => !Number.isSafeInteger(id) || typeof name !== 'string')
+    || meta.elements.some(({ modelId, levelId }) => (modelId != null && !Number.isSafeInteger(modelId))
+      || (levelId != null && !Number.isSafeInteger(levelId)))) {
+    throw new ModelDataError('Invalid META model or level identity.');
   }
   for (const material of meta.materials) {
     const index = material.texture;

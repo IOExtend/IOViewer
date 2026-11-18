@@ -137,6 +137,10 @@ export default function globalSetup() {
   const metaBlock = /(<script id="ioviewer-meta" type="application\/json">)([^<]*)/;
   const meta = JSON.parse(html.match(metaBlock)[2]);
   const withMeta = (changes) => html.replace(metaBlock, (_, open) => open + JSON.stringify({ ...meta, ...changes }));
+  writeFileSync(path.join(results, 'tree-filters-legacy.html'), withMeta({
+    models: undefined,
+    elements: meta.elements.map(({ modelId, levelId, ...element }) => element),
+  }));
   writeFileSync(path.join(results, 'malformed-meta.html'), withMeta({ instances: [] }));
   writeFileSync(path.join(results, 'missing-geometry.html'), withMeta({ geometries: [] }));
   writeFileSync(path.join(results, 'zero-vertices.html'), withMeta({

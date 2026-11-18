@@ -716,6 +716,16 @@ internal sealed class ViewerPayloadWriter
         var levels = new Dictionary<int, string>();
         foreach (var level in _scene.Levels) levels.TryAdd(level.Id, level.Name);
 
+        w.WriteStartArray("models");
+        foreach (var model in _scene.Models)
+        {
+            w.WriteStartObject();
+            w.WriteNumber("id", model.Id);
+            w.WriteString("name", model.Name ?? string.Empty);
+            w.WriteEndObject();
+        }
+        w.WriteEndArray();
+
         w.WriteStartArray("elements");
         foreach (var el in _scene.Elements)
         {
@@ -726,6 +736,9 @@ internal sealed class ViewerPayloadWriter
             w.WriteString("category", string.IsNullOrEmpty(el.Category) ? "General" : el.Category);
             w.WriteString("type", el.TypeName);
             w.WriteString("level", el.LevelId is int level ? levels.GetValueOrDefault(level, string.Empty) : string.Empty);
+            if (el.LevelId is int levelId) w.WriteNumber("levelId", levelId);
+            // The first model is the default so single-source files do not repeat its ID on every element.
+            if (el.ModelId != host?.Id) w.WriteNumber("modelId", el.ModelId);
             if (host is null || el.ModelId == host.Id || links.GetValueOrDefault(el.ModelId) is not { Length: > 0 } link) w.WriteNull("link");
             else w.WriteString("link", link);
             if (!string.IsNullOrEmpty(el.SourceId)) w.WriteString("sourceId", el.SourceId);

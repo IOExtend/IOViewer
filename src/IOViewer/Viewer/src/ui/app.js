@@ -55,6 +55,7 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
     render: (body) =>
       mountTree(body, {
         elements: meta.elements,
+        models: meta.models ?? [],
         selection,
         scene,
         openContextMenu,
