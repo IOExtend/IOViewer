@@ -36,10 +36,12 @@ public sealed class ViewerDocument
     public ViewerSectionBox? SectionBox { get; set; }
 
     /// <summary>
-    /// Keys (<see cref="SceneModel.Key"/>) of the models hidden at start. The first model of the scene is the host
-    /// and is always shown; the others are listed as linked files.
+    /// Keys (<see cref="SceneModel.Key"/>) of the models hidden at start. This applies to models listed in the viewer.
     /// </summary>
     public List<string> HiddenModelKeys { get; set; } = [];
+
+    /// <summary>Include the first model in the viewer's model visibility list, as in a federated export.</summary>
+    public bool ShowHostInModelList { get; set; }
 
     /// <summary>Optional viewer state keyed by a unique, non-null <see cref="SceneViewpoint.Id"/> in this scene.</summary>
     public Dictionary<string, ViewerViewpointState> ViewpointStates { get; set; } = [];

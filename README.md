@@ -100,6 +100,19 @@ ioviewer model.nwc -o viewer.html
 ioviewer model.glb --serve
 ```
 
+Pass `--add` and `--placement` to combine several source models into one offline HTML viewer.
+
+```sh
+ioviewer architecture.ifc --add services.rvt --placement 10,20,3,90 -o coordination.html
+```
+
+The first input defines the coordinate space. Each `--add` takes a file followed by
+`--placement x,y,z,yaw`. Rotate counterclockwise about +Z by `yaw` degrees, then translate by
+`x,y,z` metres. Use `0,0,0,0` for a source already in the first model's coordinates. Repeat the
+pair to add more inputs. The viewer lists all models in the Linked files panel with individual
+visibility controls. The first input supplies any startup clipping. Saved views from added sources
+are placed with their models. A saved section box requires a yaw that is a multiple of 90 degrees.
+
 Export structured JSON snapshots:
 
 ```sh

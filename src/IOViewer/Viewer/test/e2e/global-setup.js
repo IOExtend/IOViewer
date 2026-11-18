@@ -73,6 +73,18 @@ export default function globalSetup() {
   exportHtml(shear, 'shear');
 
   const results = path.join(viewerDir, 'test-results');
+  const sources = ['Architecture', 'Services'].map((name) => {
+    const doc = largeModel(2);
+    doc.Title = name;
+    doc.Elements.forEach((element, i) => {
+      element.Name = `${name} part ${i + 1}`;
+      element.Properties = { Source: { Discipline: name } };
+    });
+    const file = path.join(results, `${name}.json`);
+    writeFileSync(file, JSON.stringify(doc));
+    return file;
+  });
+  exportHtml(sources[0], 'federated', ['--add', sources[1], '--placement', '10,20,3,90']);
   const wide = largeModel(2);
   for (const [i, id] of ['9007199254740992', '9007199254740993'].entries()) {
     wide.Elements[i].Id = wide.Meshes[i].ElementId = JSON.rawJSON(id);

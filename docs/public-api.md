@@ -26,9 +26,9 @@ The model data is the IOScene scene model, referenced by the `IOViewer` package.
 
 ### Viewer document (`IOViewer.Model`)
 
-- `ViewerDocument`: a `Scene` plus what only the viewer uses: `SectionPlanes`, `SectionBox` and `HiddenModelKeys`, the
-  keys of the linked models hidden at start. `ViewpointStates` adds optional state to saved cameras. `Title` reads and
-  writes `Scene.Title`.
+- `ViewerDocument` holds the scene, startup clipping, and the model keys hidden at start in `HiddenModelKeys`.
+  `ShowHostInModelList` adds the first model to the Linked files controls so it can be hidden independently.
+  `ViewpointStates` adds optional state to saved cameras. `Title` reads and writes `Scene.Title`.
 - `ViewerSectionPlane`: Cutting plane defined by axis or custom normal. `Offset` is the signed distance in metres
   from the scene origin along its unit normal. By default the plane cuts the side the normal points to. `Inverted`
   cuts the opposite side.
