@@ -27,7 +27,7 @@ ioviewer model.glb -o viewer.html
 # and an error (elements may be missing) gives exit code 4 after the output is written
 ioviewer model.ifc
 ioviewer model.rvt
-ioviewer model.nwc
+ioviewer model.nwc --json model.viewer.json
 
 # Launch local preview server and open in default browser
 ioviewer model.glb --serve
@@ -35,6 +35,7 @@ ioviewer model.glb --serve
 
 The direct `.nwc` command is available in CLI builds from this repository. Published `IOViewer.Cli` 0.3.1 uses the
 [IOScene JSON handoff](#navisworks-cache) for Navisworks models.
+The CLI reports `.nwd` and `.nwf` as unsupported input formats and exits with code 3.
 
 ## C# API usage
 
