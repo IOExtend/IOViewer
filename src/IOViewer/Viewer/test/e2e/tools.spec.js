@@ -100,13 +100,13 @@ test('distance: two clicks on the slab top 6 m apart measure 6.00 m; the selecti
 
 test('display mode menu: materials checked, textures disabled without textures, each mode changes the picture', async ({ page }) => {
   const errors = await open(page);
+  const pictures = { materials: await shot(page) };
   await tool(page, 'displayMode').click();
   await expect(page.locator('.ioviewer-display-modes')).toBeVisible();
   await expect(page.locator('.ioviewer-display-modes .ioviewer-menu-item')).toHaveText(['Материалы', 'Текстуры', 'Белый', 'Каркас']);
   await expect(modeItem(page, 'materials')).toHaveAttribute('aria-checked', 'true');
   await expect(modeItem(page, 'textures')).toBeDisabled();
 
-  const pictures = { materials: await shot(page) };
   for (const mode of ['white', 'wireframe']) {
     if (!(await page.locator('.ioviewer-display-modes').isVisible())) await tool(page, 'displayMode').click();
     await modeItem(page, mode).click();
@@ -121,6 +121,39 @@ test('display mode menu: materials checked, textures disabled without textures, 
   await expect(modeItem(page, 'materials')).toHaveAttribute('aria-checked', 'false');
   await modeItem(page, 'materials').click();
   expect((await shot(page)).equals(pictures.materials)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('viewport background changes from the display menu and can be reset', async ({ page }) => {
+  const errors = await open(page);
+  const background = async () => {
+    await frame(page);
+    return page.screenshot({ clip: { x: 110, y: 40, width: 2, height: 2 } });
+  };
+  const original = await background();
+  const display = tool(page, 'displayMode');
+  const panel = page.getByRole('dialog', { name: 'Отображение' });
+  const color = panel.getByLabel('Цвет фона');
+  const reset = panel.getByRole('button', { name: 'Фон по умолчанию' });
+
+  await display.click();
+  await expect(color).toHaveValue('#1f2228');
+  await expect(reset).toBeDisabled();
+  await color.fill('#ffffff');
+  await expect(page.locator('#ioviewer-status')).toHaveCSS('color', 'rgb(0, 0, 0)');
+  const white = await background();
+  expect(white.equals(original)).toBe(false);
+  await color.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(display).toBeFocused();
+  expect((await background()).equals(white)).toBe(true);
+
+  await display.click();
+  await expect(color).toHaveValue('#ffffff');
+  await reset.click();
+  await expect(color).toHaveValue('#1f2228');
+  await expect(reset).toBeDisabled();
+  expect((await background()).equals(original)).toBe(true);
   expect(errors).toEqual([]);
 });
 

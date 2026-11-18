@@ -50,7 +50,8 @@ function start(data, context) {
   renderer.localClippingEnabled = true;
 
   const world = new THREE.Scene();
-  world.background = new THREE.Color('#1f2228');
+  const initialBackground = '#1f2228';
+  world.background = new THREE.Color(initialBackground);
   const sky = new THREE.HemisphereLight('#ffffff', '#8a8f99', 1.6);
   sky.position.set(0, 0, 1);
   world.add(sky);
@@ -157,7 +158,15 @@ function start(data, context) {
   world.add(clashes.group); // overlay, like the measure
   const timeliner = mountTimeliner({ root: uiRoot, ...ui, timeliner: meta.timeliner, elements: meta.elements, scene });
   mountLinks({ ...ui, files: meta.linkedFiles ?? [], elements: meta.elements, scene });
-  for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta: data.meta, grids })) ui.onEscape(popover.close);
+  const setBackground = (color) => {
+    const { r, g, b } = world.background.set(color);
+    // The equality point of the white and black contrast ratios against a linear sRGB background.
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const text = luminance > Math.sqrt(0.0525) - 0.05 ? '#000' : '#fff';
+    uiRoot.style.setProperty('--viewport-text', color === initialBackground ? '' : text);
+    requestRender();
+  };
+  for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta, grids, initialBackground, setBackground })) ui.onEscape(popover.close);
   ui.toolbar.setHandler('distance', () => {
     measure.setActive(!measure.active);
     ui.toolbar.setActive('distance', measure.active);
