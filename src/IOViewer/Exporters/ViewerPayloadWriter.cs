@@ -45,6 +45,8 @@ internal sealed class ViewerPayloadWriter
     private readonly List<int> _instanceElement = [];
     private readonly List<float> _instanceMatrix = [];
     private readonly Dictionary<string, PreparedViewpoint> _viewpointStates = new(StringComparer.Ordinal);
+    private readonly List<ViewerBcfTopic> _bcfTopics;
+    private readonly Dictionary<ViewerBcfViewpoint, PreparedViewpoint> _bcfStates = [];
     private SectionState _sections;
     private BoundingBox3d _bounds;
     private Vector3d _rtcOffset;
@@ -58,6 +60,7 @@ internal sealed class ViewerPayloadWriter
         _scene = doc.Scene;
         _hiddenModels = [.. doc.HiddenModelKeys];
         _firstListedModel = doc.ShowHostInModelList ? 0 : 1;
+        _bcfTopics = doc.BcfTopics;
         _options = options;
     }
 
@@ -108,34 +111,57 @@ internal sealed class ViewerPayloadWriter
 
     private void BuildViewpointStates(Dictionary<string, ViewerViewpointState>? states, Dictionary<long, int> elementIndex)
     {
-        if (!_options.IncludeViewpoints || states is not { Count: > 0 }) return;
+        if (!_options.IncludeViewpoints || (states is not { Count: > 0 } && _bcfTopics.Count == 0)) return;
 
         var linkedKeys = _scene.Models.Skip(_firstListedModel).Select(model => model.Key).ToHashSet(StringComparer.Ordinal);
         foreach (var view in _scene.Viewpoints)
         {
-            if (view.Id is not { } id || !states.TryGetValue(id, out var state)) continue;
-            if (state is null) throw new InvalidDataException($"Viewpoint '{id}' has a null state.");
+            if (view.Id is not { } id || states is null || !states.TryGetValue(id, out var state)) continue;
             if (_viewpointStates.ContainsKey(id))
                 throw new InvalidDataException($"Viewpoint state '{id}' matches more than one saved camera.");
 
-            SectionState? sections = state.SectionPlanes is not null || state.SectionBox is not null
-                ? BuildSections(state.SectionPlanes, state.SectionBox)
-                : null;
-            int[]? hiddenElements = state.HiddenElementIds?.Select(elementId =>
-                elementIndex.TryGetValue(elementId, out int index)
-                    ? index
-                    : throw new InvalidDataException($"Viewpoint '{id}' references unknown element {elementId}.")).ToArray();
-            string[]? hiddenModels = state.HiddenModelKeys?.ToArray();
-            if (hiddenModels?.Any(key => !linkedKeys.Contains(key)) == true)
-                throw new InvalidDataException($"Viewpoint '{id}' references an unknown linked model or the host.");
-            _viewpointStates.Add(id, new(sections, hiddenElements, hiddenModels));
+            _viewpointStates.Add(id, PrepareViewpoint(state, id, elementIndex, linkedKeys));
         }
 
-        foreach (string id in states.Keys)
+        foreach (string id in states?.Keys ?? Enumerable.Empty<string>())
         {
             if (!_viewpointStates.ContainsKey(id))
                 throw new InvalidDataException($"Viewpoint state '{id}' has no saved camera.");
         }
+        foreach (var topic in _bcfTopics)
+        {
+            foreach (var view in topic.Viewpoints)
+            {
+                var camera = view.Camera;
+                if (!IsFinite(camera.Position - _rtcOffset) || !IsFinite(camera.Target - _rtcOffset)
+                    || camera.Position == camera.Target || !IsFinite(camera.Up) || camera.Up == Vector3d.Zero
+                    || !double.IsFinite(camera.FieldOfView) || camera.FieldOfView <= 0 || camera.FieldOfView >= Math.PI
+                    || (camera.Projection == SceneProjection.Orthographic
+                        && (view.OrthographicHeight is not double height || !double.IsFinite(height) || height <= 0
+                            || !double.IsFinite((camera.Target - camera.Position).Length / height)))
+                    || view.MissingComponents < 0 || view.AmbiguousComponents < 0)
+                    throw new InvalidDataException($"BCF topic '{topic.Title}' has an invalid viewpoint.");
+                _bcfStates.Add(view, PrepareViewpoint(view.State, topic.Title, elementIndex, linkedKeys));
+            }
+        }
+    }
+
+    private PreparedViewpoint PrepareViewpoint(ViewerViewpointState? state, string id,
+        Dictionary<long, int> elementIndex, HashSet<string> linkedKeys)
+    {
+        if (state is null) throw new InvalidDataException($"Viewpoint '{id}' has a null state.");
+        if (state.HiddenElementIds is not null && state.VisibleElementIds is not null)
+            throw new InvalidDataException($"Viewpoint '{id}' specifies both hidden and visible elements.");
+        SectionState? sections = state.SectionPlanes is not null || state.SectionBox is not null
+            ? BuildSections(state.SectionPlanes, state.SectionBox) : null;
+        int[]? Indices(List<long>? ids) => ids?.Select(elementId =>
+            elementIndex.TryGetValue(elementId, out int index) ? index
+                : throw new InvalidDataException($"Viewpoint '{id}' references unknown element {elementId}.")).ToArray();
+        string[]? models = state.HiddenModelKeys?.ToArray();
+        if (models?.Any(key => !linkedKeys.Contains(key)) == true)
+            throw new InvalidDataException($"Viewpoint '{id}' references an unknown linked model or the host.");
+        return new(sections, Indices(state.HiddenElementIds), Indices(state.VisibleElementIds),
+            Indices(state.SelectedElementIds), models);
     }
 
     private static bool IsFinite(Vector3d v) => double.IsFinite(v.X) && double.IsFinite(v.Y) && double.IsFinite(v.Z);
@@ -752,6 +778,7 @@ internal sealed class ViewerPayloadWriter
 
         if (_sections.Planes.Count > 0 || _sections.Box is not null) WriteSections(w, _sections);
         WriteViewpoints(w);
+        WriteBcfTopics(w);
         WriteGrids(w);
         WriteTimeLiner(w);
         WriteLinkedFiles(w);
@@ -791,27 +818,71 @@ internal sealed class ViewerPayloadWriter
             {
                 w.WriteStartObject();
                 w.WriteString("name", vp.Name);
-                w.WriteStartObject("camera");
-                WriteVector(w, "position", vp.Camera.Position - _rtcOffset);
-                WriteVector(w, "target", vp.Camera.Target - _rtcOffset);
-                // A projection this version does not know is perspective (the enum is open).
-                w.WriteString("projection", vp.Camera.Projection == SceneProjection.Orthographic ? "orthographic" : "perspective");
-                w.WriteEndObject();
+                WriteCamera(w, vp.Camera, authored: false);
                 if (vp.Id is { } id && _viewpointStates.TryGetValue(id, out var state))
-                {
-                    if (state.Sections is { } sections) WriteSections(w, sections);
-                    if (state.HiddenElements is { } elements) WriteIndices(w, "hiddenElements", elements);
-                    if (state.HiddenModels is { } models)
-                    {
-                        w.WriteStartArray("hiddenModelKeys");
-                        foreach (string key in models) w.WriteStringValue(key);
-                        w.WriteEndArray();
-                    }
-                }
+                    WriteViewpointState(w, state);
                 w.WriteEndObject();
             }
         }
         w.WriteEndArray();
+    }
+
+    private void WriteBcfTopics(Utf8JsonWriter w)
+    {
+        if (!_options.IncludeViewpoints || _bcfTopics.Count == 0) return;
+        w.WriteStartArray("bcfTopics");
+        foreach (var topic in _bcfTopics)
+        {
+            w.WriteStartObject();
+            w.WriteString("id", topic.Id);
+            w.WriteString("title", topic.Title);
+            w.WriteString("status", topic.Status);
+            w.WriteString("description", topic.Description);
+            w.WriteStartArray("viewpoints");
+            foreach (var view in topic.Viewpoints)
+            {
+                w.WriteStartObject();
+                WriteCamera(w, view.Camera, authored: true, view.OrthographicHeight);
+                WriteViewpointState(w, _bcfStates[view]);
+                w.WriteNumber("missingComponents", view.MissingComponents);
+                w.WriteNumber("ambiguousComponents", view.AmbiguousComponents);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+            w.WriteEndObject();
+            FlushIfLarge(w);
+        }
+        w.WriteEndArray();
+    }
+
+    private void WriteCamera(Utf8JsonWriter w, SceneCamera camera, bool authored, double? orthographicHeight = null)
+    {
+        w.WriteStartObject("camera");
+        WriteVector(w, "position", camera.Position - _rtcOffset);
+        WriteVector(w, "target", camera.Target - _rtcOffset);
+        w.WriteString("projection", camera.Projection == SceneProjection.Orthographic ? "orthographic" : "perspective");
+        if (authored)
+        {
+            WriteVector(w, "up", camera.Up);
+            if (camera.Projection == SceneProjection.Orthographic && orthographicHeight is double height)
+                w.WriteNumber("orthographicHeight", height);
+            else w.WriteNumber("fov", camera.FieldOfView * 180 / Math.PI);
+        }
+        w.WriteEndObject();
+    }
+
+    private static void WriteViewpointState(Utf8JsonWriter w, PreparedViewpoint state)
+    {
+        if (state.Sections is { } sections) WriteSections(w, sections);
+        if (state.HiddenElements is { } hidden) WriteIndices(w, "hiddenElements", hidden);
+        if (state.VisibleElements is { } visible) WriteIndices(w, "visibleElements", visible);
+        if (state.SelectedElements is { } selected) WriteIndices(w, "selectedElements", selected);
+        if (state.HiddenModels is { } models)
+        {
+            w.WriteStartArray("hiddenModelKeys");
+            foreach (string key in models) w.WriteStringValue(key);
+            w.WriteEndArray();
+        }
     }
 
     private void WriteGrids(Utf8JsonWriter w)
@@ -1004,7 +1075,8 @@ internal sealed class ViewerPayloadWriter
     private readonly record struct SectionState(
         List<(string Axis, Vector3d Normal, double Offset, bool Flipped)> Planes, (BoundingBox3d Bounds, bool Inverted)? Box);
 
-    private sealed record PreparedViewpoint(SectionState? Sections, int[]? HiddenElements, string[]? HiddenModels);
+    private sealed record PreparedViewpoint(SectionState? Sections, int[]? HiddenElements, int[]? VisibleElements,
+        int[]? SelectedElements, string[]? HiddenModels);
 
     private readonly record struct MaterialKey(byte R, byte G, byte B, double Opacity, int? Texture);
 

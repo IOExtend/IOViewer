@@ -63,13 +63,15 @@ internal static class SceneFederation
         var propertyIds = RemapIds(to.PropertySets.Select(p => p.Id).Concat(to.Elements.SelectMany(e => e.PropertySetIds)),
             from.PropertySets.Select(p => p.Id));
         var sourceElements = from.Elements.ToDictionary(e => e.Id);
-        var elementIds = RemapIds(ElementReferences(to).Concat(target.ViewpointStates.Values.SelectMany(s => s?.HiddenElementIds ?? [])),
+        var targetViews = target.ViewpointStates.Values.Concat(target.BcfTopics.SelectMany(t => t.Viewpoints).Select(v => v.State));
+        var elementIds = RemapIds(ElementReferences(to).Concat(targetViews.SelectMany(s =>
+                (s?.HiddenElementIds ?? []).Concat(s?.VisibleElementIds ?? []).Concat(s?.SelectedElementIds ?? []))),
             ElementReferences(from).Distinct());
         var rotation = placement with { Translation = Vector3d.Zero };
 
         var keys = to.Models.Select(m => m.Key).ToHashSet(StringComparer.Ordinal);
         target.HiddenModelKeys.RemoveAll(key => !keys.Contains(key) || (!target.ShowHostInModelList && key == to.Models[0].Key));
-        keys.UnionWith(target.ViewpointStates.Values.SelectMany(s => s?.HiddenModelKeys ?? []));
+        keys.UnionWith(targetViews.SelectMany(s => s?.HiddenModelKeys ?? []));
         var reservedKeys = from.Models.Select(m => m.Key).ToHashSet(StringComparer.Ordinal);
         var modelKeys = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var model in from.Models)
@@ -141,21 +143,21 @@ internal static class SceneFederation
             throw new InvalidDataException("A saved viewpoint state matches more than one camera.");
         foreach (var view in from.Viewpoints)
         {
-            view.Camera.Position = placement.Apply(view.Camera.Position);
-            view.Camera.Target = placement.Apply(view.Camera.Target);
-            view.Camera.Up = rotation.Apply(view.Camera.Up);
+            PlaceCamera(view.Camera);
             if (view.Id is not { } oldId) continue;
             view.Id = Unique(oldId, viewIds, reservedViews);
             if (!states.Remove(oldId, out var state)) continue;
-            if (state is null) throw new InvalidDataException($"Viewpoint '{oldId}' has a null state.");
-            if (state.HiddenElementIds?.Any(id => !sourceElements.ContainsKey(id)) == true)
-                throw new InvalidDataException($"Viewpoint '{oldId}' references an unknown element.");
-            state.HiddenElementIds = state.HiddenElementIds?.Select(id => elementIds[id]).ToList();
-            state.HiddenModelKeys = state.HiddenModelKeys?.Select(key => modelKeys[key]).ToList();
-            TransformSections(state, placement, rotation);
+            PlaceState(state, oldId);
             target.ViewpointStates.Add(view.Id, state);
         }
         if (states.Count != 0) throw new InvalidDataException("A saved viewpoint state has no matching camera.");
+        foreach (var topic in source.BcfTopics)
+            foreach (var view in topic.Viewpoints)
+            {
+                PlaceCamera(view.Camera);
+                PlaceState(view.State, topic.Title);
+            }
+        target.BcfTopics.AddRange(source.BcfTopics);
 
         target.HiddenModelKeys.AddRange(source.HiddenModelKeys
             .Where(key => (source.ShowHostInModelList || key != sourceHost) && modelKeys.ContainsKey(key))
@@ -173,6 +175,25 @@ internal static class SceneFederation
         to.Schedules.AddRange(from.Schedules);
         to.Viewpoints.AddRange(from.Viewpoints);
         to.ClashTests.AddRange(from.ClashTests);
+
+        void PlaceCamera(SceneCamera camera)
+        {
+            camera.Position = placement.Apply(camera.Position);
+            camera.Target = placement.Apply(camera.Target);
+            camera.Up = rotation.Apply(camera.Up);
+        }
+
+        void PlaceState(ViewerViewpointState? state, string label)
+        {
+            if (state is null) throw new InvalidDataException($"Viewpoint '{label}' has a null state.");
+            List<long>? Map(List<long>? list) => list?.Select(id => sourceElements.ContainsKey(id) ? elementIds[id]
+                : throw new InvalidDataException($"Viewpoint '{label}' references an unknown element.")).ToList();
+            state.HiddenElementIds = Map(state.HiddenElementIds);
+            state.VisibleElementIds = Map(state.VisibleElementIds);
+            state.SelectedElementIds = Map(state.SelectedElementIds);
+            state.HiddenModelKeys = state.HiddenModelKeys?.Select(key => modelKeys[key]).ToList();
+            TransformSections(state, placement, rotation);
+        }
     }
 
     private static void TransformSections(ViewerViewpointState state, Transform3d placement, Transform3d rotation)

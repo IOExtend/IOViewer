@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { t } from '../i18n.js';
 import { icons } from './icons.js';
 import { el } from './dom.js';
@@ -19,7 +18,7 @@ export function rowButton(className, text) {
  * projection becomes orthographic only for a viewpoint marked so). «Тур по видам» flies through all of them in turn,
  * pausing 3 s at each, round and round, until stopped by its button or by any press, wheel or key.
  */
-export function mountViews({ shell, toolbar, controls, scene, sections, restoreLinkedModels, views }) {
+export function mountViews({ shell, toolbar, controls, scene, sections, selection, restoreLinkedModels, views, bcfTopics }) {
   let tour = null; // { next, frame, timer }
   const tourButton = el('button', 'ioviewer-text-button ioviewer-tour');
   tourButton.type = 'button';
@@ -27,14 +26,13 @@ export function mountViews({ shell, toolbar, controls, scene, sections, restoreL
   function go(view) {
     if (view.sections != null) sections.restore(view.sections);
     if (view.hiddenElements != null) scene.setHiddenElements(view.hiddenElements);
+    if (view.visibleElements != null) scene.isolate(view.visibleElements);
     if (view.hiddenModelKeys != null) restoreLinkedModels(view.hiddenModelKeys);
+    if (view.selectedElements != null) selection.set(view.selectedElements);
     const orthographic = view.camera.projection === 'orthographic';
     controls.setProjection(orthographic ? 'orthographic' : 'perspective');
     toolbar.setActive('projection', orthographic);
-    controls.animateTo({
-      position: new THREE.Vector3(...view.camera.position),
-      target: new THREE.Vector3(...view.camera.target),
-    });
+    controls.restoreViewCamera(view.camera);
   }
 
   // Next stop once the flight there has ended and the pause is over.
@@ -95,6 +93,35 @@ export function mountViews({ shell, toolbar, controls, scene, sections, restoreL
         list.append(row);
       }
       body.append(tourButton, list);
+    },
+  });
+
+  shell.registerPanel('bcf', {
+    icon: icons.bcf,
+    title: t('panel.bcf'),
+    visible: bcfTopics.length > 0,
+    render: (body) => {
+      const list = el('div', 'ioviewer-row-list');
+      for (const topic of bcfTopics) {
+        const details = el('details', 'ioviewer-bcf-topic');
+        details.append(el('summary', '', topic.title));
+        if (topic.status) details.append(el('p', 'ioviewer-bcf-status', topic.status));
+        if (topic.description) details.append(el('p', 'ioviewer-bcf-description', topic.description));
+        if (!topic.viewpoints.length) details.append(el('p', 'ioviewer-bcf-status', t('bcf.noView')));
+        topic.viewpoints.forEach((view, index) => {
+          const label = t('bcf.viewpoint').replace('{index}', String(index + 1));
+          const button = rowButton('ioviewer-row ioviewer-view', label);
+          button.addEventListener('click', () => go(view));
+          details.append(button);
+          if (view.missingComponents || view.ambiguousComponents) {
+            const message = t('bcf.components').replace('{missing}', String(view.missingComponents))
+              .replace('{ambiguous}', String(view.ambiguousComponents));
+            details.append(el('p', 'ioviewer-bcf-status', message));
+          }
+        });
+        list.append(details);
+      }
+      body.append(list);
     },
   });
 }

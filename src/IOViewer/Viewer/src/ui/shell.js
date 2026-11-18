@@ -3,7 +3,7 @@ import { icons } from './icons.js';
 import { el, iconButton } from './dom.js';
 
 // Rail order is fixed, so a panel registered later (sections, by its own task) still lands in its place.
-const ORDER = ['model', 'views', 'sections', 'clashes', 'timeliner', 'links'];
+const ORDER = ['model', 'views', 'sections', 'clashes', 'bcf', 'timeliner', 'links'];
 
 /**
  * Left icon rail with floating panels; one panel is open at a time and its active rail icon closes it.

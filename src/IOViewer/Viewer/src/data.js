@@ -76,7 +76,7 @@ function validateMeta(meta) {
       throw new ModelDataError('Invalid META geometry.');
     }
   }
-  for (const name of ['textures', 'grids', 'viewpoints', 'clashTests', 'linkedFiles', 'models']) {
+  for (const name of ['textures', 'grids', 'viewpoints', 'bcfTopics', 'clashTests', 'linkedFiles', 'models']) {
     if (meta[name] != null && !records(meta[name])) throw new ModelDataError(`Invalid META ${name} list.`);
   }
   if (meta.models?.some(({ id, name }) => !Number.isSafeInteger(id) || typeof name !== 'string')
@@ -93,13 +93,27 @@ function validateMeta(meta) {
   }
   const elementIndices = (values) => values == null || (Array.isArray(values) &&
     values.every((i) => Number.isInteger(i) && i >= 0 && i < meta.elements.length));
+  const finiteVector = (v) => vector(v) && v.every(Number.isFinite);
+  const optionalText = (value) => value == null || typeof value === 'string';
+  const validView = (view) => finiteVector(view.camera?.position) && finiteVector(view.camera?.target)
+    && sectionState(view.sections) && elementIndices(view.hiddenElements) && elementIndices(view.visibleElements)
+    && elementIndices(view.selectedElements) && (view.hiddenElements == null || view.visibleElements == null)
+    && (view.hiddenModelKeys == null || (Array.isArray(view.hiddenModelKeys)
+      && view.hiddenModelKeys.every((key) => typeof key === 'string')));
+  const count = (value) => Number.isSafeInteger(value) && value >= 0;
+  const validBcfView = (view) => validView(view) && finiteVector(view.camera.up) && view.camera.up.some((n) => n !== 0)
+    && (view.camera.projection === 'orthographic'
+      ? Number.isFinite(view.camera.orthographicHeight) && view.camera.orthographicHeight > 0
+      : view.camera.projection === 'perspective' && Number.isFinite(view.camera.fov) && view.camera.fov > 0 && view.camera.fov < 180)
+    && count(view.missingComponents) && count(view.ambiguousComponents);
   if (meta.grids?.some((grid) => !vector(grid.start) || !vector(grid.end))
-    || meta.viewpoints?.some((view) => !vector(view.camera?.position) || !vector(view.camera?.target)
-      || !sectionState(view.sections) || !elementIndices(view.hiddenElements)
-      || (view.hiddenModelKeys != null && (!Array.isArray(view.hiddenModelKeys) ||
-        !view.hiddenModelKeys.every((key) => typeof key === 'string'))))
+    || meta.viewpoints?.some((view) => !validView(view))
     || meta.clashTests?.some((test) => !records(test.clashes) || test.clashes.some((clash) => !vector(clash.point)))) {
     throw new ModelDataError('Invalid META grids, viewpoints or clashes.');
+  }
+  if (meta.bcfTopics?.some((topic) => typeof topic.title !== 'string' || !optionalText(topic.description)
+    || !optionalText(topic.status) || !records(topic.viewpoints) || topic.viewpoints.some((view) => !validBcfView(view)))) {
+    throw new ModelDataError('Invalid META BCF topics.');
   }
   if (meta.linkedFiles?.some((file) => !elementIndices(file.members))) throw new ModelDataError('Invalid META linked file members.');
   if (!sectionState(meta.sections)) throw new ModelDataError('Invalid META sections.');

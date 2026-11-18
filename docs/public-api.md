@@ -28,7 +28,8 @@ The model data is the IOScene scene model, referenced by the `IOViewer` package.
 
 - `ViewerDocument` holds the scene, startup clipping, and the model keys hidden at start in `HiddenModelKeys`.
   `ShowHostInModelList` adds the first model to the Linked files controls so it can be hidden independently.
-  `ViewpointStates` adds optional state to saved cameras. `Title` reads and writes `Scene.Title`.
+  `ViewpointStates` adds optional state to saved cameras. `BcfTopics` holds imported summaries and viewpoints
+  with cameras already in scene coordinates. `Title` reads and writes `Scene.Title`.
 - `ViewerSectionPlane`: Cutting plane defined by axis or custom normal. `Offset` is the signed distance in metres
   from the scene origin along its unit normal. By default the plane cuts the side the normal points to. `Inverted`
   cuts the opposite side.
@@ -40,6 +41,8 @@ The model data is the IOScene scene model, referenced by the `IOViewer` package.
 
 Use a unique `SceneViewpoint.Id` and the same key in `ViewerDocument.ViewpointStates`. A `ViewerViewpointState` can
 restore clipping, element visibility and linked-file checkboxes. The view list and the tour apply the same state.
+`SelectedElementIds` replaces the selection when supplied. `VisibleElementIds` isolates a set of elements
+and is exclusive with `HiddenElementIds`. All three lists use scene element IDs.
 
 ```csharp
 doc.Scene.Viewpoints.Add(new SceneViewpoint

@@ -1,4 +1,5 @@
 using IOScene;
+using System.Text.Json.Serialization;
 
 namespace IOViewer.Model;
 
@@ -19,6 +20,14 @@ public sealed class ViewerViewpointState
     /// all elements in it. Linked files and schedules still apply their own visibility.
     /// </summary>
     public List<long>? HiddenElementIds { get; set; }
+
+    /// <summary>Show only these elements in the user's visibility layer. Exclusive with <see cref="HiddenElementIds"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<long>? VisibleElementIds { get; set; }
+
+    /// <summary>Replace the selection with these scene element IDs. Null preserves the selection.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<long>? SelectedElementIds { get; set; }
 
     /// <summary>
     /// <see cref="SceneModel.Key"/> values of hidden linked models. Null preserves the linked-file checkboxes and an

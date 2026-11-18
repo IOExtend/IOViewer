@@ -11,6 +11,7 @@ export const icons = {
   views: svg('<rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3"/>'),
   sections: svg('<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>'),
   clashes: svg('<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.01"/>'),
+  bcf: svg('<path d="M4 4h16v13H9l-5 4z"/><path d="M8 8h8M8 12h5"/>'),
   timeliner: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
   links: svg(
     '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',

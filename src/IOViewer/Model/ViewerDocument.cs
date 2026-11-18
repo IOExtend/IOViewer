@@ -46,6 +46,9 @@ public sealed class ViewerDocument
     /// <summary>Optional viewer state keyed by a unique, non-null <see cref="SceneViewpoint.Id"/> in this scene.</summary>
     public Dictionary<string, ViewerViewpointState> ViewpointStates { get; set; } = [];
 
+    /// <summary>Imported BCF topic summaries and viewpoints in this scene.</summary>
+    public List<ViewerBcfTopic> BcfTopics { get; set; } = [];
+
     /// <summary>Title of the scene: reads and writes <see cref="SceneDocument.Title"/>.</summary>
     [JsonIgnore]
     public string Title

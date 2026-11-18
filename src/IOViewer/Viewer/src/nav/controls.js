@@ -37,6 +37,7 @@ export class NavigationControls extends EventTarget {
     this.target = new THREE.Vector3();
     this.leftButtonMode = 'orbit';
     this._perspective = camera;
+    this._defaultFov = camera.fov;
     this._orthographic = new THREE.OrthographicCamera(-1, 1, 1, -1);
     this.camera = camera;
     this._drag = null;
@@ -156,7 +157,29 @@ export class NavigationControls extends EventTarget {
     this.fitBox(box, true);
   }
 
-  // Swings the camera round the target (see interpolateView); `up` stays +Z, so it is accepted and ignored.
+  resetCameraStyle() {
+    this._perspective.fov = this._defaultFov;
+    this.camera.up.set(0, 0, 1);
+  }
+
+  restoreViewCamera({ position, target, up, fov, orthographicHeight }) {
+    const eye = new THREE.Vector3(...position);
+    const aim = new THREE.Vector3(...target);
+    this.resetCameraStyle();
+    if (!up) {
+      this.animateTo({ position: eye, target: aim });
+      return;
+    }
+    this._stopAnimation();
+    this.camera.up.fromArray(up);
+    this._perspective.fov = fov ?? this._defaultFov;
+    const distance = Math.max(eye.distanceTo(aim), 1e-6);
+    this.camera.zoom = orthographicHeight == null ? 1
+      : 2 * distance * Math.tan(THREE.MathUtils.degToRad(this._perspective.fov / 2)) / orthographicHeight;
+    this._set(eye, aim);
+  }
+
+  // Swings the camera round the target (see interpolateView).
   animateTo({ position, target, zoom = 1 }, ms = 400) {
     this._stopAnimation();
     const from = { position: this.camera.position.clone(), target: this.target.clone() };

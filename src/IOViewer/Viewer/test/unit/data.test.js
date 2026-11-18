@@ -47,6 +47,24 @@ test('checks optional saved viewpoint state and explicit linked-file members', (
   }
 });
 
+test('checks BCF cameras, counts and component indices', () => {
+  const read = (topic) => readModelMeta({ getElementById: () => ({ textContent: JSON.stringify({
+    ...emptyMeta, elements: [{}], bcfTopics: [topic],
+  }) }) });
+  const view = {
+    camera: { position: [0, 0, 1], target: [0, 1, 1], up: [0, 0, 1], projection: 'perspective', fov: 55 },
+    hiddenElements: [], selectedElements: [0], missingComponents: 1, ambiguousComponents: 0,
+  };
+  const topic = { title: 'Inspect', viewpoints: [view] };
+  assert.deepEqual(read(topic).bcfTopics, [topic]);
+  for (const invalid of [
+    { ...view, selectedElements: [1] }, { ...view, visibleElements: [] }, { ...view, missingComponents: -1 },
+    { ...view, camera: { ...view.camera, fov: 0 } }, { ...view, camera: { ...view.camera, up: [0, 0, 0] } },
+  ]) {
+    assert.throws(() => read({ ...topic, viewpoints: [invalid] }), ModelDataError);
+  }
+});
+
 // A data block as the DOM has it: its text in text nodes (`pieces` of it, one node each), read with substringData.
 function textBlock(text, pieces = 1) {
   const size = Math.ceil(text.length / pieces);

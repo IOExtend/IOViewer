@@ -71,6 +71,8 @@ internal sealed class ViewerJsonFile
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool ShowHostInModelList { get; set; }
     public Dictionary<string, ViewerViewpointState>? ViewpointStates { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ViewerBcfTopic>? BcfTopics { get; set; }
 
     public static ViewerJsonFile From(ViewerDocument doc) => new()
     {
@@ -80,6 +82,7 @@ internal sealed class ViewerJsonFile
         HiddenModelKeys = doc.HiddenModelKeys,
         ShowHostInModelList = doc.ShowHostInModelList,
         ViewpointStates = doc.ViewpointStates is { Count: > 0 } ? doc.ViewpointStates : null,
+        BcfTopics = doc.BcfTopics is { Count: > 0 } ? doc.BcfTopics : null,
     };
 
     public ViewerDocument ToDocument() => new(Scene)
@@ -89,5 +92,6 @@ internal sealed class ViewerJsonFile
         HiddenModelKeys = HiddenModelKeys,
         ShowHostInModelList = ShowHostInModelList,
         ViewpointStates = ViewpointStates ?? [],
+        BcfTopics = BcfTopics ?? [],
     };
 }
