@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  F32, GENERAL, MERGED_CAP, VERBATIM, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, planShapes, prefixByRadius, select,
-  sortByRadius, splitByCount, splitCells,
+  F32, GENERAL, MERGED_CAP, VERBATIM, bakeChunk, bakeSource, cellLayoutDiagonal, drawSpan, indexArray, placeSlot,
+  planShapes, prefixByRadius, select, sortByRadius, splitByCount, splitCells,
 } from '../../src/engine/chunks.js';
 import { GRID, octDecodeInto } from '../../src/engine/quantize.js';
 
@@ -346,4 +346,28 @@ test('cells: a leaf is also bounded in extent, centres within maxRadius of its m
 test('plan: the draws counted are the cells a shape really takes when given', () => {
   const shapes = [{ k: 100, bytes: 100, cells: 5 }, { k: 90, bytes: 100, cells: 2 }, { k: 80, bytes: 100, cells: 1 }];
   assert.deepEqual([...planShapes(shapes, { cap: 0, maxDraws: 6 })], [1, 0, 1]);
+});
+
+test('cell sizing caps one drawable box’s influence on every axis and keeps tied extrema', () => {
+  const boxes = Float32Array.from([
+    0, 0, 0, 1, 1, 1,
+    0, 0, 0, 1, 1, 1,
+    -1000, -1000, 0, -999, -999, 1,
+    0, 90, 0, 1, 91, 1,
+    0, 10_000, 0, 1, 10_001, 1,
+  ]);
+  assert.equal(cellLayoutDiagonal(boxes, [1, 1, 1, 1, 0]), 2 * Math.hypot(1, 91, 1));
+  assert.equal(cellLayoutDiagonal(boxes, [1, 1, 0, 1, 0]), 2 * Math.sqrt(3));
+  assert.equal(cellLayoutDiagonal(boxes, [1, 1, 0, 0, 0]), Math.sqrt(3));
+  assert.equal(cellLayoutDiagonal(boxes, [1, 0, 0, 0, 0]), Math.sqrt(3));
+  assert.equal(cellLayoutDiagonal(boxes, [0, 0, 0, 0, 0]), 0);
+});
+
+test('cell sizing keeps the full bounds when no placement more than doubles the diagonal', () => {
+  const boxes = Float32Array.from([
+    0, 0, 0, 1, 1, 1,
+    4, 0, 0, 5, 1, 1,
+    8, 0, 0, 9, 1, 1,
+  ]);
+  assert.equal(cellLayoutDiagonal(boxes, [1, 1, 1]), Math.hypot(9, 1, 1));
 });

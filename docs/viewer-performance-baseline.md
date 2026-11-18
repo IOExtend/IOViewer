@@ -182,3 +182,35 @@ files in alternating order. Each trial times the default adaptive orbit after th
 
 The Radeon trial view stayed on cell detail. On the RTX 4080, two trials used one refined frame each, and
 the other two stayed on cell detail. The report's `refinedFrames` field records this choice.
+
+## Instanced cells with a distant placement
+
+The layout limits the radius of cell centres to 10% of the drawable model's diagonal. When a single placement
+more than doubles that diagonal, the layout caps it at twice the diagonal of the remaining placements. All
+placements enter the partition and the actual model bounds. One linear scan retains the two extrema on each
+side, so the layout can evaluate these exclusions without sorting all placements. The partition allows up to
+1,024 placements per cell and 8,192 instanced cells per scene.
+
+On the regular Synthetic-400k model, three paired trials per GPU alternated the `790a881` and updated bundles
+over identical model data with `PERF_ADAPTIVE_ORBIT_ONLY=1`.
+
+| GPU | Baseline p95 median (range), ms | Updated p95 median (range), ms | Baseline / updated median submitted triangles |
+| --- | ---: | ---: | ---: |
+| Radeon | 33.6 (33.5–50.1) | 33.5 (33.4–33.6) | 12.37 M / 12.37 M |
+| RTX 4080 | 16.8 (16.8–16.8) | 16.8 (16.8–16.8) | 38.40 M / 38.40 M |
+
+For the outlier comparison, move the last Synthetic-1M instance to RTC X = 500,000 m by writing a float32
+at `instances.matrix.o + (instances.count - 1) * 48 + 36` in the decoded BIN. Use the same edited payload for
+both bundles. Fit the bounds of the other 999,999 placements, then set the camera at one quarter of that
+fitted distance from the target. After warm-up, submit 36 evenly spaced orbit poses with full detail and
+read one pixel per offscreen frame. Then run the five-second adaptive orbit from the same starting pose.
+The table gives medians of three alternating pairs, with ranges for the two frame p95 measurements.
+
+| GPU | Adaptive p95, before / after, ms | Full-detail completed p95, before / after, ms | Full-detail median CPU submission, before / after, ms |
+| --- | ---: | ---: | ---: |
+| Radeon | 33.6 (33.6–49.8) / 33.5 (33.5–33.5) | 212.6 (212.4–212.6) / 212.4 (212.4–212.6) | 4.7 / 7.0 |
+| RTX 4080 | 16.8 (16.8–16.8) / 16.8 (16.8–16.8) | 16.6 (12.8–16.7) / 13.4 (13.3–16.3) | 3.7 / 5.6 |
+
+The outlier case builds 1,666 cells, up from 1,104. At full detail the median draw count rises from 1,039
+to 1,582 and median submitted triangles drop from 89.95 M to 89.57 M. This increases CPU submission time
+in exchange for tighter spatial bounds. The outlier case tests a single divergent placement.

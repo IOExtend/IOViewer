@@ -3,8 +3,8 @@ import { ModelDataError } from '../data.js';
 import { BINS, detailBin, frustumPlanes, insideFrustum, outsideFrustum, thresholdFromBins, viewMetrics } from './culling.js';
 import { GRID, normalsView, octEncodeInto, positionsView } from './quantize.js';
 import {
-  CHUNK_VERTICES, F32, MERGED_CAP, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, planShapes, prefixByRadius, sortByRadius,
-  splitByCount, splitCells, unitNormals,
+  CHUNK_VERTICES, F32, MERGED_CAP, bakeChunk, bakeSource, cellLayoutDiagonal, drawSpan, indexArray, placeSlot,
+  planShapes, prefixByRadius, sortByRadius, splitByCount, splitCells, unitNormals,
 } from './chunks.js';
 import { patchLambert } from './slotShader.js';
 
@@ -16,8 +16,8 @@ const ROW = 2048; // slots per slot-texture row (the shaders use slot & 2047, sl
 const RANGE_LIMIT = 256; // up to this many changed slots are uploaded one by one, more as the whole texture
 const MIN_REPEATS = 16; // fewer instances of a shape stay merged even above the cap
 const PER_CELL = 1024; // instances per remainder cell
-// A cell's centres lie within this share of the model's diagonal: a cell spread over the site is drawn whole by the
-// 1-pixel pick pass and sized by its nearest point by the detail cut. Measured at 1M synthetic elements on an
+// A cell's centres lie within this share of the outlier-capped model diagonal. Wide cells weaken frustum
+// rejection and are sized by their nearest point by the detail cut. Measured at 1M synthetic elements on an
 // integrated GPU (cells / pick / CPU per still frame): unbounded 1024 / 61 ms / 4 ms; 0.1: 4766 / 20 ms / 23 ms;
 // 0.06: over 8192 cells, 9.5 ms. Each draw costs three ~5 us of CPU, so merged-chunk extents (0.035) are out of reach.
 const CELL_EXTENT = 0.1;
@@ -712,8 +712,9 @@ export class ModelScene {
     const minRepeats = options.minRepeats ?? MIN_REPEATS;
     if (shapes.reduce((sum, s) => sum + s.k * s.bytes, 0) > cap) {
       // The cells of every candidate, so that the plan counts the draws they really take.
-      const box = this.visibleBox();
-      const maxRadius = box.isEmpty() ? Infinity : box.min.distanceTo(box.max) * (options.cellExtent ?? CELL_EXTENT);
+      const maxRadius = options.cellExtent == null
+        ? cellLayoutDiagonal(b, weight) * CELL_EXTENT
+        : this.visibleBox().getSize(new THREE.Vector3()).length() * options.cellExtent;
       for (const shape of shapes) {
         if (shape.k < minRepeats) continue;
         shape.leaves = splitByCount(centres, shape.members, PER_CELL, maxRadius);
