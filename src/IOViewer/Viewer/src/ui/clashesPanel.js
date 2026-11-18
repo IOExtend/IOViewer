@@ -142,6 +142,8 @@ export function mountClashes({ shell, tests, elements, scene, controls, selectio
     }
 
     body.addEventListener('scroll', refresh);
+    // Native focus scrolls a row into view before the queued scroll event runs.
+    body.addEventListener('focusin', refresh);
     new ResizeObserver(refresh).observe(body);
   }
 
