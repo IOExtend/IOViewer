@@ -55,6 +55,21 @@ test('empty document shows "no geometry"', async ({ page }) => {
   expect(requests).toEqual([]);
 });
 
+test('startup profiling samples load and first render once', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.startupSamples = [];
+    window.IOVIEWER_TEST = { startup: (sample) => window.startupSamples.push(sample) };
+  });
+  const { errors, requests } = await open(page, 'building');
+  await page.evaluate(() => window.__ioviewer.controls.resize());
+  await nextFrame(page);
+  expect(await page.evaluate(() => window.startupSamples)).toEqual([
+    'metadataStart', 'metadataEnd', 'binaryEnd', 'sceneStart', 'sceneEnd', 'renderStart', 'renderEnd',
+  ]);
+  expect(errors).toEqual([]);
+  expect(requests).toEqual([]);
+});
+
 test('ModelScene addresses elements by index across meshes and materials', async ({ page }) => {
   const { errors } = await open(page, 'building');
   const duct = building.Elements.findIndex((e) => e.Name === 'Supply Duct SA-1');

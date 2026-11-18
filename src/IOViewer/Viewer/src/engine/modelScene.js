@@ -50,6 +50,29 @@ const finiteBox = (boxes, i) => {
   for (let k = i * 6; k < i * 6 + 6; k++) if (!Number.isFinite(boxes[k])) return false;
   return true;
 };
+
+// Each row of an affine transform reaches its extrema at the sum of its per-axis extrema.
+function writeInstanceBox(matrices, i, { min, max }, boxes) {
+  const offset = i * 12;
+  const box = i * 6;
+  if (min[0] > max[0] || min[1] > max[1] || min[2] > max[2]) {
+    boxes.set(min, box);
+    boxes.set(max, box + 3);
+    return;
+  }
+  for (let row = 0; row < 3; row++) {
+    const a = matrices[offset + row];
+    const b = matrices[offset + row + 3];
+    const c = matrices[offset + row + 6];
+    const t = matrices[offset + row + 9];
+    const x0 = a * min[0], x1 = a * max[0];
+    const y0 = b * min[1], y1 = b * max[1];
+    const z0 = c * min[2], z1 = c * max[2];
+    boxes[box + row] = Math.min(x0, x1) + Math.min(y0, y1) + Math.min(z0, z1) + t;
+    boxes[box + row + 3] = Math.max(x0, x1) + Math.max(y0, y1) + Math.max(z0, z1) + t;
+  }
+}
+
 const colorBytes = (color) => {
   const hex = color.getHex(THREE.SRGBColorSpace);
   return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
@@ -111,17 +134,8 @@ export class ModelScene {
     this._buckets = this._createBuckets(meta, materialOf, noHideBranch);
     this._indexElements();
 
-    const matrix = new THREE.Matrix4();
-    const box = new THREE.Box3();
     for (let i = 0; i < count; i++) {
-      const m = matrices.subarray(i * 12, i * 12 + 12);
-      matrix.set(m[0], m[3], m[6], m[9], m[1], m[4], m[7], m[10], m[2], m[5], m[8], m[11], 0, 0, 0, 1);
-      const local = meta.geometries[geometryOf[i]].bbox;
-      box.min.fromArray(local.min);
-      box.max.fromArray(local.max);
-      box.applyMatrix4(matrix);
-      box.min.toArray(this._boxes, i * 6);
-      box.max.toArray(this._boxes, i * 6 + 3);
+      writeInstanceBox(matrices, i, meta.geometries[geometryOf[i]].bbox, this._boxes);
     }
     const limit = Math.min(2 ** 24 - 1, ROW * (options.maxTextureSize ?? Infinity), options.slotLimit ?? Infinity);
     this._build(data, geometryOf, matrices, options, limit);

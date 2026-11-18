@@ -6,6 +6,7 @@
 //   textures (textures mode; ladder pages are generated with --textured), nohidebranch (IOVIEWER_TEST.noHideBranch);
 // PERF_OUT: where JSON results go (default <os temp>/ioviewer-perf); PERF_LABEL names the run (e.g. baseline);
 // PERF_PROFILE=1 also writes a CPU profile of each model's whole run; PERF_GPU: see playwright.perf.config.js.
+// PERF_STARTUP_ONLY=1 stops after the first rendered frame and writes only the startup measurements.
 // After all runs, one table across them is printed and written with every result to <PERF_OUT>/ladder-<label>.{md,json}.
 import { test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -21,6 +22,7 @@ const LADDER = list(process.env.PERF_LADDER).map(Number);
 const MODELS = list(process.env.PERF_MODELS ?? (LADDER.length ? '' : path.join(OUT, 'synthetic-200k.html')));
 const VARIANTS = list(process.env.PERF_VARIANTS);
 const LABEL = process.env.PERF_LABEL ?? 'run';
+const STARTUP_ONLY = process.env.PERF_STARTUP_ONLY === '1';
 const ORBIT_MS = 5000;
 const REPO = fileURLToPath(new URL('../../../../../', import.meta.url));
 const LIBRARY = path.join(REPO, 'src', 'IOViewer');
@@ -223,16 +225,43 @@ for (const run of RUNS) {
     const file = run.page(run.variant === 'textures');
     const name = path.basename(file, '.html') + (run.variant ? `-${run.variant}` : '');
     const result = { label: LABEL, run: runName, model: name, variant: run.variant, htmlMB: statSync(file).size / 1048576, gpu: process.env.PERF_GPU ?? 'default' };
-    // Test-only engine options are read by the viewer from IOVIEWER_TEST (an engine without the option ignores it).
-    if (run.variant === 'nohidebranch') await page.addInitScript(() => (window.IOVIEWER_TEST = { noHideBranch: true }));
     const cdp = process.env.PERF_PROFILE ? await page.context().newCDPSession(page) : null;
     if (cdp) {
       await cdp.send('Profiler.enable');
       await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
       await cdp.send('Profiler.start');
     }
-    // Time `ready` resolves, taken as it resolves (main.js publishes window.__ioviewer before the first frame).
-    await page.addInitScript(() => {
+    await page.addInitScript((variant) => {
+      const samples = {};
+      window.IOVIEWER_TEST = {
+        noHideBranch: variant === 'nohidebranch',
+        startup(name) {
+          samples[name] = { at: performance.now(), heap: performance.memory?.usedJSHeapSize };
+        },
+      };
+      const entries = [];
+      const observer = PerformanceObserver.supportedEntryTypes.includes('longtask')
+        ? new PerformanceObserver((list) => entries.push(...list.getEntries()))
+        : null;
+      observer?.observe({ type: 'longtask', buffered: true });
+      window.__perfStartup = (readyMs) => {
+        if (observer) entries.push(...observer.takeRecords());
+        observer?.disconnect();
+        const tasks = entries.map((entry) => Math.min(entry.duration, readyMs - entry.startTime)).filter((ms) => ms >= 50);
+        const duration = (from, to) => samples[from] && samples[to] ? samples[to].at - samples[from].at : null;
+        const heap = Object.values(samples).map((sample) => sample.heap).filter(Number.isFinite);
+        return {
+          metaMs: duration('metadataStart', 'metadataEnd'),
+          binMs: duration('metadataEnd', 'binaryEnd'),
+          sceneMs: duration('sceneStart', 'sceneEnd'),
+          renderCallMs: duration('renderStart', 'renderEnd'),
+          sampledHeapPeakMiB: heap.length ? Math.max(...heap) / 1048576 : null,
+          longTasks: observer ? tasks.length : null,
+          longestTaskMs: observer ? Math.max(0, ...tasks) : null,
+          blockingMs: observer ? tasks.reduce((sum, ms) => sum + ms - 50, 0) : null,
+        };
+      };
+      // main.js publishes window.__ioviewer before the first frame.
       let value;
       Object.defineProperty(window, '__ioviewer', {
         configurable: true,
@@ -242,14 +271,16 @@ for (const run of RUNS) {
           v.ready.then(() => (window.__perfReady = performance.now()));
         },
       });
-    });
+    }, run.variant);
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     page.on('crash', () => console.log(`${name}: the page crashed`));
     page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
     await page.goto(pathToFileURL(file).href, { timeout: 10 * 60 * 1000 });
     await page.waitForFunction(() => window.__perfReady, null, { timeout: 10 * 60 * 1000, polling: 100 });
-    const load = await page.evaluate(() => {
+    const load = await page.evaluate(async () => {
+      // The long-task entry for first render becomes available after that task ends.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const nav = performance.getEntriesByType('navigation')[0];
       const gl = document.createElement('canvas').getContext('webgl2');
       const info = gl.getExtension('WEBGL_debug_renderer_info');
@@ -257,6 +288,7 @@ for (const run of RUNS) {
       const triangles = scene.memory().triangles;
       return {
         readyMs: window.__perfReady,
+        startup: window.__perfStartup(window.__perfReady),
         domContentLoadedMs: nav.domContentLoadedEventStart,
         renderer: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
         elements: scene.elementCount,
@@ -267,7 +299,21 @@ for (const run of RUNS) {
         canvas: [innerWidth, innerHeight],
       };
     });
-    Object.assign(result, load);
+    Object.assign(result, load, { browserVersion: page.context().browser().version() });
+    const finish = async () => {
+      result.errors = errors;
+      if (cdp) {
+        const { profile } = await cdp.send('Profiler.stop');
+        mkdirSync(OUT, { recursive: true });
+        writeFileSync(path.join(OUT, `profile-${LABEL}-${name}.cpuprofile`), JSON.stringify(profile));
+      }
+      save(result);
+      if (!STARTUP_ONLY) console.log(table(result));
+    };
+    if (STARTUP_ONLY) {
+      await finish();
+      return;
+    }
     await installTimer(page);
     if (run.variant === 'sections') await page.evaluate(() => window.__ioviewer.sections.setMode('box')); // box = the shown model
     if (run.variant === 'textures') await page.evaluate(() => window.__ioviewer.scene.setDisplayMode('textures'));
@@ -279,9 +325,7 @@ for (const run of RUNS) {
     result.orbitFull = fps(await orbit(page, ORBIT_MS, 1, true));
     if (run.variant) {
       result.heapEndMB = await page.evaluate(() => performance.memory.usedJSHeapSize / 1048576);
-      result.errors = errors;
-      save(result);
-      console.log(table(result));
+      await finish();
       return;
     }
     result.orbitZoomed = fps(await orbit(page, ORBIT_MS, 0.25));
@@ -354,15 +398,7 @@ for (const run of RUNS) {
       await step('fourDClose', 'fourD', 'close');
     }
     result.heapEndMB = await page.evaluate(() => performance.memory.usedJSHeapSize / 1048576);
-    result.errors = errors;
-
-    if (cdp) {
-      const { profile } = await cdp.send('Profiler.stop');
-      mkdirSync(OUT, { recursive: true });
-      writeFileSync(path.join(OUT, `profile-${LABEL}-${name}.cpuprofile`), JSON.stringify(profile));
-    }
-    save(result);
-    console.log(table(result));
+    await finish();
   });
 }
 
@@ -379,10 +415,20 @@ test.afterAll(() => {
   const op = (o) => (o ? `${n(o.frameMs, 0)}${o.full === false ? ' (partial)' : ''}` : '—');
   const orbitCell = (o) => (o ? `${n(o.medianFps)} / ${n(o.p95Fps)} (${n(o.drawnMedian * 100, 0)} %)` : '—');
   const still = (s) => (s ? `${n(s.medianMs)} (${n(s.maxMs, 0)})${s.full ? '' : ' (partial)'}` : '—');
-  const rows = [
+  const startupRows = [
     ['elements / M triangles', (r) => `${r.elements} / ${n(r.triangles / 1e6, 2)}`],
     ['HTML MB', (r) => n(r.htmlMB)],
     ['open ms', (r) => n(r.readyMs, 0)],
+    ['META parse ms', (r) => n(r.startup.metaMs)],
+    ['BIN decode ms', (r) => n(r.startup.binMs)],
+    ['scene preparation ms', (r) => n(r.startup.sceneMs)],
+    ['first render call ms', (r) => n(r.startup.renderCallMs)],
+    ['startup long tasks / longest ms', (r) => `${n(r.startup.longTasks, 0)} / ${n(r.startup.longestTaskMs)}`],
+    ['startup blocking ms (over 50 ms)', (r) => n(r.startup.blockingMs)],
+    ['sampled peak startup JS heap MiB', (r) => n(r.startup.sampledHeapPeakMiB, 0)],
+  ];
+  const rows = STARTUP_ONLY ? startupRows : [
+    ...startupRows,
     ['full-detail still frame ms, median (max of 10)', (r) => still(r.stillFrame)],
     ['draw calls (still frame)', (r) => String(r.stillFrame?.calls ?? '—')],
     ['orbit adaptive fps median / p95 (drawn)', (r) => orbitCell(r.orbit)],

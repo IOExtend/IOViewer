@@ -23,6 +23,8 @@ import { mountLinks } from './ui/linksPanel.js';
 
 document.documentElement.lang = lang;
 const canvas = document.getElementById('ioviewer-canvas');
+const testOptions = window.IOVIEWER_TEST ?? {};
+const startup = testOptions.startup;
 
 function showMessage(text) {
   const message = document.getElementById('ioviewer-message');
@@ -36,7 +38,7 @@ const context = canvas.getContext('webgl2', { antialias: true });
 if (!context) showMessage(t('noWebGL'));
 else {
   try {
-    start(loadModelData(), context);
+    start(loadModelData(document, startup), context);
   } catch (error) {
     if (!(error instanceof ModelDataError)) throw error;
     showMessage(t('badData'));
@@ -66,9 +68,10 @@ function start(data, context) {
   world.add(camera);
 
   // Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat, slotLimit,
-  // mergedCap, minRepeats, cellExtent.
-  const testOptions = window.IOVIEWER_TEST ?? {};
+  // mergedCap, minRepeats, cellExtent, startup (optional phase samples).
+  startup?.('sceneStart');
   const scene = createScene();
+  startup?.('sceneEnd');
   data.releaseBinary(); // the scene has copied what it needs
   // Starting at the whole model's cost, a GPU that draws it in time orbits at full detail; a slower one shrinks it.
   // Larger models start at about what an integrated GPU draws at 30 fps (a 200k-element model, 19.2e6): from a 1M one's
@@ -107,6 +110,7 @@ function start(data, context) {
 
   let resolveReady;
   const ready = new Promise((resolve) => (resolveReady = resolve));
+  let firstRender = startup;
   let frameRequested = false;
   function requestRender() {
     if (frameRequested || contextLost) return;
@@ -121,7 +125,12 @@ function start(data, context) {
       measure.update(controls.camera, rect);
       grids.update(controls.camera, rect);
       motionDetail.begin(controls.camera, rect.height, performance.now());
+      firstRender?.('renderStart');
       renderer.render(world, controls.camera);
+      if (firstRender) {
+        firstRender('renderEnd');
+        firstRender = undefined;
+      }
       motionDetail.end(performance.now());
       viewCube.update();
       resolveReady();
