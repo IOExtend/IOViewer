@@ -23,6 +23,7 @@ const PER_CELL = 1024; // instances per remainder cell
 const CELL_EXTENT = 0.1;
 const MAX_CELLS = 8192; // remainder draws at most
 const INSTANCED_COST = 1.4; // an instanced triangle against a merged one (measured 1.58 / 1.16 ns per triangle)
+const PICK_ROUNDING = 2 ** -20; // conservative float32 error for the shader's short matrix products
 
 // True when the linear part of instance i (12 floats per instance, columns first) has a negative determinant.
 export function isMirrored(matrices, i) {
@@ -51,6 +52,17 @@ const finiteBox = (boxes, i) => {
   for (let k = i * 6; k < i * 6 + 6; k++) if (!Number.isFinite(boxes[k])) return false;
   return true;
 };
+
+// The positive support vertex tests the whole box against each plane of the pick tile.
+function outsidePickBox(planes, boxes, i, padding) {
+  for (let k = 0; k < 24; k += 4) {
+    const x = planes[k], y = planes[k + 1], z = planes[k + 2], d = planes[k + 3];
+    const farthest = x * boxes[i + (x >= 0 ? 3 : 0)] + y * boxes[i + (y >= 0 ? 4 : 1)]
+      + z * boxes[i + (z >= 0 ? 5 : 2)] + d;
+    if (farthest < -(padding + PICK_ROUNDING * Math.abs(d))) return true;
+  }
+  return false;
+}
 
 // Each row of an affine transform reaches its extrema at the sum of its per-axis extrema.
 function writeInstanceBox(matrices, i, { min, max }, boxes) {
@@ -117,6 +129,8 @@ export class ModelScene {
     this._mode = 'materials';
     this._opacity = 1;
     this._picking = false;
+    this._pickBounds = true;
+    this._pickFrustum = null;
     this._textures = new Map();
     this._elementOf = data.view(instances.element).slice(); // own copy: the BIN block is released after load
     this._bucketOf = new Uint32Array(count);
@@ -295,8 +309,13 @@ export class ModelScene {
   }
 
   // Runs fn with `material` on every chunk's triangles (and triangles shown in wireframe mode), e.g. for picking.
-  withMaterial(material, fn) {
+  withMaterial(material, fn, pickCamera = null) {
     this._picking = true;
+    if (pickCamera && this._pickBounds && this._units.length > this._chunkCount) {
+      this._pickFrustum = frustumPlanes(pickCamera, this._planes);
+      const { x, y, z } = pickCamera.position;
+      this._pickViewPadding = PICK_ROUNDING * (Math.abs(x) + Math.abs(y) + Math.abs(z));
+    }
     for (const unit of this._units) {
       unit.mesh.material = material;
       this._showUnit(unit);
@@ -305,9 +324,14 @@ export class ModelScene {
       return fn();
     } finally {
       this._picking = false;
+      this._pickFrustum = null;
       for (const unit of this._units) {
         unit.mesh.material = unit.bucket.material;
         this._showUnit(unit);
+      }
+      for (const unit of this._cut) {
+        unit.mesh.visible = false;
+        if (unit.lines) unit.lines.visible = false;
       }
     }
   }
@@ -634,7 +658,17 @@ export class ModelScene {
       const i0 = members[0];
       const s = source(geometryOf[i0]);
       let data = shared.get(shape);
-      if (!data) shared.set(shape, (data = this._shape(s, mirrored[i0] === 1, shape.textured)));
+      if (!data) {
+        const authored = meta.geometries[geometryOf[i0]].bbox;
+        data = this._shape(s, mirrored[i0] === 1, shape.textured);
+        const maxAbs = (values) => Math.max(...values.map(Math.abs));
+        const extent = Math.max(maxAbs(s.min), maxAbs(s.max));
+        data.pickExtent = extent;
+        // META bounds describe the authored positions. The decoded ones can extend beyond them.
+        data.pickPadding = Math.max(0, ...s.min.map((v, a) => authored.min[a] - v), ...s.max.map((v, a) => v - authored.max[a]))
+          + (s.q ? PICK_ROUNDING * (maxAbs(s.q.o) + 65535 * Math.abs(s.q.s)) : 0);
+        shared.set(shape, data);
+      }
       for (let j = 0; j < members.length; j++) {
         const i = members[j];
         const slot = slotBase + j;
@@ -702,6 +736,7 @@ export class ModelScene {
     geometry.boundingSphere = sphere; // set, so three never computes one from the positions
     const mesh = new THREE.InstancedMesh(geometry, bucket.material, 0);
     const m = new Float32Array(n * 16); // three's column-major 4 x 4 from the 3 x 4 columns
+    let pickPadding = 0;
     for (let j = 0; j < n; j++) {
       const e = members[j] * 12;
       for (let c = 0; c < 4; c++) {
@@ -710,6 +745,11 @@ export class ModelScene {
         m[j * 16 + c * 4 + 2] = matrices[e + c * 3 + 2];
       }
       m[j * 16 + 15] = 1;
+      for (let a = e; a < e + 3; a++) {
+        const scale = Math.abs(matrices[a]) + Math.abs(matrices[a + 3]) + Math.abs(matrices[a + 6]);
+        const magnitude = scale * data.pickExtent + Math.abs(matrices[a + 9]);
+        pickPadding = Math.max(pickPadding, scale * data.pickPadding + PICK_ROUNDING * magnitude);
+      }
     }
     mesh.instanceMatrix = attr(m, 16, false, THREE.InstancedBufferAttribute);
     mesh.count = n;
@@ -717,7 +757,7 @@ export class ModelScene {
     this._instancedBytes += n * (64 + 4);
     const unit = {
       bucket, mesh, lines: null, slotBase, n, sphere: s, shown: 0, first: 0, last: -1, end: 0, dirty: false,
-      cell: true, triangles: data.triangles, lastFrame: -Infinity,
+      cell: true, triangles: data.triangles, lastFrame: -Infinity, pickPadding: Math.sqrt(3) * pickPadding,
     };
     mesh.onBeforeRender = (renderer, scene, camera) => this._range(unit, renderer, camera, mesh);
     mesh.visible = false;
@@ -808,7 +848,19 @@ export class ModelScene {
   _range(unit, renderer, camera, object) {
     if (unit.dirty) this._span(unit);
     let end = unit.last + 1;
-    if (this._minPixels > 0 && end > unit.first) {
+    if (this._picking) {
+      if (unit.cell && this._pickFrustum) {
+        const alpha = this._state.image.data;
+        const padding = unit.pickPadding + this._pickViewPadding;
+        // WebGL2 has no base instance. Keep the original draw order and slot IDs, but drop the suffix
+        // after the last shown instance whose box can intersect the narrow pick tile.
+        while (end > 0) {
+          const slot = unit.slotBase + end - 1;
+          if (alpha[slot * 4 + 3] && !outsidePickBox(this._pickFrustum, this._boxes, this._slotInstance[slot] * 6, padding)) break;
+          end--;
+        }
+      }
+    } else if (this._minPixels > 0 && end > unit.first) {
       const frame = renderer.info.render.frame;
       if (frame !== this._frameViewAt) {
         viewMetrics(camera, this._viewHeight, this._frameView);
@@ -825,9 +877,11 @@ export class ModelScene {
       const [start, count] = drawSpan(unit.starts, unit.first, end);
       object.geometry.setDrawRange(start * wire, count * wire);
     }
-    unit.end = end;
-    unit.lastFrame = renderer.info.render.frame;
-    if (this._cutFrame === null && this._minPixels > 0) this._cutFrame = unit.lastFrame;
+    if (!this._picking) {
+      unit.end = end;
+      unit.lastFrame = renderer.info.render.frame;
+      if (this._cutFrame === null && this._minPixels > 0) this._cutFrame = unit.lastFrame;
+    }
   }
 
   // First and last shown slot of the unit (from the alpha bytes).
