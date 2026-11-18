@@ -32,21 +32,27 @@ const screenAt = (page, index, f = [0.5, 0.5, 0.5]) =>
     return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];
   }, [index, f]);
 
-// Mean [r, g, b] of the 3x3 screen pixels around a point; the PNG is decoded by the page itself.
-async function rgb(page, [x, y]) {
-  const png = await page.screenshot({ clip: { x: Math.round(x) - 1, y: Math.round(y) - 1, width: 3, height: 3 } });
-  return page.evaluate(async (base64) => {
+// Mean [r, g, b] of the 3x3 pixels around each point, sampled from one composited frame.
+async function colorsAt(page, points) {
+  const samples = points.map(([x, y]) => [Math.round(x), Math.round(y)]);
+  const xs = samples.map(([x]) => x), ys = samples.map(([, y]) => y);
+  const x = Math.min(...xs) - 1, y = Math.min(...ys) - 1;
+  const png = await page.screenshot({ clip: { x, y, width: Math.max(...xs) - x + 2, height: Math.max(...ys) - y + 2 } });
+  return page.evaluate(async ({ base64, offsets }) => {
     const image = new Image();
     image.src = `data:image/png;base64,${base64}`;
     await image.decode();
     const context = document.createElement('canvas').getContext('2d');
     context.drawImage(image, 0, 0);
-    const { data } = context.getImageData(0, 0, image.width, image.height);
-    const sum = [0, 0, 0];
-    for (let i = 0; i < data.length; i += 4) for (let c = 0; c < 3; c++) sum[c] += data[i + c];
-    return sum.map((s) => s / (data.length / 4));
-  }, png.toString('base64'));
+    return offsets.map(([x, y]) => {
+      const { data } = context.getImageData(x, y, 3, 3);
+      const sum = [0, 0, 0];
+      for (let i = 0; i < data.length; i += 4) for (let c = 0; c < 3; c++) sum[c] += data[i + c];
+      return sum.map((s) => s / 9);
+    });
+  }, { base64: png.toString('base64'), offsets: samples.map(([px, py]) => [px - x - 1, py - y - 1]) });
 }
+const rgb = async (page, point) => (await colorsAt(page, [point]))[0];
 const distance = (a, b) => a.reduce((sum, c, i) => sum + Math.abs(c - b[i]), 0);
 
 async function visibleColors(page, points) {
@@ -593,8 +599,12 @@ for (const instanced of [false, true]) {
     }, [index, inside]);
     for (const inside of [false, true]) {
       await boxSection(inside);
-      await expect.poll(() => pixelDistance(center)).toBeLessThan(10);
-      expect(await pixelDistance(offCenter)).toBeGreaterThan(40);
+      await frame(page);
+      // The centre is filled in the previous mode too. Wait for the whole frame of the new mode.
+      await expect.poll(async () => {
+        const [middle, outside] = await colorsAt(page, [center, offCenter]);
+        return [distance(middle, capColor) < 10, distance(outside, capColor) > 40];
+      }, { timeout: 10000 }).toEqual([true, true]);
       await fill.uncheck();
       await expect.poll(() => pixelDistance(center)).toBeGreaterThan(40);
       await fill.check();
