@@ -282,9 +282,9 @@ for (const run of RUNS) {
       // The long-task entry for first render becomes available after that task ends.
       await new Promise((resolve) => setTimeout(resolve, 0));
       const nav = performance.getEntriesByType('navigation')[0];
-      const gl = document.createElement('canvas').getContext('webgl2');
+      const { scene, picker } = window.__ioviewer;
+      const gl = picker.renderer.getContext();
       const info = gl.getExtension('WEBGL_debug_renderer_info');
-      const { scene } = window.__ioviewer;
       const triangles = scene.memory().triangles;
       return {
         readyMs: window.__perfReady,

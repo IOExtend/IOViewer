@@ -7,6 +7,8 @@
       href: public-api.md
     - name: Viewer startup performance
       href: startup-performance.md
+    - name: Viewer GPU performance baseline
+      href: viewer-performance-baseline.md
 - name: API reference
   href: api/
 - name: GitHub
