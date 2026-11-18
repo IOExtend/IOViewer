@@ -53,6 +53,9 @@ for (const instanced of [false, true]) {
     }
 
     await hover(vertex, 5, -3, 'vertex');
+    await page.evaluate(() => window.__ioviewer.controls.resize());
+    await expect(marker).toBeVisible();
+    await expect(marker).toHaveAttribute('data-kind', 'vertex');
     const preview = () => page.evaluate(() => window.__ioviewer.measure.preview?.point.toArray());
     const first = await preview();
     await page.mouse.click(vertex[0] + 5, vertex[1] - 3);

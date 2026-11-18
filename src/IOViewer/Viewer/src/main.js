@@ -148,26 +148,35 @@ function start(data, context) {
 
   const picker = new Picker(renderer, scene, camera, { pickFloat: testOptions.pickFloat });
   const measureSnap = new MeasureSnap(picker, sections, data);
-  let measureFrame = 0, hoverX, hoverY;
+  let measureFrame = 0, measureHover = null;
   function clearMeasurePreview() {
     cancelAnimationFrame(measureFrame);
     measureFrame = 0;
+    measureHover = null;
     measure.setPreview(null);
+  }
+  function updateMeasurePreview() {
+    measureFrame = 0;
+    if (measureHover) measure.setPreview(measureSnap.target(...measureHover));
+  }
+  function refreshMeasurePreview() {
+    if (!measureHover) return;
+    measure.setPreview(null);
+    cancelAnimationFrame(measureFrame);
+    // Wait for a frame without another view change before reading the pick tile.
+    measureFrame = requestAnimationFrame(() => {
+      measureFrame = requestAnimationFrame(updateMeasurePreview);
+    });
   }
   canvas.addEventListener('pointermove', (e) => {
     if (!measure.active || e.buttons) return clearMeasurePreview();
-    hoverX = e.clientX;
-    hoverY = e.clientY;
-    if (measureFrame) return;
-    measureFrame = requestAnimationFrame(() => {
-      measureFrame = 0;
-      measure.setPreview(measureSnap.target(hoverX, hoverY));
-    });
+    measureHover = [e.clientX, e.clientY];
+    if (!measureFrame) measureFrame = requestAnimationFrame(updateMeasurePreview);
   });
   for (const event of ['pointerdown', 'pointerleave', 'pointercancel', 'webglcontextlost'])
     canvas.addEventListener(event, clearMeasurePreview);
   scene.root.addEventListener('change', (e) => {
-    if (e.detail.kind !== 'appearance') clearMeasurePreview();
+    if (e.detail.kind !== 'appearance') refreshMeasurePreview();
   });
   const controls = new NavigationControls(camera, canvas, {
     pick: (x, y) => picker.pick(x, y)?.point ?? null,
@@ -175,7 +184,7 @@ function start(data, context) {
   });
   controls.addEventListener('change', () => {
     picker.camera = controls.camera; // swaps with the projection
-    clearMeasurePreview();
+    refreshMeasurePreview();
     requestRender();
   });
   scene.root.addEventListener('change', (e) => {
