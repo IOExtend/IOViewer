@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 
-IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Geometry read by sibling libraries ([RvtIO](https://github.com/IOExtend/RvtIO), [IfcIO](https://github.com/IOExtend/IfcIO), and [NwcIO](https://github.com/IOExtend/NwcIO)) can be passed in by building a `SceneDocument` in code, and the `ioviewer` command line tool reads IFC and Revit files directly through IfcIO and RvtIO. The scene model comes from the [IOScene](https://github.com/IOExtend/IOScene) package; the IOViewer library has no dependency on the format libraries.
+IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Builds of the `ioviewer` CLI from this repository also read IFC, Revit and Navisworks cache files (`.nwc`) through `IfcIO.Scene`, `RvtIO.Scene` and `NwcIO.Scene`. The IOViewer library accepts the `SceneDocument` these adapters produce and depends on [IOScene](https://github.com/IOExtend/IOScene) for the scene model.
 
 The generated HTML is a single file with no external dependencies that works offline: it opens from disk (`file://`) in a current browser with WebGL 2 and makes no network requests. The viewer is built on [three.js](https://threejs.org/), which is embedded in the file (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
@@ -136,6 +136,22 @@ var doc = GlbViewerImporter.Load("complex_building.glb");
 // Export to self-contained single-file HTML viewer
 HtmlViewerExporter.Save(doc, "complex_building.html");
 ```
+
+To view a Navisworks cache, install `NwcIO.Scene` with `dotnet add package NwcIO.Scene --version 0.13.0` and pass its scene to IOViewer.
+
+```csharp
+using IOViewer.Exporters;
+using NwcIO.Scene;
+
+var result = NwcSceneReader.Read("Tower.nwc");
+HtmlViewerExporter.Save(result.Document, "Tower.html");
+```
+
+Check `result.Diagnostics` for conversion warnings and errors. For the adapter's supported inputs and limits, see the
+[NwcIO.Scene guide](https://github.com/IOExtend/NwcIO/blob/v0.13.0/docs/scene.md).
+
+For `IOViewer.Cli` 0.3.1, save the same scene with `IOScene.SceneJson.Save(result.Document, "Tower.scene.json")` and run
+`ioviewer Tower.scene.json`. See the [IOScene JSON handoff](docs/getting-started.md#navisworks-cache) for the full workflow.
 
 See the [public API](docs/public-api.md) for the supported surface and [getting started guide](docs/getting-started.md) for detailed workflows.
 
