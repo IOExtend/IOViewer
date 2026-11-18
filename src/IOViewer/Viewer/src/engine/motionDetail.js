@@ -1,6 +1,7 @@
 const TARGET_MS = 1000 / 30; // frame time to keep while the camera moves
 const SETTLE_MS = 200; // after the last camera move, the full model is drawn again
 const MIN_BUDGET = 1e6; // about 12 000 draws: the largest objects always stay in view
+const DETAIL_WINDOW = 20; // budget extra CPU work only after a window of frames with headroom
 
 /**
  * Keeps camera motion smooth on weak GPUs: while the camera moves, a frame is drawn within a cost budget (see
@@ -11,6 +12,7 @@ const MIN_BUDGET = 1e6; // about 12 000 draws: the largest objects always stay i
  * after it was requested (a busy GPU delays the next animation frame) plus the frame's own script time; time spent
  * waiting for input is never counted. Slow frames shrink the budget (never below MIN_BUDGET); fast frames grow it only
  * while detail is being left out, and never past the cost of everything in view.
+ * Use cell detail until motion has enough measured headroom for per-instance selection. Fall back after a slow frame.
  * Call requested(now) when a frame is requested, begin(camera, viewHeight, now) right before rendering and end(now)
  * right after.
  */
@@ -25,6 +27,8 @@ export class MotionDetail {
     this._requestedAt = null;
     this._frame = null; // { start, waited } of a frame drawn while the camera moved
     this._cost = 0; // smoothed frame cost (ms) while moving
+    this._fastFrames = 0;
+    this._refine = false;
     this._settle = 0;
   }
 
@@ -38,7 +42,8 @@ export class MotionDetail {
     this._requestedAt = null;
     const moved = this._moved(camera);
     this._frame = moved ? { start: now, waited } : null;
-    this.minPixels = moved ? this.scene.detailThreshold(camera, viewHeight, this.budget) : 0;
+    this.minPixels = moved ? this.scene.detailThreshold(camera, viewHeight, this.budget, this._refine) : 0;
+    if (!moved) this._fastFrames = 0;
     this.scene.setDetail(this.minPixels, viewHeight);
     if (moved) {
       clearTimeout(this._settle);
@@ -54,6 +59,13 @@ export class MotionDetail {
 
   _adapt(frameMs) {
     this._cost = this._cost ? this._cost * 0.8 + frameMs * 0.2 : frameMs;
+    if (frameMs > TARGET_MS * 1.1) {
+      this._refine = false;
+      this._fastFrames = 0;
+    } else if (!this._refine) {
+      this._fastFrames = this.minPixels > 0 && frameMs < TARGET_MS * 0.7 ? this._fastFrames + 1 : 0;
+      this._refine = this._fastFrames >= DETAIL_WINDOW;
+    }
     if (this._cost > TARGET_MS * 1.1) this.budget = Math.max(this.budget * 0.9, MIN_BUDGET);
     else if (this._cost < TARGET_MS * 0.7 && this.minPixels > 0) {
       this.budget = Math.max(Math.min(this.budget * 1.05, this.scene.visibleCost), MIN_BUDGET);

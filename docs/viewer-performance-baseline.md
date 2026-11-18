@@ -144,6 +144,9 @@ exports. The fixed-budget comparison completes 72 identical camera poses per mod
 one-pixel readback. Both modes get the same budget of up to 20 million weighted triangles. The adaptive comparison
 uses the normal controller and reports animation-frame intervals from the same starting view.
 
+The following results are from the initial experiment with per-instance selection enabled throughout motion
+(`f0c1918`).
+
 | Workload | GPU | Fixed frame p95, ms, cell / instance | Fixed median triangles, cell / instance | Adaptive frame p95, ms, cell / instance | Adaptive median drawn share, cell / instance |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Synthetic-400k | Radeon | 34.7 / 35.2 | 12.36 M / 12.28 M | 33.5 / 50.3 | 25.5% / 32.0% |
@@ -160,3 +163,22 @@ and 4.3 / 7.1 ms on RTX 4080. More precise selection trades CPU preparation for 
 Instance detail keeps 48 bytes of CPU transform data per instanced slot and allocates reusable CPU/GPU draw buffers
 as needed. The Radeon run on Synthetic-1M retained 45.8 MiB of source transforms and allocated 18.8 MiB of compact
 draw data on each side. Read `memory.detailSourceBytes` and `memory.detailBytes` for these totals.
+
+### Adaptive frame budget with refinement
+
+Motion starts with cell detail. After 20 consecutive moving frames with detail cut and measured cost below
+the controller's existing growth threshold, the next frame may use per-instance detail. A slow frame
+returns to cell detail immediately. This keeps the original detail budget and lets the viewer refine selection
+when rendering and frame preparation leave enough headroom.
+
+For the 400,000-element check, export the same model with the viewer at `4288013` and with the updated bundle.
+Set `PERF_ADAPTIVE_ORBIT_ONLY=1` and pass the two exports to `PERF_MODELS`. Run four trials per GPU with the two
+files in alternating order. Each trial times the default adaptive orbit after the first full frame settles.
+
+| GPU | Main p95 median (range), ms | Refined policy p95 median (range), ms | Main median submitted triangles | Refined policy median submitted triangles |
+| --- | ---: | ---: | ---: | ---: |
+| Radeon | 33.5 (33.4–33.5) | 33.5 (33.5–33.5) | 11.11 M | 12.36 M |
+| RTX 4080 | 33.3 (33.2–33.4) | 25.1 (16.8–33.4) | 38.40 M | 38.40 M |
+
+The Radeon trial view stayed on cell detail. On the RTX 4080, two trials used one refined frame each, and
+the other two stayed on cell detail. The report's `refinedFrames` field records this choice.

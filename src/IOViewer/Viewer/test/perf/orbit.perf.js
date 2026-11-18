@@ -9,6 +9,7 @@
 // PERF_STARTUP_ONLY=1 stops after the first rendered frame and writes only the startup measurements.
 // PERF_PICK_BOUNDS_ONLY=1 compares full-cell and bounded picking with the same fixed camera and pixels.
 // PERF_ORBIT_DETAIL_ONLY=1 compares cell and instance detail from the same camera and triangle budget.
+// PERF_ADAPTIVE_ORBIT_ONLY=1 measures the default adaptive orbit of each exported HTML page.
 // After all runs, one table across them is printed and written with every result to <PERF_OUT>/ladder-<label>.{md,json}.
 import { test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -27,6 +28,7 @@ const LABEL = process.env.PERF_LABEL ?? 'run';
 const STARTUP_ONLY = process.env.PERF_STARTUP_ONLY === '1';
 const PICK_BOUNDS_ONLY = process.env.PERF_PICK_BOUNDS_ONLY === '1';
 const ORBIT_DETAIL_ONLY = process.env.PERF_ORBIT_DETAIL_ONLY === '1';
+const ADAPTIVE_ORBIT_ONLY = process.env.PERF_ADAPTIVE_ORBIT_ONLY === '1';
 const ORBIT_MS = 5000;
 const REPO = fileURLToPath(new URL('../../../../../', import.meta.url));
 const LIBRARY = path.join(REPO, 'src', 'IOViewer');
@@ -151,6 +153,7 @@ function orbit(page, ms, zoom, fullDetail = false) {
     const drawn = [];
     const triangles = [];
     const thresholds = [];
+    let refinedFrames = 0;
     await new Promise((resolve) => {
       let start = 0;
       let last = 0;
@@ -162,6 +165,7 @@ function orbit(page, ms, zoom, fullDetail = false) {
           drawn.push(stats.inView ? stats.drawn / stats.inView : 1);
           triangles.push(stats.drawn);
           thresholds.push(motionDetail?.minPixels ?? 0);
+          if (scene._detailUsesInstances && motionDetail.minPixels > 0) refinedFrames++;
         }
         const a = (now - last) * 0.0008;
         last = now;
@@ -179,15 +183,16 @@ function orbit(page, ms, zoom, fullDetail = false) {
     camera.position.sub(target).divideScalar(zoom).add(target);
     controls.resize();
     motionDetail.budget = budget;
-    return { deltas, drawn, triangles, thresholds };
+    return { deltas, drawn, triangles, thresholds, refinedFrames };
   }, { ms, zoom, fullDetail });
 }
 
-const fps = ({ deltas, drawn, triangles, thresholds, prepare }) => ({
+const fps = ({ deltas, drawn, triangles, thresholds, prepare, refinedFrames }) => ({
   frames: deltas.length,
   drawnMedian: median(drawn),
   drawnMin: Math.min(...drawn),
   trianglesMedian: median(triangles),
+  ...(refinedFrames === undefined ? {} : { refinedFrames }),
   ...(prepare ? { prepareP95Ms: quantile(prepare, 0.95) } : {}),
   thresholdMedianPx: median(thresholds),
   thresholdMaxPx: Math.max(...thresholds),
@@ -262,6 +267,8 @@ async function compareOrbitDetail(page) {
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const { scene, motionDetail } = window.__ioviewer;
       motionDetail._cost = 0;
+      motionDetail._fastFrames = 0;
+      motionDetail._refine = false;
       motionDetail.budget = Math.min(scene.totalCost, 20e6);
     });
     result[name] = fps(await (adaptive ? orbit(page, ORBIT_MS, 1) : fixedOrbit(page, start)));
@@ -445,6 +452,7 @@ for (const run of RUNS) {
       save(result);
       if (result.pickBounds) console.log(JSON.stringify({ model: result.model, renderer: result.renderer, ...result.pickBounds }));
       else if (result.orbitDetail) console.log(JSON.stringify({ model: result.model, renderer: result.renderer, memory: result.memory, ...result.orbitDetail }));
+      else if (ADAPTIVE_ORBIT_ONLY && result.orbit) console.log(JSON.stringify({ model: result.model, renderer: result.renderer, ...result.orbit }));
       else if (!STARTUP_ONLY) console.log(table(result));
     };
     if (STARTUP_ONLY) {
@@ -459,6 +467,12 @@ for (const run of RUNS) {
     if (ORBIT_DETAIL_ONLY) {
       result.orbitDetail = await compareOrbitDetail(page);
       result.memory = await page.evaluate(() => window.__ioviewer.scene.memory());
+      await finish();
+      return;
+    }
+    if (ADAPTIVE_ORBIT_ONLY) {
+      await page.waitForTimeout(1000); // drain the first full render before timing motion
+      result.orbit = fps(await orbit(page, ORBIT_MS, 1));
       await finish();
       return;
     }
@@ -607,6 +621,8 @@ test.afterAll(() => {
         return `${n(sample.p95Ms)} / ${n(sample.drawnMedian * 100)} % / ${n(sample.trianglesMedian, 0)}`;
       },
     ]),
+  ] : ADAPTIVE_ORBIT_ONLY ? [
+    ['adaptive orbit p95 ms / median drawn triangles', (r) => r.orbit ? `${n(r.orbit.p95Ms)} / ${n(r.orbit.trianglesMedian, 0)}` : '—'],
   ] : [
     ...startupRows,
     ['full-detail still frame ms, median (max of 10)', (r) => still(r.stillFrame)],

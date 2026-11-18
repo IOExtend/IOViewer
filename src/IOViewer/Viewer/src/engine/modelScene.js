@@ -400,7 +400,7 @@ export class ModelScene {
     this._units.forEach((unit, u) => {
       if (!(scales[u] >= 0) || unit.shown === 0) return;
       if (unit.dirty) this._span(unit);
-      if (unit.cell && this._instanceDetail) {
+      if (unit.cell && this._detailUsesInstances) {
         if (unit.detailHigh >= minPixels && this._detailCell(unit, minPixels)) return;
       } else if (this._slotRadius[unit.slotBase + unit.first] * scales[u] >= minPixels) return;
       unit.mesh.visible = false;
@@ -485,9 +485,11 @@ export class ModelScene {
 
   // The radius for setDetail that keeps the triangles drawn of what `camera` sees within `budget`; 0 when everything
   // fits. Sets visibleCost to the cost of all that is in view (the whole model when it fits the budget anyway).
-  detailThreshold(camera, viewHeight, budget) {
+  detailThreshold(camera, viewHeight, budget, refine = true) {
     this.visibleCost = this._totalCost;
+    this._detailUsesInstances = false;
     if (this._totalCost <= budget) return 0;
+    this._detailUsesInstances = refine && this._instanceDetail && this._chunkCount < this._units.length;
     camera.updateMatrixWorld();
     const planes = frustumPlanes(camera, this._planes);
     const view = viewMetrics(camera, viewHeight, this._detailView);
@@ -504,7 +506,7 @@ export class ModelScene {
       const near = nearDepth(view, s);
       const scale = view[7] ? (near > 0 ? view[6] / near : Infinity) : view[6];
       scales[u] = scale;
-      const perInstance = unit.cell && this._instanceDetail;
+      const perInstance = unit.cell && this._detailUsesInstances;
       const testFrustum = perInstance && !insideFrustum(planes, s[0], s[1], s[2], s[3] + unit.pickPadding);
       const stop = unit.slotBase + unit.n;
       let uniform = -1;
