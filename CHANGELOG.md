@@ -15,6 +15,7 @@ API between minor releases.
 ### Fixed
 
 - Preserve all 64 bits of element IDs in HTML properties, Copy Id, clash results and 4D tasks.
+- Report the required byte count and the limit when an HTML export exceeds its binary buffer capacity.
 
 ## [0.3.1] - 2026-11-13
 
