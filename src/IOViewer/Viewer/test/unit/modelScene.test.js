@@ -60,6 +60,16 @@ function model(items, { geometries = [quantizedCube()], materials = [{ color: [0
   return new ModelScene({ meta, view: (v) => v.array }, options);
 }
 
+test('instance bounds match the eight transformed corners under shear, scale and reflection', () => {
+  const geometry = quantizedCube();
+  geometry.bbox = { min: [-1, -2, -0.5], max: [0.75, 3, 4] };
+  const m = Float32Array.of(-2, 1, 0, 0.5, 1, -0.25, 0, 0.5, 2, 5, -3, 1);
+  const matrix = new THREE.Matrix4().set(m[0], m[3], m[6], m[9], m[1], m[4], m[7], m[10], m[2], m[5], m[8], m[11], 0, 0, 0, 1);
+  const expected = new THREE.Box3(new THREE.Vector3(...geometry.bbox.min), new THREE.Vector3(...geometry.bbox.max)).applyMatrix4(matrix);
+  const scene = model([{ m }], { geometries: [geometry] });
+  assert.ok(scene.elementBox(0).equals(expected));
+});
+
 const bytes = (scene, i) => [...scene._state.image.data.subarray(scene.instance(i).slot * 4, scene.instance(i).slot * 4 + 4)];
 const renderer = { info: { render: { frame: 1 } } };
 const camera = () => {

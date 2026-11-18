@@ -5,6 +5,8 @@
   items:
     - name: Public API
       href: public-api.md
+    - name: Viewer startup performance
+      href: startup-performance.md
 - name: API reference
   href: api/
 - name: GitHub
