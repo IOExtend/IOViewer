@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ModelDataError } from '../data.js';
 import { detailThreshold, frustumPlanes, outsideFrustum, viewMetrics } from './culling.js';
 import { GRID, normalsView, octEncodeInto, positionsView } from './quantize.js';
 import {
@@ -98,7 +99,7 @@ const colorBytes = (color) => {
  * options (tests and the performance harness, from window.IOVIEWER_TEST): chunkVertices, noHideBranch, slotLimit,
  * mergedCap, minRepeats, cellExtent; and maxTextureSize (the renderer's). A model over the slot limit throws
  * ModelTooLargeError.
- * Instances with a non-finite box (NaN or infinite matrix or geometry box) get no slot and take no part in the bounds.
+ * Instances with non-finite bounds or without drawable triangles get no slot.
  */
 export class ModelScene {
   constructor(data, options = {}) {
@@ -135,7 +136,9 @@ export class ModelScene {
     this._indexElements();
 
     for (let i = 0; i < count; i++) {
-      writeInstanceBox(matrices, i, meta.geometries[geometryOf[i]].bbox, this._boxes);
+      const geometry = meta.geometries[geometryOf[i]];
+      if (!geometry) throw new ModelDataError(`Instance ${i} references missing geometry ${geometryOf[i]}.`);
+      writeInstanceBox(matrices, i, geometry.bbox, this._boxes);
     }
     const limit = Math.min(2 ** 24 - 1, ROW * (options.maxTextureSize ?? Infinity), options.slotLimit ?? Infinity);
     this._build(data, geometryOf, matrices, options, limit);
@@ -458,6 +461,7 @@ export class ModelScene {
         const indices = data.view(geometry.indices);
         const uvs = geometry.uvs ? data.view(geometry.uvs) : null;
         s = bakeSource(positionsView(data, geometry), geometry.q ?? null, normalsView(data, geometry), indices, uvs);
+        s.drawable = s.indices.length >= 3 && s.min.every(Number.isFinite) && s.max.every(Number.isFinite);
         sources.set(g, s);
       }
       return s;
@@ -472,7 +476,7 @@ export class ModelScene {
     const b = this._boxes;
     for (let i = 0; i < count; i++) {
       const s = source(geometryOf[i]);
-      if (s.vertices === 0 || !finiteBox(b, i)) continue;
+      if (!s.drawable || !finiteBox(b, i)) continue;
       kind[i] = placeSlot(matrices, i, s, origins.subarray(i * 3, i * 3 + 3));
       mirrored[i] = isMirrored(matrices, i) ? 1 : 0;
       weight[i] = s.vertices;
@@ -825,11 +829,12 @@ export class ModelScene {
       let bucket = byMaterial.get(m);
       if (!bucket) {
         const source = meta.materials[m];
+        if (!source) throw new ModelDataError(`Instance ${i} references missing material ${m}.`);
         bucket = {
           index: buckets.length,
           bytes: source.color.map((c) => Math.round(c * 255)), // META colours are bytes / 255: exact
           opacity: source.opacity,
-          texture: source.texture,
+          texture: source.texture ?? null,
           // The material colour stays white: the slot colour multiplies it in the shader.
           material: patchLambert(new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }), this.slotUniforms, noHideBranch),
           // The same for the instanced cells in wireframe mode (three's own wireframe of their triangles).

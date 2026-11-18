@@ -242,6 +242,15 @@ test('an instance with a non-finite box gets no slot and leaves the bounds alone
   assert.deepEqual(scene.drawnInstances(camera()), [0, 2]);
 });
 
+test('geometry without a triangle or finite positions does not allocate a draw slot', () => {
+  const noFaces = { ...quantizedCube(), indices: view(new Uint16Array(), 'u16') };
+  const nonFinite = { ...quantizedCube(), q: null, positions: view(new Float32Array(9).fill(NaN), 'f32') };
+  const scene = model([{ x: 0 }, { x: 1, geometry: 1 }], { geometries: [noFaces, nonFinite] });
+  assert.equal(scene.instance(0).slot, -1);
+  assert.equal(scene.instance(1).slot, -1);
+  assert.equal(scene.totalCost, 0);
+});
+
 // Every shape instanced (test options): no merged chunks at all.
 const INSTANCED = { mergedCap: 0, minRepeats: 1, cellExtent: 1 }; // cells as wide as the model: one per shape
 // Instance count the cell mesh of instance i gets for the next render.

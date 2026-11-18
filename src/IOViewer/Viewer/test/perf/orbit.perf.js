@@ -252,7 +252,7 @@ for (const run of RUNS) {
         const heap = Object.values(samples).map((sample) => sample.heap).filter(Number.isFinite);
         return {
           metaMs: duration('metadataStart', 'metadataEnd'),
-          binMs: duration('metadataEnd', 'binaryEnd'),
+          binMs: duration(samples.binaryStart ? 'binaryStart' : 'metadataEnd', 'binaryEnd'),
           sceneMs: duration('sceneStart', 'sceneEnd'),
           renderCallMs: duration('renderStart', 'renderEnd'),
           sampledHeapPeakMiB: heap.length ? Math.max(...heap) / 1048576 : null,

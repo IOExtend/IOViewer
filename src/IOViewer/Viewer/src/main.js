@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadModelData, ModelDataError } from './data.js';
+import { loadModelData, ModelDataError, readModelMeta } from './data.js';
 import { ModelScene, ModelTooLargeError } from './engine/modelScene.js';
 import { lang, t } from './i18n.js';
 import { NavigationControls } from './nav/controls.js';
@@ -34,19 +34,18 @@ function showMessage(text) {
 
 // The context is asked for here, with the attributes three would ask for, so that without WebGL 2 the page says so
 // instead of three logging an error; damaged model data is reported on the page too.
-const context = canvas.getContext('webgl2', { antialias: true });
-if (!context) showMessage(t('noWebGL'));
-else {
-  try {
-    start(loadModelData(document, startup), context);
-  } catch (error) {
-    if (!(error instanceof ModelDataError)) throw error;
-    showMessage(t('badData'));
-  }
+try {
+  const meta = readModelMeta(document, startup);
+  if (meta.title) document.title = meta.title;
+  const context = canvas.getContext('webgl2', { antialias: true });
+  if (context) start(loadModelData(document, startup, meta), context);
+  else showMessage(t('noWebGL'));
+} catch (error) {
+  if (!(error instanceof ModelDataError)) throw error;
+  showMessage(t('badData'));
 }
 
 function start(data, context) {
-  if (data.meta.title) document.title = data.meta.title;
   const renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.localClippingEnabled = true;
@@ -90,7 +89,9 @@ function start(data, context) {
   // A model over what the viewer can draw opens without geometry and says why; the tree and properties still work.
   function createScene() {
     try {
-      return new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
+      const model = new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
+      if (model.totalCost === 0) showMessage(t('noGeometry'));
+      return model;
     } catch (error) {
       if (!(error instanceof ModelTooLargeError)) throw error;
       showMessage(t('tooLarge').replace('{count}', error.count).replace('{limit}', error.limit));
@@ -99,7 +100,6 @@ function start(data, context) {
       return new ModelScene({ ...data, meta: { ...data.meta, instances } });
     }
   }
-  if (data.meta.instances.count === 0) showMessage(t('noGeometry'));
   // The model's GPU buffers keep no CPU copy, so a lost context cannot be rebuilt, not even when the browser restores
   // it: say so instead of a blank page, and draw nothing more (the picker stops too).
   let contextLost = false;

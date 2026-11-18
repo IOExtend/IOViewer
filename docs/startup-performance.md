@@ -8,7 +8,7 @@ Set `PERF_STARTUP_ONLY=1` when running `npm run perf` from `src/IOViewer/Viewer`
 over `file://` and stops after the first render. It writes JSON and a Markdown summary to `PERF_OUT`. Set `PERF_PROFILE=1`
 for a Chromium CPU profile. Run the timing comparison with CPU profiling off.
 
-The report measures META parsing, BIN decoding, `ModelScene` construction and the first renderer call in milliseconds.
+The report measures META parsing and validation, BIN decoding, `ModelScene` construction and the first renderer call in milliseconds.
 Open time starts at navigation and ends when the viewer resolves `ready`, after submitting the first frame. It includes
 HTML parsing and browser startup work. On browsers with Long Tasks reporting, blocking time sums the portion above
 50 ms for each reported task before `ready`. The heap figure is the largest JavaScript heap sample at the phase

@@ -64,7 +64,7 @@ test('startup profiling samples load and first render once', async ({ page }) =>
   await page.evaluate(() => window.__ioviewer.controls.resize());
   await nextFrame(page);
   expect(await page.evaluate(() => window.startupSamples)).toEqual([
-    'metadataStart', 'metadataEnd', 'binaryEnd', 'sceneStart', 'sceneEnd', 'renderStart', 'renderEnd',
+    'metadataStart', 'metadataEnd', 'binaryStart', 'binaryEnd', 'sceneStart', 'sceneEnd', 'renderStart', 'renderEnd',
   ]);
   expect(errors).toEqual([]);
   expect(requests).toEqual([]);
@@ -252,15 +252,31 @@ test('without WebGL 2 the page says so instead of staying blank', async ({ page 
   const errors = await openFailing(page, 'building');
   await expect(page.locator('#ioviewer-message')).toHaveText('Нужен браузер с поддержкой WebGL 2');
   await expect(page.locator('#ioviewer-message')).toBeVisible();
+  const title = await page.evaluate(() => JSON.parse(document.getElementById('ioviewer-meta').textContent).title);
+  expect(title).toBeTruthy();
+  await expect(page).toHaveTitle(title);
   expect(errors).toEqual([]);
 });
 
-test('a page with damaged model data says so instead of staying blank', async ({ page }) => {
-  const errors = await openFailing(page, 'damaged');
-  await expect(page.locator('#ioviewer-message')).toHaveText('Не удалось прочитать данные модели');
-  await expect(page.locator('#ioviewer-message')).toBeVisible();
-  expect(errors).toEqual([]);
-});
+for (const name of ['damaged', 'malformed-meta', 'missing-geometry']) {
+  test(`${name} reports unreadable model data`, async ({ page }) => {
+    const errors = await openFailing(page, name);
+    await expect(page.locator('#ioviewer-message')).toHaveText('Не удалось прочитать данные модели');
+    await expect(page.locator('#ioviewer-message')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const name of ['zero-vertices', 'non-finite-instances']) {
+  test(`${name} opens with the no-geometry message and a populated model tree`, async ({ page }) => {
+    const { errors } = await open(page, name);
+    await expect(page.locator('#ioviewer-message')).toHaveText('Нет геометрии');
+    await expect(page.locator('#ioviewer-message')).toBeVisible();
+    await page.locator('.ioviewer-rail-button[data-panel="model"]').click();
+    await expect(page.locator('.tree-category').first()).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+}
 
 test('context lost shows the reload message', async ({ page }) => {
   await open(page, 'building');
