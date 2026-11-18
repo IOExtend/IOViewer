@@ -20,6 +20,8 @@ API between minor releases.
   duplicate element IDs, missing textures and conflicting legacy mesh arrays before publishing the output.
 - Virtualize long clash lists. Show the existing localized messages for malformed model metadata and scenes without
   drawable geometry, and set the model title when WebGL 2 is unavailable.
+- Keep close geometry visible and pickable in kilometre-scale models. Orthographic wheel zoom changes the
+  magnification around the cursor while keeping the camera at the same depth.
 
 ## [0.3.1] - 2026-11-13
 

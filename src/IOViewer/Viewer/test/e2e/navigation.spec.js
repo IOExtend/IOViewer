@@ -157,6 +157,39 @@ test('orthographic projection keeps the pose and the visible size at the target'
   expect(errors).toEqual([]);
 });
 
+test('orthographic wheel zoom keeps the cursor point and the camera depth', async ({ page }) => {
+  await open(page);
+  const x = 730, y = 350;
+  await page.mouse.move(x, y);
+  const sample = () => page.evaluate(({ x, y }) => {
+    const { camera, controls } = window.__ioviewer;
+    camera.updateMatrixWorld();
+    const depth = controls.target.clone().project(camera).z;
+    const cursor = camera.position.clone().set(2 * x / innerWidth - 1, 1 - 2 * y / innerHeight, depth).unproject(camera);
+    return {
+      position: camera.position.toArray(),
+      forward: camera.getWorldDirection(camera.position.clone()).toArray(),
+      distance: camera.position.distanceTo(controls.target),
+      cursor: cursor.toArray(),
+      scale: camera.projectionMatrix.elements[5],
+    };
+  }, { x, y });
+
+  await page.evaluate(() => window.__ioviewer.controls.setProjection('orthographic'));
+  const before = await sample();
+  await page.mouse.wheel(0, -100);
+  await frame(page);
+  const after = await sample();
+  const depthShift = after.position.reduce((sum, v, i) => sum + (v - before.position[i]) * before.forward[i], 0);
+  expect(depthShift).toBeCloseTo(0, 8);
+  expect(after.distance).toBeCloseTo(before.distance, 8);
+  expect(after.scale / before.scale).toBeCloseTo(1 / 0.85, 8);
+  after.cursor.forEach((value, i) => expect(value).toBeCloseTo(before.cursor[i], 8));
+
+  await page.evaluate(() => window.__ioviewer.controls.setProjection('perspective'));
+  expect((await sample()).distance).toBeCloseTo(before.distance * 0.85, 8);
+});
+
 test('animateTo moves the camera to the requested pose', async ({ page }) => {
   await open(page);
   const final = await page.evaluate(async () => {

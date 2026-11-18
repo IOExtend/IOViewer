@@ -59,6 +59,15 @@ export default function globalSetup() {
   const large = path.join(viewerDir, 'test-results', 'large.json');
   writeFileSync(large, JSON.stringify(largeModel(LARGE_ELEMENTS)));
   exportHtml(large, 'large');
+  const depthRange = largeModel(3);
+  depthRange.Meshes[1].Transform.Translation.Y = -5000;
+  const distant = depthRange.Meshes[2].Transform;
+  distant.Translation = { X: 100, Y: 5000, Z: 0 };
+  distant.XAxis = { X: 100, Y: 0, Z: 0 };
+  distant.ZAxis = { X: 0, Y: 0, Z: 100 };
+  const depthRangePath = path.join(viewerDir, 'test-results', 'depth-range.json');
+  writeFileSync(depthRangePath, JSON.stringify(depthRange));
+  exportHtml(depthRangePath, 'depth-range');
   const shear = path.join(viewerDir, 'test-results', 'shear.json');
   writeFileSync(shear, JSON.stringify(shearModel()));
   exportHtml(shear, 'shear');

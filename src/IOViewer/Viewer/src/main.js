@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { loadModelData, ModelDataError, readModelMeta } from './data.js';
 import { ModelScene, ModelTooLargeError } from './engine/modelScene.js';
 import { lang, t } from './i18n.js';
-import { NavigationControls } from './nav/controls.js';
+import { NavigationControls, needsLogarithmicDepth } from './nav/controls.js';
 import { ViewCube } from './nav/viewCube.js';
 import { Picker } from './engine/picking.js';
 import { MotionDetail } from './engine/motionDetail.js';
@@ -46,7 +46,9 @@ try {
 }
 
 function start(data, context) {
-  const renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true });
+  const renderer = new THREE.WebGLRenderer({
+    canvas, context, antialias: true, logarithmicDepthBuffer: needsLogarithmicDepth(data.meta),
+  });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.localClippingEnabled = true;
 
