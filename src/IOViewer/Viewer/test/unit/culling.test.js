@@ -212,6 +212,28 @@ test('MotionDetail: slow frames while moving shrink the budget', () => {
   assert.ok(detail.budget < 4e6 && detail.budget >= 1e6, `budget ${detail.budget}`);
 });
 
+test('MotionDetail uses cell detail under load and tries instance detail after sustained headroom', () => {
+  const calls = [];
+  const scene = {
+    ...stubScene(2),
+    detailThreshold(camera, height, budget, refine) {
+      calls.push(refine);
+      return 2;
+    },
+  };
+  const cam = camera();
+  const detail = new MotionDetail(scene, () => {});
+  frame(detail, cam, 0);
+  for (let i = 1; i <= 30; i++) frame(detail, cam, i * 34, { wait: 31, cpu: 2, move: 0.01 });
+  assert.ok(calls.every((refine) => !refine));
+  for (let i = 0; i < 20; i++) frame(detail, cam, 1100 + i * 16, { wait: 10, cpu: 2, move: 0.01 });
+  assert.equal(calls.at(-1), false);
+  frame(detail, cam, 1420, { wait: 50, cpu: 2, move: 0.01 });
+  assert.equal(calls.at(-1), true);
+  frame(detail, cam, 1480, { wait: 10, cpu: 2, move: 0.01 });
+  assert.equal(calls.at(-1), false);
+});
+
 test('MotionDetail starting at totalCost stays at full detail when moving frames measure 33 ms', () => {
   const scene = bigScene();
   const cam = camera(30);

@@ -68,6 +68,13 @@ export default function globalSetup() {
   const depthRangePath = path.join(viewerDir, 'test-results', 'depth-range.json');
   writeFileSync(depthRangePath, JSON.stringify(depthRange));
   exportHtml(depthRangePath, 'depth-range');
+  const orbitDetail = largeModel(4);
+  [[-10, 80], [0, 0], [80, 0], [1, 0]].forEach(([X, Y], i) => {
+    orbitDetail.Meshes[i].Transform.Translation = { X, Y, Z: 0 };
+  });
+  const orbitDetailPath = path.join(viewerDir, 'test-results', 'orbit-detail.json');
+  writeFileSync(orbitDetailPath, JSON.stringify(orbitDetail));
+  exportHtml(orbitDetailPath, 'orbit-detail');
   const shear = path.join(viewerDir, 'test-results', 'shear.json');
   writeFileSync(shear, JSON.stringify(shearModel()));
   exportHtml(shear, 'shear');

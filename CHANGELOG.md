@@ -19,6 +19,7 @@ API between minor releases.
 - Export explicitly placed source models together in one standalone HTML viewer with independent visibility.
 - Import BCF 2.1 topics and open their cameras, clipping and matched components in the offline viewer.
 - Preview distance measurement points and snap to visible vertices, edge midpoints and edges near the pointer.
+- Use each instance's projected size for orbit detail when the measured frame budget has room.
 
 ### Fixed
 

@@ -430,6 +430,46 @@ test('the pick tile includes encoded geometry extending beyond the authored boun
   }, c);
 });
 
+test('orbit compacts visible nearby cell instances while picking and the still frame use all slots', () => {
+  const at = (x, y) => ({ m: [1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, 0] });
+  const scene = model([at(-2, 80), at(0, 0), at(80, 0), at(2, 0)], { options: INSTANCED });
+  const { mesh } = scene.instance(0);
+  assert.equal(scene.instance(3).mesh, mesh);
+  const nativeMatrix = mesh.instanceMatrix;
+  const c = camera();
+  scene.setDisplayMode('wireframe');
+  const cut = scene.detailThreshold(c, 800, 34); // two cubes fit the budget
+  assert.ok(cut > 0);
+  scene.setDetail(cut, 800);
+  assert.deepEqual(scene.drawnInstances(c), [1, 3]);
+  assert.deepEqual(scene.drawStats(), { drawn: 24, inView: 48, draws: 1 });
+  const slots = mesh.geometry.getAttribute('slotBase');
+  assert.deepEqual([slots.getX(0), slots.getX(1)], [scene.instance(1).slot, scene.instance(3).slot]);
+  assert.equal(mesh.instanceMatrix.data.array[17 + 12], 2);
+  const pick = new THREE.MeshBasicMaterial();
+  scene.withMaterial(pick, () => assert.equal(mesh.instanceMatrix, nativeMatrix), c);
+  assert.equal(mesh.geometry.getAttribute('slotBase'), slots);
+  scene.setDetail(0);
+  assert.equal(mesh.instanceMatrix, nativeMatrix);
+  assert.deepEqual(scene.drawnInstances(c), [0, 1, 2, 3]);
+});
+
+test('an in-view cell contained by one screen-size bin uses its native buffer', () => {
+  const items = [{ x: 0 }, { x: 1 }, { x: 2, scale: 0.01, geometry: 1 }, { x: 3, scale: 0.01, geometry: 1 }];
+  const scene = model(items, { geometries: [quantizedCube(), quantizedCube()], options: INSTANCED });
+  const c = camera();
+  c.position.y = -100;
+  c.updateMatrixWorld();
+  const { mesh } = scene.instance(0);
+  const matrix = mesh.instanceMatrix;
+  const cut = scene.detailThreshold(c, 800, 34);
+  assert.ok(scene._units.every((unit) => unit.detailLow === unit.detailHigh));
+  scene.setDetail(cut, 800);
+  assert.deepEqual(scene.drawnInstances(c), [0, 1]);
+  assert.equal(mesh.instanceMatrix, matrix);
+  assert.equal(scene.memory().detailBytes, 0);
+});
+
 test('over the cap, cells are bounded in extent: one shape spread along 190 m takes several cells', () => {
   const scene = model(Array.from({ length: 20 }, (_, i) => ({ x: i * 10 })), { options: { mergedCap: 0, minRepeats: 1 } });
   const { cells, instancedInstances } = scene.memory();
