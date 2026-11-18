@@ -410,27 +410,39 @@ public class ModelAndCliIntegrationTests
     }
 
     [Fact]
-    public void Cli_ConvertNwcToHtml_ReadsTheModelThroughNwcIO()
+    public void Cli_ConvertNwcToHtml_ReportsAdapterWarningsAndWritesBothOutputs()
     {
         string input = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.nwc");
         string html = Path.ChangeExtension(input, ".html");
         string json = Path.ChangeExtension(input, ".json");
+        using var errors = new StringWriter();
+        var originalError = Console.Error;
         try
         {
             var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
-            root.Children.Add(new NwcNode { Id = 1, Name = "Test layer", Class = "LcRevitLayer", Tag = 52, Parent = root });
+            var leaf = new NwcNode { Id = 1, Name = "Test slab", Class = "Leaf", Tag = 22, Parent = root };
+            leaf.Properties.Add(new NwcPropertyRecord { FirstInt = 1, Tag = 52, Name = "Comment", Class = "Test", ValueType = 4, Value = "Sample" });
+            root.Children.Add(leaf);
             NwcDocument.Create(
                 new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root).Save(input);
+            Console.SetError(errors);
 
             Assert.Equal(0, Program.Main([input, "--json", json]));
+            Assert.Contains("Warning: properties-outside-tabs:", errors.ToString());
             var scene = JsonViewerImporter.Load(json).Scene;
             Assert.Empty(scene.Validate());
-            Assert.Equal(Path.GetFileName(input), Assert.Single(scene.Models).Key);
-            Assert.Contains(scene.Elements, element => element.Name == "Test layer");
-            Assert.True(File.Exists(html));
+            var model = Assert.Single(scene.Models);
+            Assert.Equal(Path.GetFileName(input), model.Key);
+            Assert.Equal("nwc", model.SourceFormat);
+            Assert.Contains(scene.Elements, element => element.Name == leaf.Name);
+
+            var view = ViewerHtml.Parse(File.ReadAllText(html));
+            Assert.Contains(view.Meta.GetProperty("elements").EnumerateArray(),
+                element => element.GetProperty("name").GetString() == leaf.Name);
         }
         finally
         {
+            Console.SetError(originalError);
             File.Delete(input);
             File.Delete(html);
             File.Delete(json);
@@ -459,6 +471,35 @@ public class ModelAndCliIntegrationTests
             Console.SetError(originalError);
             File.Delete(input);
             File.Delete(html);
+        }
+    }
+
+    [Theory]
+    [InlineData(".nwd")]
+    [InlineData(".nwf")]
+    public void Cli_UnsupportedNavisworksExtension_ReportsLoadFailureWithoutWritingOutputs(string extension)
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}{extension}");
+        string html = Path.ChangeExtension(input, ".html");
+        string json = Path.ChangeExtension(input, ".json");
+        using var errors = new StringWriter();
+        var originalError = Console.Error;
+        try
+        {
+            File.WriteAllBytes(input, []);
+            Console.SetError(errors);
+
+            Assert.Equal(3, Program.Main([input, "--json", json]));
+            Assert.Contains($"Unsupported input file extension: '{extension}'", errors.ToString());
+            Assert.False(File.Exists(html));
+            Assert.False(File.Exists(json));
+        }
+        finally
+        {
+            Console.SetError(originalError);
+            File.Delete(input);
+            File.Delete(html);
+            File.Delete(json);
         }
     }
 
