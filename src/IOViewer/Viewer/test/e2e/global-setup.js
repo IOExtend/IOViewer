@@ -73,6 +73,9 @@ export default function globalSetup() {
   exportHtml(widePath, 'wide-ids');
 
   const building = JSON.parse(readFileSync(path.join(fixturesDir, 'building.json'), 'utf8'));
+  const noGrids = path.join(results, 'building-no-grids.json');
+  writeFileSync(noGrids, JSON.stringify({ ...building, Scene: { ...building.Scene, Grids: [] } }));
+  exportHtml(noGrids, 'building-no-grids');
   const planes = [{ Axis: 3, Normal: [0, 0, 2], Offset: 2 }, { Axis: 0, Offset: -100, Enabled: false }];
   for (const [name, box] of [
     ['building-section-planes', null],

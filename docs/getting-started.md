@@ -33,6 +33,9 @@ ioviewer model.nwc
 ioviewer model.glb --serve
 ```
 
+The direct `.nwc` command is available in CLI builds from this repository. Published `IOViewer.Cli` 0.3.1 uses the
+[IOScene JSON handoff](#navisworks-cache) for Navisworks models.
+
 ## C# API usage
 
 The model data is a `SceneDocument` from the [IOScene](https://github.com/IOExtend/IOScene) package: models, elements,
@@ -51,6 +54,38 @@ HtmlViewerExporter.Save(scene, "tower_viewer.html");
 `ViewerDocument` (namespace `IOViewer.Model`) wraps a scene with what only the viewer uses: section planes, a section
 box and the keys of the models hidden at start. `JsonViewerExporter` writes it as viewer JSON, and `JsonViewerImporter`
 reads viewer JSON, IOScene scene files and IOViewer 0.1/0.2 snapshots.
+
+## Navisworks cache
+
+Add `NwcIO.Scene` alongside `IOViewer` in your .NET project.
+
+```sh
+dotnet add package NwcIO.Scene --version 0.13.0
+```
+
+Read the `.nwc` file into an IOScene document and export it to HTML.
+
+```csharp
+using IOViewer.Exporters;
+using NwcIO.Scene;
+
+var result = NwcSceneReader.Read("Tower.nwc");
+HtmlViewerExporter.Save(result.Document, "Tower.html");
+```
+
+Inspect `result.Diagnostics` for warnings and errors. See the [NwcIO.Scene guide](https://github.com/IOExtend/NwcIO/blob/v0.13.0/docs/scene.md)
+for supported caches, diagnostics and conversion limits.
+
+The adapter is in preview. Some caches, including the IFC-derived office and terrain caches in the
+[Safe Software Navisworks example](https://support.safe.com/hc/en-us/articles/37510812360717-Getting-Started-with-Navisworks),
+fail to load with `NwcIO.Scene` 0.13.0. If you have the original IFC or Revit file, you can pass it directly to `ioviewer`.
+
+For the IOScene JSON handoff, save the scene with `IOScene.SceneJson.Save(result.Document, "Tower.scene.json")`.
+Then open it with the CLI, including `IOViewer.Cli` 0.3.1.
+
+```sh
+ioviewer Tower.scene.json -o Tower.html
+```
 
 ## Sharing geometry between instances
 

@@ -124,8 +124,8 @@ for (const inverted of [false, true]) {
 }
 
 test('a Z plane through the middle cuts the roof away; flipping it brings the roof back and cuts the ground slab; reset restores', async ({ page }) => {
-  const errors = await open(page);
-  await page.evaluate(() => window.__ioviewer.grids.setVisible(false)); // axis 2 runs across the sampled slab rim
+  // Axis 2 runs across the sampled slab rim.
+  const errors = await open(page, 'building-no-grids');
   const roof = await indexOf(page, 'Roof Slab');
   const ground = await indexOf(page, 'Ground Slab');
   // Roof top near its back edge (seen past the roof there is only background) and the ground slab rim right of the
@@ -147,23 +147,20 @@ test('a Z plane through the middle cuts the roof away; flipping it brings the ro
   expect(state).toMatchObject({ mode: 'planes', axis: 'z' });
   expect(state.z).toBeCloseTo(state.mid, 9);
   await page.evaluate(() => window.__ioviewer.sections.setGizmoVisible(false)); // keep the handles off the sampled pixels
-  await frame(page);
-  expect(cleared(await rgb(page, roofAt), roofBefore)).toBe(true);
+  await expect.poll(async () => cleared(await rgb(page, roofAt), roofBefore)).toBe(true);
   expect(await pickAt(page, roofAt)).not.toBe(roof);
   expect(cleared(await rgb(page, groundAt), groundBefore)).toBe(false);
   expect(await pickAt(page, groundAt)).toBe(ground);
 
   await panel(page).getByRole('button', { name: 'Сменить сторону' }).click();
-  await frame(page);
-  expect(await rgb(page, roofAt)).toEqual(roofBefore); // the roof is in front of the plane rectangle
+  await expect.poll(() => rgb(page, roofAt)).toEqual(roofBefore); // the roof is in front of the plane rectangle
   expect(await pickAt(page, roofAt)).toBe(roof);
-  expect(cleared(await rgb(page, groundAt), groundBefore)).toBe(true);
+  await expect.poll(async () => cleared(await rgb(page, groundAt), groundBefore)).toBe(true);
   expect(await pickAt(page, groundAt)).not.toBe(ground);
 
   await tool(page, 'resetSections').click();
-  await frame(page);
-  expect(await rgb(page, roofAt)).toEqual(roofBefore);
-  expect(await rgb(page, groundAt)).toEqual(groundBefore);
+  await expect.poll(() => rgb(page, roofAt)).toEqual(roofBefore);
+  await expect.poll(() => rgb(page, groundAt)).toEqual(groundBefore);
   expect(await page.evaluate(() => [window.__ioviewer.sections.mode, window.__ioviewer.sections.planes.length])).toEqual(['off', 0]);
   await expect(tool(page, 'plane')).not.toHaveClass(/active/);
   expect(errors).toEqual([]);

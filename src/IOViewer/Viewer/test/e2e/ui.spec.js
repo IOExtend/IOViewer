@@ -93,7 +93,9 @@ test('right click on nothing opens the short menu; Esc, an outside click and the
   // The same for a tree row under the press.
   await rail(page, 'model').click();
   await sidePanel(page, 'model').locator('.ioviewer-tree').evaluate((t) => (t.scrollTop = 0)); // it scrolled to D3
-  const ducts = await rows(page).filter({ hasText: 'Ducts' }).boundingBox();
+  const ductsRow = rows(page).filter({ hasText: 'Ducts' });
+  await expect(ductsRow).toBeVisible();
+  const ducts = await ductsRow.boundingBox();
   await page.mouse.click(1000, 40, { button: 'right' }); // background clear of the open panel and the view cube
   await expect(menu(page)).toBeVisible();
   await page.mouse.click(ducts.x + 20, ducts.y + ducts.height / 2); // press on the Ducts category header

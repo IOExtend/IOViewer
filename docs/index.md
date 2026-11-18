@@ -4,7 +4,7 @@ title: IOViewer
 
 # IOViewer
 
-**IOViewer** is a fast, 100% managed .NET library and CLI tool for generating standalone interactive 3D WebGL / HTML BIM & CAD model viewers directly from code or file formats (glTF/GLB, Wavefront OBJ and JSON; the CLI tool also reads IFC and Revit files through IfcIO and RvtIO).
+**IOViewer** is a fast, 100% managed .NET library and CLI tool for generating standalone interactive 3D WebGL / HTML BIM & CAD model viewers directly from code or from glTF/GLB, Wavefront OBJ and JSON. CLI builds from this repository also read IFC, Revit and Navisworks cache files (`.nwc`) through `IfcIO.Scene`, `RvtIO.Scene` and `NwcIO.Scene`. For the library and published CLI 0.3.1, see the [Navisworks workflow](getting-started.md#navisworks-cache).
 
 The generated HTML is a single file with no external dependencies that works offline: it opens from disk in a current browser with WebGL 2, without servers, plug-ins or network requests. The viewer is built on three.js, embedded in the file.
 
