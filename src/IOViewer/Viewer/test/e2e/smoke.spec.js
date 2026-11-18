@@ -21,14 +21,26 @@ const nextFrame = (page) =>
   page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
 const region = (page, x, y) => page.screenshot({ clip: { x, y, width: 40, height: 40 } });
+const centerRegion = (page) => {
+  const { width, height } = page.viewportSize();
+  return region(page, width / 2 - 20, height / 2 - 20);
+};
+
+// A screenshot can still show the background after the first render call has returned.
+async function renderedCenter(page) {
+  const background = await region(page, 80, 0); // right of the panel rail
+  let center;
+  await expect.poll(async () => {
+    center = await centerRegion(page);
+    return center.equals(background);
+  }).toBe(false);
+  return center;
+}
 
 test('building renders the model and counts elements', async ({ page }) => {
   const { errors, requests } = await open(page, 'building');
 
-  const { width, height } = page.viewportSize();
-  const center = await region(page, width / 2 - 20, height / 2 - 20);
-  const background = await region(page, 80, 0); // right of the panel rail
-  expect(center.equals(background)).toBe(false);
+  await renderedCenter(page);
   await expect(page.locator('#ioviewer-status')).toHaveText(`Выбрано: 0 · Элементов: ${building.Elements.length}`);
   expect(errors).toEqual([]);
   expect(requests).toEqual([]);
@@ -119,17 +131,15 @@ test('a mirrored instance is shaded like its unmirrored twin', async ({ page }) 
 
 test('highlight, visibility and display modes change the picture without errors', async ({ page }) => {
   const { errors } = await open(page, 'building');
-  const { width, height } = page.viewportSize();
-  const shot = () => region(page, width / 2 - 20, height / 2 - 20);
-  const before = await shot();
+  const before = await renderedCenter(page);
 
   await page.evaluate((n) => window.__ioviewer.scene.setHighlighted([...Array(n).keys()]), building.Elements.length);
   await nextFrame(page);
-  expect((await shot()).equals(before)).toBe(false);
+  expect((await centerRegion(page)).equals(before)).toBe(false);
 
   await page.evaluate(() => window.__ioviewer.scene.setHighlighted([]));
   await nextFrame(page);
-  expect((await shot()).equals(before)).toBe(true);
+  expect((await centerRegion(page)).equals(before)).toBe(true);
 
   for (const mode of ['white', 'wireframe', 'textures', 'materials']) {
     await page.evaluate((m) => window.__ioviewer.scene.setDisplayMode(m), mode);
@@ -139,7 +149,7 @@ test('highlight, visibility and display modes change the picture without errors'
   await nextFrame(page);
   await page.evaluate(() => window.__ioviewer.scene.setOpacity(1));
   await nextFrame(page);
-  expect((await shot()).equals(before)).toBe(true);
+  expect((await centerRegion(page)).equals(before)).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -175,7 +185,13 @@ async function cylinderJumps(page) {
     const [b, y] = screen(centre.clone().addScaledVector(right, 1.6));
     return [Math.round(a), Math.round(b), Math.round(y)];
   });
-  const row = await greys(page, { x: x0, y, width: x1 - x0, height: 1 });
+  const clip = { x: x0, y, width: x1 - x0, height: 1 };
+  const background = await brightness(page, 100, 20);
+  let row;
+  await expect.poll(async () => {
+    row = await greys(page, clip);
+    return row.some((grey) => Math.abs(grey - background) > 10);
+  }).toBe(true);
   return row.slice(1).filter((g, i) => Math.abs(g - row[i]) > 1.5).length;
 }
 
