@@ -48,6 +48,18 @@ async function rgb(page, [x, y]) {
   }, png.toString('base64'));
 }
 const distance = (a, b) => a.reduce((sum, c, i) => sum + Math.abs(c - b[i]), 0);
+
+async function visibleColors(page, points) {
+  let colors;
+  // The viewer's ready promise marks the render call, which can precede the browser's composited screenshot.
+  await expect.poll(async () => {
+    colors = [];
+    for (const point of points) colors.push(await rgb(page, point));
+    return Math.min(...colors.map((color) => distance(color, BACKGROUND)));
+  }).toBeGreaterThan(60);
+  return colors;
+}
+
 // The pixel now shows (nearly) the background where it showed the model: at most a quarter of the old difference
 // is left, which allows for the translucent plane rectangle lying in front of it.
 const cleared = (now, before) => distance(now, BACKGROUND) < 0.25 * distance(before, BACKGROUND);
@@ -120,12 +132,9 @@ test('a Z plane through the middle cuts the roof away; flipping it brings the ro
   // floors above it (nothing below it).
   const roofAt = await screenAt(page, roof, [0.5, 0.95, 1]);
   const groundAt = await screenAt(page, ground, [0.985, 0.5, 1]);
-  const roofBefore = await rgb(page, roofAt);
-  const groundBefore = await rgb(page, groundAt);
+  const [roofBefore, groundBefore] = await visibleColors(page, [roofAt, groundAt]);
   expect(await pickAt(page, roofAt)).toBe(roof);
   expect(await pickAt(page, groundAt)).toBe(ground);
-  expect(distance(roofBefore, BACKGROUND)).toBeGreaterThan(60);
-  expect(distance(groundBefore, BACKGROUND)).toBeGreaterThan(60);
 
   await tool(page, 'plane').click();
   await expect(panel(page)).toBeVisible();
@@ -168,7 +177,8 @@ test('box around the selected column: keepInside shows only the column, cutInsid
   const d2At = await screenAt(page, d2);
   const d1At = await screenAt(page, d1);
   const roofAt = await screenAt(page, roof, [0.5, 0.95, 1]);
-  const before = { d2: await rgb(page, d2At), d1: await rgb(page, d1At), roof: await rgb(page, roofAt) };
+  const [d2Before, d1Before, roofBefore] = await visibleColors(page, [d2At, d1At, roofAt]);
+  const before = { d2: d2Before, d1: d1Before, roof: roofBefore };
 
   await page.mouse.click(...d2At);
   expect(await selected(page)).toEqual([d2]);

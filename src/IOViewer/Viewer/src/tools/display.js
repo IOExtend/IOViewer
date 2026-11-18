@@ -9,15 +9,20 @@ export function initialDisplayMode(options) {
 }
 
 /**
- * Display tools: `displayMode` opens a menu of the modes (textures only when META has textures; the current one is
- * checked), `grids` shows or hides the grid axes and their labels (off when there are none), `opacity` opens a
+ * Display tools: `displayMode` opens the mode choices and the viewport background setting, `grids` shows or hides
+ * the grid axes and their labels (off when there are none), `opacity` opens a
  * 10–100 % slider for the whole model. Returns the popovers, for Esc.
  */
-export function mountDisplay({ root, toolbar, scene, meta, grids }) {
+export function mountDisplay({ root, toolbar, scene, meta, grids, initialBackground, setBackground }) {
   const anchor = (id) => toolbar.element.querySelector(`[data-tool="${id}"]`);
 
-  const modes = createPopover(root, anchor('displayMode'), t('tool.displayMode'), 'menu');
+  const displayButton = anchor('displayMode');
+  const modes = createPopover(root, displayButton, t('group.display'));
   modes.element.classList.add('ioviewer-display-modes');
+  const menu = el('div');
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', t('tool.displayMode'));
+  modes.element.append(menu);
   const hasTextures = (meta.textures ?? []).length > 0;
   const items = DISPLAY_MODES.map((mode) => {
     const item = el('button', 'ioviewer-menu-item', t(`display.${mode}`));
@@ -28,8 +33,9 @@ export function mountDisplay({ root, toolbar, scene, meta, grids }) {
     item.addEventListener('click', () => {
       setMode(mode);
       modes.close();
+      displayButton.focus();
     });
-    modes.element.append(item);
+    menu.append(item);
     return item;
   });
   const setMode = (mode) => {
@@ -37,7 +43,31 @@ export function mountDisplay({ root, toolbar, scene, meta, grids }) {
     for (const item of items) item.setAttribute('aria-checked', String(item.dataset.mode === mode));
   };
   setMode(initialDisplayMode(meta.options));
-  toolbar.setHandler('displayMode', modes.toggle);
+  toolbar.setHandler('displayMode', () => {
+    modes.toggle();
+    if (modes.isOpen) menu.querySelector('[aria-checked="true"]')?.focus();
+  });
+
+  const background = el('div', 'ioviewer-background-setting');
+  const label = el('label', '', t('display.background'));
+  const color = el('input');
+  Object.assign(color, { type: 'color', value: initialBackground });
+  label.append(color);
+  const reset = el('button', 'ioviewer-text-button', t('display.backgroundReset'));
+  reset.type = 'button';
+  reset.disabled = true;
+  const applyBackground = () => {
+    setBackground(color.value);
+    reset.disabled = color.value === initialBackground;
+  };
+  color.addEventListener('input', applyBackground);
+  reset.addEventListener('click', () => {
+    color.value = initialBackground;
+    color.focus();
+    applyBackground();
+  });
+  background.append(label, reset);
+  modes.element.append(background);
 
   toolbar.setActive('grids', grids.visible);
   if (grids.count > 0) {

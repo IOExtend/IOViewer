@@ -29,7 +29,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
   - context menu: properties, hide, isolate, show all, zoom to object, section box around the object, copy Id;
   - view cube that follows the camera exactly, with face clicks, 90° arrows and a home button;
   - section planes (up to six, moved and rotated with an in-scene gizmo) or a section box (keep inside or cut inside, face handles, move by the centre, box around the selection);
-  - point-to-point distance measurement, display modes (materials, textures, white, wireframe), grid lines and a global opacity slider;
+  - point-to-point distance measurement, display modes (materials, textures, white, wireframe), viewport background color, grid lines and a global opacity slider;
   - saved viewpoints with a viewpoint tour, clash results, a 4D schedule player and linked-file visibility, each shown only when the document has that data.
 - Imports binary glTF 2.0 (`.glb`), Wavefront OBJ (`.obj`), and JSON: viewer JSON, IOScene scene files and IOViewer 0.1/0.2 snapshots.
 
