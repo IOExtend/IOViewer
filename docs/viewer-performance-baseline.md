@@ -119,6 +119,7 @@ Set `PERF_PICK_BOUNDS_ONLY=1` and point `PERF_MODELS` at the current Synthetic-4
 Run on both GPU modes as above. The harness alternates full-cell and bounded draws on each pixel, flushes the pick
 cache and requires equal hit IDs and coordinates. It repeats an 81-pixel grid and up to 48 known hit pixels three
 times each with the same fitted camera. `pickBounds` in the reports includes hit counts and median submitted triangles.
+Export Synthetic-1M the same way with `--elements 1000000` to reproduce the million-element workload.
 
 | Workload | GPU | Samples | Full cells p50 / p95, ms | Instance bounds p50 / p95, ms |
 | --- | --- | --- | ---: | ---: |
@@ -126,9 +127,12 @@ times each with the same fitted camera. `pickBounds` in the reports includes hit
 | Synthetic-400k | Radeon | 144 hits | 8.7 / 10.4 | 2.0 / 3.0 |
 | Synthetic-400k | RTX 4080 | Grid, 3 hits of 243 | 2.0 / 2.7 | 1.9 / 2.7 |
 | Synthetic-400k | RTX 4080 | 144 hits | 1.8 / 2.3 | 1.6 / 2.1 |
+| Synthetic-1M | Radeon | Grid, 6 hits of 243 | 21.9 / 25.8 | 5.2 / 8.2 |
+| Synthetic-1M | Radeon | 144 hits | 20.0 / 25.7 | 5.5 / 7.5 |
 | Schependomlaan | Radeon | 144 hits | 0.5 / 0.6 | 0.5 / 0.7 |
 | Schependomlaan | RTX 4080 | 144 hits | 0.2 / 0.3 | 0.2 / 0.3 |
 
-The median triangle count for Synthetic-400k hits fell from 4,046,612 to 62,948. All sample pairs matched.
+The median triangle count for Synthetic-400k hits fell from 4,046,612 to 62,948. On Synthetic-1M, with 96 million
+triangles in the model, it fell from 10,339,788 to 159,872. All sample pairs matched.
 Schependomlaan draws only merged chunks, so both runs submitted 247,472 triangles. This change applies to picking.
 Adaptive orbit continues to use its existing detail cut. [Instancing and picking issue](https://github.com/IOExtend/IOViewer/issues/12)
