@@ -106,11 +106,13 @@ test('a mirrored instance is shaded like its unmirrored twin', async ({ page }) 
       return [((point.x + 1) / 2) * innerWidth, ((1 - point.y) / 2) * innerHeight];
     });
   }, twins);
-  const plain = await brightness(page, ...points[0]);
-  const mirrored = await brightness(page, ...points[1]);
   const background = await brightness(page, 100, 20);
-
-  expect(Math.abs(plain - background)).toBeGreaterThan(10); // the sample hits the column, not the background
+  let plain, mirrored;
+  await expect.poll(async () => {
+    plain = await brightness(page, ...points[0]);
+    mirrored = await brightness(page, ...points[1]);
+    return Math.min(Math.abs(plain - background), Math.abs(mirrored - background));
+  }).toBeGreaterThan(10); // Both columns have reached the composited frame.
   expect(Math.abs(mirrored - plain)).toBeLessThanOrEqual(3);
   expect(errors).toEqual([]);
 });
