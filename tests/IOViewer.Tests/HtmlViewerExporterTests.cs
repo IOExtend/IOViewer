@@ -744,13 +744,15 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
-    public void Elements_ListEveryElementWithLevelAndLink()
+    public void Elements_ListEveryElementWithLevelAndModelIdentity()
     {
         var scene = TestScenes.Empty();
         scene.Models.Add(new SceneModel { Id = 2, Key = "mep.rvt", Name = "MEP", Path = "links/mep.rvt" });
         scene.Models.Add(new SceneModel { Id = 3, Key = "arch", Name = "Arch" });
         scene.Levels.Add(new SceneLevel { Id = 4, ModelId = 2, Name = "L2" });
+        scene.Levels.Add(new SceneLevel { Id = 5, ModelId = 1, Name = "L2" });
         Cube(scene, Vector3d.Zero);
+        scene.Elements[0].LevelId = 5;
         scene.Elements.Add(new SceneElement { Id = 2, ModelId = 2, Name = "Duct", LevelId = 4, Category = "Ducts" });
         scene.Elements.Add(new SceneElement { Id = 3, ModelId = 3, Name = "Wall", Kind = (SceneNodeKind)99 });
         var doc = new ViewerDocument(scene) { HiddenModelKeys = ["arch"] };
@@ -760,7 +762,16 @@ public class HtmlViewerExporterTests
 
         // Elements without geometry are listed too; a link is the model's path, else its name.
         Assert.Equal([1L, 2L, 3L], elements.Select(e => e.GetProperty("id").GetInt64()));
-        Assert.Equal(["", "L2", ""], elements.Select(e => e.GetProperty("level").GetString()));
+        Assert.Equal(["L2", "L2", ""], elements.Select(e => e.GetProperty("level").GetString()));
+        Assert.Equal(5, elements[0].GetProperty("levelId").GetInt32());
+        Assert.Equal(4, elements[1].GetProperty("levelId").GetInt32());
+        Assert.False(elements[2].TryGetProperty("levelId", out _));
+        Assert.False(elements[0].TryGetProperty("modelId", out _));
+        Assert.Equal(2, elements[1].GetProperty("modelId").GetInt32());
+        Assert.Equal(3, elements[2].GetProperty("modelId").GetInt32());
+        var models = meta.GetProperty("models").EnumerateArray().ToArray();
+        Assert.Equal([1, 2, 3], models.Select(model => model.GetProperty("id").GetInt32()));
+        Assert.Equal(["Test", "MEP", "Arch"], models.Select(model => model.GetProperty("name").GetString()));
         Assert.Equal([null, "links/mep.rvt", "Arch"], elements.Select(e => e.GetProperty("link").GetString()));
         Assert.Equal(["General", "Ducts", "General"], elements.Select(e => e.GetProperty("category").GetString()));
         var files = meta.GetProperty("linkedFiles").EnumerateArray().ToArray();

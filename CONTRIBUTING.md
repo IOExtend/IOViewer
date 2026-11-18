@@ -83,7 +83,7 @@ fails when it differs from the committed file. The end-to-end tests need the
 .NET SDK and a Chromium for Playwright (`npx playwright install chromium`).
 Fixtures are in `tests/fixtures/viewer`.
 
-CI also runs the smoke, selection, section, keyboard-accessibility and model-tree selection tests in Firefox.
+CI also runs the smoke, selection, section, keyboard-accessibility and model-tree tests in Firefox.
 It builds `tests/fixtures/viewer/generate-fixtures.cs` and `tools/SyntheticModel/SyntheticModel.cs`.
 To run the Firefox project locally, build the viewer, install Firefox
 with `npx playwright install firefox` and run `npx playwright test --project=firefox`. On Linux, install browser

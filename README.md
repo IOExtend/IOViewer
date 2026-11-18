@@ -24,7 +24,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
 - Shifts coordinates relative to the model centre (RTC), so georeferenced models with coordinates around 10⁶ m do not jitter.
 - Draws large models with few draw calls: geometry is merged into spatial chunks per material (very large models draw their repeated shapes as instanced copies instead), and hiding, selection and colouring are per-object data, so they never rebuild geometry.
 - Viewer interface in Russian or English, chosen from the browser language:
-  - model tree by category with search, a properties panel and a selected/total counter;
+  - model tree with search and filters by source model, level and category, a properties panel and a selected/total counter;
   - toolbar with labelled groups: navigation, sections, measure, display and view;
   - context menu: properties, hide, isolate, show all, zoom to object, section box around the object, copy Id;
   - view cube that follows the camera exactly, with face clicks, 90° arrows and a home button;
@@ -56,6 +56,10 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
 | Esc | Close the open menu or popup, or clear the measurement; otherwise clear the selection |
 
 The model's up axis is +Z.
+
+In the model tree, open **Filters** to combine source model, level and category with the text search. Use
+**Isolate matches** to apply the results to 3D visibility. Clearing the filters keeps the current visibility.
+Use **Show all** to reset the hide and isolate actions.
 
 ## Install
 

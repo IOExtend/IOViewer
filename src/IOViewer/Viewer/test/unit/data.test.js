@@ -17,6 +17,21 @@ const emptyMeta = {
 };
 const emptyMetaBlock = { textContent: JSON.stringify(emptyMeta) };
 
+test('accepts optional source identity and rejects malformed model or level keys', () => {
+  const read = (meta) => readModelMeta({ getElementById: () => ({ textContent: JSON.stringify(meta) }) });
+  const meta = { ...emptyMeta, models: [{ id: 0, name: 'Architecture' }], elements: [{ levelId: 4 }, { modelId: 0 }] };
+  assert.deepEqual(read(meta), meta);
+  assert.deepEqual(read({ ...emptyMeta, elements: [{ level: 'Level 1' }] }).elements, [{ level: 'Level 1' }]);
+  for (const invalid of [
+    { ...meta, models: [{ id: '0', name: 'Architecture' }] },
+    { ...meta, models: [{ id: 0, name: null }] },
+    { ...meta, elements: [{ modelId: '0' }] },
+    { ...meta, elements: [{ levelId: 0.5 }] },
+  ]) {
+    assert.throws(() => read(invalid), ModelDataError);
+  }
+});
+
 test('checks optional saved viewpoint state and explicit linked-file members', () => {
   const camera = { position: [2, 2, 2], target: [0, 0, 0] };
   const read = (meta) => readModelMeta({ getElementById: () => ({ textContent: JSON.stringify(meta) }) });

@@ -2,6 +2,7 @@ import { t } from '../i18n.js';
 import { icons } from './icons.js';
 import { el } from './dom.js';
 import { isContextMenuKey } from './hotkeys.js';
+import { createTreeFilters } from './treeFilters.js';
 
 export const ROW_HEIGHT = 24; // px, every row; the list is virtualized on this fixed height
 const OVERSCAN = 8;
@@ -37,11 +38,11 @@ export function groupByCategory(elements) {
 }
 
 /**
- * Model tree in `container`: collapsed categories with counts, then elements (name, muted type); a search flattens
+ * Model tree in `container`: collapsed categories with counts, then elements (name, muted type); search and filters flatten
  * matches. Rows in view and the focused row exist in the DOM. Activating an element selects and zooms to it;
  * selecting elsewhere scrolls to and highlights the last selected row, expanding its category. Hidden elements are dimmed.
  */
-export function mountTree(container, { elements, selection, scene, zoomToElement, openContextMenu }) {
+export function mountTree(container, { elements, models, selection, scene, zoomToElement, openContextMenu }) {
   const groups = groupByCategory(elements);
   const categoryOf = new Int32Array(elements.length);
   groups.forEach((group, c) => group.indices.forEach((i) => (categoryOf[i] = c)));
@@ -50,6 +51,7 @@ export function mountTree(container, { elements, selection, scene, zoomToElement
   const selectedCounts = new Uint32Array(groups.length);
   const search = createSearch(elements);
   let query = '';
+  let flat = false;
   let rows = new Int32Array(0); // element index, or -(category + 1) for a category header
   let tabRow = 0;
   let pendingRow = -1; // row to scroll to once the tree has a size (it is laid out only while its panel is open)
@@ -69,12 +71,22 @@ export function mountTree(container, { elements, selection, scene, zoomToElement
   spacer.setAttribute('role', 'presentation');
   viewport.append(spacer);
   const empty = el('div', 'ioviewer-tree-empty', t('noMatches'));
-  container.append(input, viewport, empty);
+  const filters = createTreeFilters(elements, models, input, refilter, () => scene.isolate(rows));
+  container.append(filters.element, input, viewport, empty);
 
   function rebuild() {
     const previous = rows[tabRow];
-    if (query) {
-      rows = Int32Array.from(search(query));
+    const matches = filters.predicate();
+    flat = Boolean(query || matches);
+    if (flat) {
+      const candidates = query ? search(query) : elements.keys();
+      if (matches) {
+        const found = [];
+        for (const index of candidates) if (matches(elements[index])) found.push(index);
+        rows = Int32Array.from(found);
+      } else {
+        rows = Int32Array.from(candidates);
+      }
     } else {
       let count = groups.length;
       groups.forEach((group, c) => expanded[c] && (count += group.indices.length));
@@ -89,7 +101,8 @@ export function mountTree(container, { elements, selection, scene, zoomToElement
     const next = rows.indexOf(previous);
     tabRow = next >= 0 ? next : 0;
     spacer.style.height = `${rows.length * ROW_HEIGHT}px`;
-    empty.hidden = rows.length > 0 || !query;
+    empty.hidden = rows.length > 0 || !flat;
+    filters.update(query, flat && rows.some((index) => scene.instancesOf(index).length > 0));
     render();
   }
 
@@ -136,10 +149,10 @@ export function mountTree(container, { elements, selection, scene, zoomToElement
     } else {
       const element = elements[value];
       node.classList.add('tree-element');
-      node.setAttribute('aria-level', query ? '1' : '2');
-      node.setAttribute('aria-posinset', String(query ? r + 1 : r - groupRows[c]));
-      node.setAttribute('aria-setsize', String(query ? rows.length : groups[c].indices.length));
-      node.classList.toggle('tree-child', !query);
+      node.setAttribute('aria-level', flat ? '1' : '2');
+      node.setAttribute('aria-posinset', String(flat ? r + 1 : r - groupRows[c]));
+      node.setAttribute('aria-setsize', String(flat ? rows.length : groups[c].indices.length));
+      node.classList.toggle('tree-child', !flat);
       node.classList.toggle('tree-hidden', !scene.isVisible(value));
       node.append(el('span', 'tree-name', element.name || `#${element.id}`), el('span', 'tree-type', element.type ?? ''));
     }
@@ -165,7 +178,7 @@ export function mountTree(container, { elements, selection, scene, zoomToElement
 
   function reveal(index) {
     const c = categoryOf[index];
-    if (!query && !expanded[c]) {
+    if (!flat && !expanded[c]) {
       expanded[c] = 1;
       rebuild();
     }
@@ -226,13 +239,14 @@ export function mountTree(container, { elements, selection, scene, zoomToElement
   input.addEventListener('focus', () => {
     if (!spacer.firstElementChild) syncLayout();
   });
-  input.addEventListener('input', () => {
+  function refilter() {
     query = input.value.trim();
     viewport.scrollTop = 0;
     pendingRow = -1;
     tabRow = -1;
     rebuild();
-  });
+  }
+  input.addEventListener('input', refilter);
   viewport.addEventListener('scroll', () => render());
   viewport.addEventListener('focusin', (e) => {
     const node = e.target.closest('.tree-row');
@@ -287,7 +301,7 @@ export function mountTree(container, { elements, selection, scene, zoomToElement
         }
         break;
       case 'ArrowLeft':
-        if (value >= 0 && !query) next = groupRows[categoryOf[value]];
+        if (value >= 0 && !flat) next = groupRows[categoryOf[value]];
         else if (value < 0 && expanded[-value - 1]) {
           expanded[-value - 1] = 0;
           rebuild();
