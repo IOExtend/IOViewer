@@ -22,7 +22,8 @@ public sealed class ViewerViewpointState
 
     /// <summary>
     /// <see cref="SceneModel.Key"/> values of hidden linked models. Null preserves the linked-file checkboxes and an
-    /// empty list checks all linked files with elements. The host is controlled through <see cref="HiddenElementIds"/>.
+    /// empty list checks all listed models with elements. The host is listed when the document enables
+    /// <see cref="ViewerDocument.ShowHostInModelList"/>.
     /// </summary>
     public List<string>? HiddenModelKeys { get; set; }
 }

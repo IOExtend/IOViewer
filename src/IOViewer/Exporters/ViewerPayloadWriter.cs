@@ -19,7 +19,7 @@ namespace IOViewer.Exporters;
 /// such geometries share one written geometry; a geometry that several instances place is written once in local
 /// coordinates and placed by each instance's matrix. Only triangle geometries are drawn: instances of lines, points
 /// or a topology this version does not know are skipped and counted in META <c>skipped</c>. The first model of the
-/// scene is the host; the elements of the other models carry a link, and those models are listed as linked files.
+/// scene is the host; listed models carry a link on their elements and can be hidden independently.
 /// </remarks>
 internal sealed class ViewerPayloadWriter
 {
@@ -30,6 +30,7 @@ internal sealed class ViewerPayloadWriter
 
     private readonly SceneDocument _scene;
     private readonly HashSet<string> _hiddenModels;
+    private readonly int _firstListedModel;
     private readonly HtmlViewerOptions _options;
     private readonly BinaryBlobBuilder _blob = new();
     private readonly List<GeometryEntry> _geometries = [];
@@ -56,6 +57,7 @@ internal sealed class ViewerPayloadWriter
     {
         _scene = doc.Scene;
         _hiddenModels = [.. doc.HiddenModelKeys];
+        _firstListedModel = doc.ShowHostInModelList ? 0 : 1;
         _options = options;
     }
 
@@ -108,7 +110,7 @@ internal sealed class ViewerPayloadWriter
     {
         if (!_options.IncludeViewpoints || states is not { Count: > 0 }) return;
 
-        var linkedKeys = _scene.Models.Skip(1).Select(model => model.Key).ToHashSet(StringComparer.Ordinal);
+        var linkedKeys = _scene.Models.Skip(_firstListedModel).Select(model => model.Key).ToHashSet(StringComparer.Ordinal);
         foreach (var view in _scene.Viewpoints)
         {
             if (view.Id is not { } id || !states.TryGetValue(id, out var state)) continue;
@@ -708,7 +710,7 @@ internal sealed class ViewerPayloadWriter
 
         // An element of a linked model carries the model's path, else its name, as the linked file list shows it.
         var links = new Dictionary<int, string?>();
-        for (int i = 1; i < _scene.Models.Count; i++)
+        for (int i = _firstListedModel; i < _scene.Models.Count; i++)
         {
             var model = _scene.Models[i];
             links.TryAdd(model.Id, string.IsNullOrEmpty(model.Path) ? model.Name : model.Path);
@@ -739,7 +741,8 @@ internal sealed class ViewerPayloadWriter
             if (el.LevelId is int levelId) w.WriteNumber("levelId", levelId);
             // The first model is the default so single-source files do not repeat its ID on every element.
             if (el.ModelId != host?.Id) w.WriteNumber("modelId", el.ModelId);
-            if (host is null || el.ModelId == host.Id || links.GetValueOrDefault(el.ModelId) is not { Length: > 0 } link) w.WriteNull("link");
+            if ((_firstListedModel != 0 && el.ModelId == host?.Id)
+                || links.GetValueOrDefault(el.ModelId) is not { Length: > 0 } link) w.WriteNull("link");
             else w.WriteString("link", link);
             if (!string.IsNullOrEmpty(el.SourceId)) w.WriteString("sourceId", el.SourceId);
             w.WriteEndObject();
@@ -885,20 +888,25 @@ internal sealed class ViewerPayloadWriter
     private void WriteLinkedFiles(Utf8JsonWriter w)
     {
         w.WriteStartArray("linkedFiles");
-        if (_scene.Models.Count < 2)
+        if (_scene.Models.Count <= _firstListedModel)
         {
             w.WriteEndArray();
             return;
         }
         int host = _scene.Models[0].Id;
         var members = _scene.Elements.Select((element, index) => (element.ModelId, index))
-            .Where(member => member.ModelId != host)
+            .Where(member => _firstListedModel == 0 || member.ModelId != host)
             .ToLookup(member => member.ModelId, member => member.index);
-        foreach (var model in _scene.Models.Skip(1))
+        var listed = _scene.Models.Skip(_firstListedModel);
+        var repeatedNames = _firstListedModel == 0
+            ? listed.GroupBy(model => model.Name).Where(group => group.Skip(1).Any()).Select(group => group.Key).ToHashSet()
+            : [];
+        foreach (var model in listed)
         {
             w.WriteStartObject();
             w.WriteString("key", model.Key);
-            w.WriteString("name", model.Name);
+            string name = repeatedNames.Contains(model.Name) ? FormattableString.Invariant($"{model.Name} (#{model.Id})") : model.Name;
+            w.WriteString("name", name);
             w.WriteString("path", model.Path ?? string.Empty);
             w.WriteBoolean("visible", !_hiddenModels.Contains(model.Key));
             WriteIndices(w, "members", members[model.Id]);

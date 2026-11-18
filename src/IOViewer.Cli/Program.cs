@@ -33,6 +33,9 @@ internal static class Program
 
         Options:
           -o, --output <file> Destination path for exported HTML or JSON file.
+          --add <file> --placement <x,y,z,yaw>
+                             Add another model. Translation is in metres and yaw in degrees about +Z.
+                             Repeat the pair for each model. Use 0,0,0,0 for an already aligned source.
           --title <title>     Page title shown in the browser tab.
           --wireframe         Enable wireframe display mode by default.
           --white-mode        Enable white/clay architectural rendering mode by default.
@@ -76,6 +79,7 @@ internal static class Program
         string? outputPath = null;
         string? customTitle = null;
         string? explicitJsonPath = null;
+        var additional = new List<(string Path, Transform3d Placement)>();
         bool wireframe = false;
         bool whiteMode = false;
         bool includeProps = true;
@@ -105,6 +109,16 @@ internal static class Program
                         return 1;
                     }
                     customTitle = args[++i];
+                    break;
+                case "--add":
+                    if (i + 3 >= args.Length || args[i + 1].StartsWith('-') || args[i + 2] != "--placement"
+                        || !SceneFederation.TryParsePlacement(args[i + 3], out var placement))
+                    {
+                        Console.Error.WriteLine("Error: Each --add <file> requires --placement <x,y,z,yaw> with four finite numbers.");
+                        return 1;
+                    }
+                    additional.Add((args[i + 1], placement));
+                    i += 3;
                     break;
                 case "--wireframe":
                     wireframe = true;
@@ -165,29 +179,38 @@ internal static class Program
             Console.Error.WriteLine($"Error: File not found: '{inputPath}'.");
             return 2;
         }
+        foreach (var source in additional)
+        {
+            if (File.Exists(source.Path)) continue;
+            Console.Error.WriteLine($"Error: File not found: '{Printable(source.Path)}'.");
+            return 2;
+        }
 
         outputPath ??= Path.ChangeExtension(inputPath, ".html");
 
         var sw = Stopwatch.StartNew();
         ViewerDocument doc;
-        IReadOnlyList<SceneDiagnostic> diagnostics = [];
+        int adapterCode;
+        string sourcePath = inputPath;
         try
         {
-            string ext = Path.GetExtension(inputPath).ToLowerInvariant();
-            doc = ext switch
+            doc = Load(inputPath, out var diagnostics);
+            adapterCode = ExitCode(diagnostics);
+            if (additional.Count > 0)
             {
-                ".glb" => GlbViewerImporter.Load(inputPath),
-                ".obj" => ObjViewerImporter.Load(inputPath),
-                ".json" => JsonViewerImporter.Load(inputPath),
-                ".ifc" or ".ifczip" => FromIfc(inputPath, out diagnostics),
-                ".rvt" => FromRvt(inputPath, out diagnostics),
-                ".nwc" => FromNwc(inputPath, out diagnostics),
-                _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt, .nwc.")
-            };
+                SceneFederation.SetInputPath(doc.Scene, inputPath);
+                foreach (var source in additional)
+                {
+                    sourcePath = source.Path;
+                    var input = Load(sourcePath, out diagnostics);
+                    SceneFederation.Append(doc, input, sourcePath, source.Placement);
+                    adapterCode = Math.Max(adapterCode, ExitCode(diagnostics));
+                }
+            }
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: Failed to load '{inputPath}': {Printable(ex.Message)}");
+            Console.Error.WriteLine($"Error: Failed to load '{Printable(sourcePath)}': {Printable(ex.Message)}");
             return 3;
         }
 
@@ -248,7 +271,23 @@ internal static class Program
             return 5;
         }
 
-        return ExitCode(diagnostics);
+        return adapterCode;
+    }
+
+    private static ViewerDocument Load(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
+    {
+        diagnostics = [];
+        string ext = Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
+        {
+            ".glb" => GlbViewerImporter.Load(path),
+            ".obj" => ObjViewerImporter.Load(path),
+            ".json" => JsonViewerImporter.Load(path),
+            ".ifc" or ".ifczip" => FromIfc(path, out diagnostics),
+            ".rvt" => FromRvt(path, out diagnostics),
+            ".nwc" => FromNwc(path, out diagnostics),
+            _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt, .nwc.")
+        };
     }
 
     private static ViewerDocument FromIfc(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
