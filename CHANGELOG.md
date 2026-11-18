@@ -21,6 +21,7 @@ API between minor releases.
 - Preview distance measurement points and snap to visible vertices, edge midpoints and edges near the pointer.
 - Use each instance's projected size for orbit detail when the measured frame budget has room.
 - Fill cut faces of closed meshes on demand and rotate the section box around Z with a ring or slider.
+- Compute hard clashes and surface clearances between categories in the CLI with IOCoord, and export the results to HTML or JSON.
 
 ### Fixed
 

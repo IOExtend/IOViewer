@@ -38,12 +38,13 @@ THE SOFTWARE.
 
 ## IOViewer.Cli tool package
 
-The `IOViewer.Cli` tool package reads IFC, Revit and Navisworks cache files through the engine adapters, so besides
+The `IOViewer.Cli` tool package reads IFC, Revit and Navisworks cache files and computes clash results. Besides
 `IOViewer` and `IOScene` (MIT, copyright (c) 2026 mahach666) it ships the assemblies listed below. The `IOViewer`
 library package references none of them.
 
 | Component | Use | License |
 |---|---|---|
+| [IOCoord](https://github.com/IOExtend/IOScene) 0.1.0-preview.1 | hard clash and clearance checks | MIT, copyright (c) 2026 mahach666 |
 | [IfcIO](https://github.com/IOExtend/IfcIO) 0.11.1 and IfcIO.Scene 0.11.1 | read IFC files into a scene | MIT, copyright (c) 2026 IfcIO contributors |
 | [NwcIO](https://github.com/IOExtend/NwcIO) 0.13.0 and NwcIO.Scene 0.13.0 | read Navisworks caches into a scene | MIT, copyright (c) 2026 mahach666 |
 | [RvtIO](https://github.com/IOExtend/RvtIO) 0.4.0 and RvtIO.Scene 0.4.0 | read Revit files into a scene | MIT, copyright (c) 2026 mahach666 |

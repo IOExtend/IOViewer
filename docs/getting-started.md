@@ -37,6 +37,26 @@ The direct `.nwc` command is available in CLI builds from this repository. Publi
 [IOScene JSON handoff](#navisworks-cache) for Navisworks models.
 The CLI reports `.nwd` and `.nwf` as unsupported input formats and exits with code 3.
 
+### Check for clashes
+
+In builds from this repository, pass one `--clash <category-a> <category-b>` rule to check triangle surfaces after
+all input models have been placed. Use the exact category names from the model tree and quote names with spaces.
+You can use the same category on both sides to check distinct elements within it.
+
+```sh
+ioviewer building.ifc --clash IFCWALL IFCSLAB -o hard-clashes.html
+ioviewer building.rvt --clash Walls Floors --clash-clearance 0.05 -o clearances.html
+```
+
+Hard checks report a surface contact point and use the overlap of the contacting mesh bounds to estimate
+penetration depth. The distance is negative for estimated penetration and zero for contacts with zero depth.
+Clearance mode reports the nearest gap at or below the limit in metres, with its midpoint as the result point.
+Touching surfaces report zero gap. For enclosed solids, use the separate `SceneClash.FindSolidContainments`
+query in [IOCoord](https://github.com/IOExtend/IOScene/blob/main/docs/tools.md#clash-checks-revision-comparison-grids-and-bcf).
+
+Open the **Clashes** panel in the HTML, or use `--json` to save the same results in a viewer snapshot. If a
+category is absent, the CLI reports a usage error before writing the output.
+
 ## C# API usage
 
 The model data is a `SceneDocument` from the [IOScene](https://github.com/IOExtend/IOScene) package: models, elements,
