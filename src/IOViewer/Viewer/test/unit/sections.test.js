@@ -1,12 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { boxPlanes, planeFromAxis, isClipped, boxFullyClipped, extentAlong, planeRect, closestOnLine } from '../../src/tools/sectionMath.js';
+import { boxPlanes, planeFromAxis, isClipped, boxFullyClipped, extentAlong, planeRect, closestOnLine, resizeBoxFace } from '../../src/tools/sectionMath.js';
+import { isClosedGeometry } from '../../src/tools/sectionCaps.js';
 import { Sections, MAX_PLANES } from '../../src/tools/sections.js';
 
 const v = (x, y, z) => new THREE.Vector3(x, y, z);
 const box = (min, max) => new THREE.Box3(v(...min), v(...max));
 const model = box([0, 0, 0], [10, 20, 8]); // centre (5, 10, 4)
+
+test('section caps accept a closed shell with face seams and reject a sheet, a missing face and reversed winding', () => {
+  const points = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const faces = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3];
+  const split = Float32Array.from(faces.flatMap((i) => points[i]));
+  const indices = Uint16Array.from(faces.keys());
+  assert.equal(isClosedGeometry(split, indices), true);
+  assert.equal(isClosedGeometry(split, indices.subarray(0, 9)), false);
+  assert.equal(isClosedGeometry(split, indices.subarray(0, 3)), false);
+  [indices[1], indices[2]] = [indices[2], indices[1]];
+  assert.equal(isClosedGeometry(split, indices), false);
+});
 
 // Records what Sections hands to ModelScene.setClipping.
 function fakeScene(elementBoxes = []) {
@@ -129,6 +142,30 @@ test('boxPlanes cutInside: the centre is behind every plane and cut, a point out
   assert.equal(isClipped(centre, planes, intersection), true);
   for (const outside of [v(5, 10, 9), v(-1, 10, 4), v(5, 21, 4)]) assert.equal(isClipped(outside, planes, intersection), false);
   assert.throws(() => boxPlanes(model, 'inside'), RangeError);
+});
+
+test('a rotated box clips and resizes in its local axes about a fixed centre', () => {
+  const bounds = box([3, 1, 5], [9, 3, 9]);
+  const center = bounds.getCenter(v(0, 0, 0));
+  const yaw = Math.PI / 4;
+  const point = (x, y, z) => v(x, y, z).applyAxisAngle(v(0, 0, 1), yaw).add(center);
+  const keep = boxPlanes(bounds, 'keepInside', yaw);
+  const cut = boxPlanes(bounds, 'cutInside', yaw);
+  for (const p of [center, point(2, 0, 0), point(0, 1.1, 0)]) {
+    assert.notEqual(isClipped(p, keep.planes, keep.intersection), isClipped(p, cut.planes, cut.intersection));
+  }
+  assert.equal(isClipped(point(2, 0, 0), keep.planes, keep.intersection), false);
+  assert.equal(isClipped(point(0, 1.1, 0), keep.planes, keep.intersection), true);
+  const resized = resizeBoxFace(bounds, yaw, 'x', 1, 2, 0.01);
+  const after = boxPlanes(resized, 'keepInside', yaw);
+  assert.ok(Math.abs(after.planes[0].distanceToPoint(point(-3, 0, 0))) < 1e-9);
+  assert.ok(Math.abs(after.planes[1].distanceToPoint(point(5, 0, 0))) < 1e-9);
+  const sections = new Sections(fakeScene(), model);
+  sections.setBox(box([-1, -1, -1], [1, 1, 1]), yaw);
+  const outside = box([1.5, -0.5, -0.5], [1.6, 0.5, 0.5]);
+  const { planes, intersection } = sections.clipping();
+  assert.equal(boxFullyClipped(outside, planes, intersection), false);
+  assert.equal(sections.isCut(outside), true);
 });
 
 test('planeFromAxis cuts above the centre plus offset by default; flipped turns the normal round and cuts below', () => {

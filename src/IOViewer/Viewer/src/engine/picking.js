@@ -245,7 +245,7 @@ export class Picker {
     try {
       renderer.setRenderTarget(target);
       renderer.setClearColor(0x000000, 0);
-      this.scene.withMaterial(material, () => renderer.render(this.scene.root, camera), camera);
+      this.scene.withMaterial(material, () => renderer.render(this.scene.root, camera), { pickCamera: camera });
       renderer.readRenderTargetPixels(target, 0, 0, target.width, target.height, pixels);
     } finally {
       renderer.setRenderTarget(previous.target);

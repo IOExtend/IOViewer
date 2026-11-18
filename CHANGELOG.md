@@ -20,6 +20,7 @@ API between minor releases.
 - Import BCF 2.1 topics and open their cameras, clipping and matched components in the offline viewer.
 - Preview distance measurement points and snap to visible vertices, edge midpoints and edges near the pointer.
 - Use each instance's projected size for orbit detail when the measured frame budget has room.
+- Fill cut faces of closed meshes on demand and rotate the section box around Z with a ring or slider.
 
 ### Fixed
 

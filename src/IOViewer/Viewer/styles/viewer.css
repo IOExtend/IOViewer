@@ -759,6 +759,11 @@ input:focus-visible {
   accent-color: var(--accent-text);
 }
 
+.ioviewer-section-row .ioviewer-section-slider {
+  flex: 1;
+  min-width: 0;
+}
+
 .ioviewer-section-empty {
   color: var(--muted);
 }

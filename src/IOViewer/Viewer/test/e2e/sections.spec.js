@@ -71,16 +71,16 @@ const pose = (page) =>
   });
 
 // Client position of a point in the plane gizmo's own frame (Z = normal, unit = arrow length).
-const gizmoAt = (page, local) =>
-  page.evaluate((local) => {
+const gizmoAt = (page, local, boxRing = false) =>
+  page.evaluate(([local, boxRing]) => {
     const { sectionGizmo, camera } = window.__ioviewer;
     camera.updateMatrixWorld();
-    const g = sectionGizmo.planeGizmo;
+    const g = boxRing ? sectionGizmo.boxRing : sectionGizmo.planeGizmo;
     g.updateMatrixWorld(true);
     const p = g.localToWorld(g.position.clone().set(...local)).project(camera);
     const rect = document.getElementById('ioviewer-canvas').getBoundingClientRect();
     return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];
-  }, local);
+  }, [local, boxRing]);
 
 async function drag(page, from, to, steps = 8) {
   await page.mouse.move(...from);
@@ -517,4 +517,107 @@ test('an edge-on section ring rotates smoothly along its screen projection', asy
   }
   await page.mouse.up();
   expect(await pose(page)).toEqual(start);
+});
+
+test('box rotates with its ring and keyboard slider, and resizing keeps its opposite face fixed', async ({ page }) => {
+  const errors = await open(page);
+  await tool(page, 'box').click();
+  await page.mouse.click(...(await cubePoint(page, [0, 0, 1])));
+  await settle(page);
+  const before = await boxNow(page);
+  const camera = await pose(page);
+  const yaw = () => page.evaluate(() => window.__ioviewer.sections.boxYaw);
+  const p = 0.8 * Math.SQRT1_2;
+  const from = await gizmoAt(page, [0.8, 0, 0], true);
+  const to = await gizmoAt(page, [p, p, 0], true);
+  await page.mouse.move(...from);
+  expect(await page.evaluate(() => window.__ioviewer.sectionGizmo._hovered?.name)).toBe('boxRing');
+  await drag(page, from, to);
+  expect(await yaw()).toBeCloseTo(Math.PI / 4, 1);
+  expect(await boxNow(page)).toEqual(before);
+  const slider = panel(page).getByRole('slider', { name: 'Поворот вокруг Z' });
+  await slider.fill('30');
+  await slider.press('ArrowRight');
+  expect(await yaw()).toBeCloseTo(31 * Math.PI / 180, 8);
+  const opposite = await handle(page, 'face-x');
+  const direction = [Math.cos(await yaw()), Math.sin(await yaw()), 0];
+  await dragAlong(page, 'face+x', direction);
+  await frame(page);
+  expect(size(await boxNow(page))[0]).toBeGreaterThan(size(before)[0] + 0.1);
+  (await handle(page, 'face-x')).forEach((value, i) => expect(value).toBeCloseTo(opposite[i], 8));
+  expect(await yaw()).toBeCloseTo(31 * Math.PI / 180, 8);
+  expect(await pose(page)).toEqual(camera);
+  expect(errors).toEqual([]);
+});
+
+for (const instanced of [false, true]) {
+  test(`closed solids fill planes and rotated box faces in both box modes (${instanced ? 'instanced' : 'merged'})`, async ({ page }) => {
+    if (instanced) await page.addInitScript(() => { window.IOVIEWER_TEST = { mergedCap: 0, minRepeats: 1 }; });
+    const errors = await open(page, 'building-no-grids');
+    const index = await indexOf(page, 'Column D2 Level 1');
+    expect(await page.evaluate((i) => {
+      const { scene } = window.__ioviewer;
+      return scene.instance(scene.instancesOf(i)[0]).mesh.isInstancedMesh === true;
+    }, index)).toBe(instanced);
+    await page.evaluate((index) => {
+      const { scene, sections, controls } = window.__ioviewer;
+      scene.isolate([index]);
+      const box = scene.elementBox(index);
+      const center = box.getCenter(box.min.clone());
+      controls.setProjection('orthographic');
+      controls.fitBox(box, false);
+      controls.animateTo({ position: center.clone().add(box.min.clone().set(0, -0.1, 10)), target: center });
+      sections.addPlane('z');
+      sections.updatePlane(0, { offset: center.z - sections.center.z });
+      sections.setGizmoVisible(false);
+    }, index);
+    await page.locator('.ioviewer-rail-button[data-panel="sections"]').click();
+    await settle(page);
+    const fill = panel(page).getByRole('checkbox', { name: 'Заливка срезов' });
+    const center = await screenAt(page, index);
+    const offCenter = await screenAt(page, index, [0.94, 0.5, 0.5]);
+    const capColor = [233, 173, 104];
+    const pixelDistance = (point) => rgb(page, point).then((color) => distance(color, capColor));
+    expect(await pixelDistance(center)).toBeGreaterThan(40);
+    await fill.check();
+    await expect.poll(() => pixelDistance(center)).toBeLessThan(10);
+    const boxSection = (inside) => page.evaluate(([index, inside]) => {
+      const { scene, sections } = window.__ioviewer;
+      const box = scene.elementBox(index);
+      const center = box.getCenter(box.min.clone());
+      const half = box.getSize(box.max.clone()).multiplyScalar(0.23);
+      box.min.set(center.x - half.x, center.y - half.y, inside ? center.z : box.min.z - 1);
+      box.max.set(center.x + half.x, center.y + half.y, inside ? box.max.z + 1 : center.z);
+      sections.setBox(box, Math.PI / 5);
+      sections.setBoxMode(inside ? 'cutInside' : 'keepInside');
+    }, [index, inside]);
+    for (const inside of [false, true]) {
+      await boxSection(inside);
+      await expect.poll(() => pixelDistance(center)).toBeLessThan(10);
+      expect(await pixelDistance(offCenter)).toBeGreaterThan(40);
+      await fill.uncheck();
+      await expect.poll(() => pixelDistance(center)).toBeGreaterThan(40);
+      await fill.check();
+    }
+    await page.evaluate((index) => window.__ioviewer.scene.setVisible([index], false), index);
+    await expect.poll(() => pixelDistance(center)).toBeGreaterThan(40);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('an open surface does not leave a cap on a separate cutting plane', async ({ page }) => {
+  const errors = await open(page, 'measure-snap');
+  await page.evaluate(() => {
+    const { sections, controls } = window.__ioviewer;
+    sections.addPlane('z');
+    sections.setGizmoVisible(false);
+    controls.animateTo({ position: controls.target.clone().add(controls.target.clone().set(0, -0.05, 5)) });
+  });
+  await page.locator('.ioviewer-rail-button[data-panel="sections"]').click();
+  await settle(page);
+  await panel(page).getByRole('checkbox', { name: 'Заливка срезов' }).check();
+  await frame(page);
+  const aboveSheet = await worldAt(page, [0.7, 0.7, 0]);
+  expect(distance(await rgb(page, aboveSheet), [233, 173, 104])).toBeGreaterThan(40);
+  expect(errors).toEqual([]);
 });

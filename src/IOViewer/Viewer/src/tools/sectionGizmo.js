@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MAX_PLANES } from './sections.js';
-import { closestOnLine, planeRect } from './sectionMath.js';
+import { closestOnLine, planeRect, resizeBoxFace } from './sectionMath.js';
 
 const GIZMO_PX = 80; // plane gizmo: arrow length on screen
 const HANDLE_PX = 8; // box handle radius on screen
@@ -29,11 +29,19 @@ function handle(kind, color, visuals, hit) {
   return group;
 }
 
+function ringHandle(name, axis, orient = (geometry) => geometry) {
+  const ring = handle('rotate', COLOR[axis], [orient(new THREE.TorusGeometry(RING_RADIUS, 0.018, 8, 64))],
+    orient(new THREE.TorusGeometry(RING_RADIUS, 0.09, 8, 48)));
+  ring.name = name;
+  ring.userData.axis = axis;
+  return ring;
+}
+
 /**
  * The sections in the scene, kept in `group` (an overlay outside ModelScene.root, so the picking id pass never sees
  * it): a translucent framed rectangle per enabled plane, a gizmo on the active plane (arrow: move along the normal;
  * red/green rings: turn about the plane's own axes), the section box wireframe with a handle on each face and one
- * in the centre (moves the whole box). A press on a handle is taken before NavigationControls sees it; anything else
+ * in the centre (moves the whole box), with a ring to turn around Z. A press on a handle is taken before navigation; anything else
  * (the rectangles included) goes on to orbit and pick. Call update(camera) before each render: handles keep their
  * size on screen. Dispatches 'change' when only the hover highlight changed.
  */
@@ -75,10 +83,12 @@ export class SectionGizmo extends EventTarget {
       this.arrow.visible = this._across(Z.clone().applyQuaternion(gizmo.quaternion), gizmo.position);
     }
     for (const h of this.boxHandles) {
-      const { shown, axis } = h.userData;
-      h.visible = shown && (!axis || this._across(new THREE.Vector3().setComponent(AXIS_KEYS.indexOf(axis), 1), h.position));
+      const { shown, normal } = h.userData;
+      h.visible = shown && (!normal || this._across(normal, h.position));
       if (h.visible) h.scale.setScalar(this._worldPerPixel(h.position) * HANDLE_PX);
     }
+    const ring = this.boxRing;
+    if (ring.visible) ring.scale.setScalar(this._worldPerPixel(ring.position) * GIZMO_PX);
   }
 
   // True when `axis` at `point` is not within 12 degrees of the line of sight.
@@ -109,17 +119,11 @@ export class SectionGizmo extends EventTarget {
       along(new THREE.CylinderGeometry(0.12, 0.12, 1.25), 0.625));
     arrow.name = 'arrow';
     this.arrow = arrow;
-    const ring = (name, axis, turn) => {
-      const r = handle('rotate', COLOR[axis], [turn(new THREE.TorusGeometry(RING_RADIUS, 0.018, 8, 64))], turn(new THREE.TorusGeometry(RING_RADIUS, 0.09, 8, 48)));
-      r.name = name;
-      r.userData.axis = axis;
-      return r;
-    };
     this.planeGizmo = new THREE.Group();
     this.planeGizmo.add(
       arrow,
-      ring('ringX', 'x', (g) => g.rotateY(Math.PI / 2)),
-      ring('ringY', 'y', (g) => g.rotateX(Math.PI / 2)),
+      ringHandle('ringX', 'x', (g) => g.rotateY(Math.PI / 2)),
+      ringHandle('ringY', 'y', (g) => g.rotateX(Math.PI / 2)),
     );
     this.group.add(this.planeGizmo);
   }
@@ -134,14 +138,15 @@ export class SectionGizmo extends EventTarget {
       for (const sign of [-1, 1]) {
         const h = handle('face', COLOR[axis], [sphere], hit);
         h.name = `face${sign > 0 ? '+' : '-'}${axis}`;
-        Object.assign(h.userData, { axis, sign });
+        Object.assign(h.userData, { axis, sign, normal: new THREE.Vector3() });
         this.boxHandles.push(h);
       }
     }
     const centre = handle('centre', COLOR.centre, [new THREE.BoxGeometry(1.4, 1.4, 1.4)], hit);
     centre.name = 'centre';
     this.boxHandles.push(centre);
-    this.group.add(...this.boxHandles);
+    this.boxRing = ringHandle('boxRing', 'z');
+    this.group.add(...this.boxHandles, this.boxRing);
   }
 
   // Places the visuals for the current section state.
@@ -152,6 +157,7 @@ export class SectionGizmo extends EventTarget {
       const plane = s.planes[i];
       visual.visible = planes && !!plane?.enabled;
       if (!visual.visible) return;
+      visual.children[0].visible = !s.fill;
       const rect = planeRect(s.modelBox, plane.quaternion, s.origin(i));
       visual.position.copy(rect.center);
       visual.quaternion.copy(plane.quaternion);
@@ -165,16 +171,21 @@ export class SectionGizmo extends EventTarget {
     }
     const box = s.mode === 'box' ? s.box : null;
     this.boxWire.visible = !!box;
+    this.boxRing.visible = !!box && s.gizmoVisible;
     for (const h of this.boxHandles) h.visible = h.userData.shown = !!box && s.gizmoVisible; // update() refines
     if (box) {
       const centre = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       this.boxWire.position.copy(centre);
       this.boxWire.scale.copy(size).max(new THREE.Vector3(1e-6, 1e-6, 1e-6));
+      this.boxWire.rotation.z = s.boxYaw;
+      this.boxRing.position.copy(centre);
       for (const h of this.boxHandles) {
-        h.position.copy(centre);
-        const { axis, sign } = h.userData;
-        if (axis) h.position[axis] = sign > 0 ? box.max[axis] : box.min[axis];
+        const { axis, sign, normal } = h.userData;
+        if (normal) {
+          normal.set(0, 0, 0).setComponent(AXIS_KEYS.indexOf(axis), sign).applyAxisAngle(Z, s.boxYaw);
+          h.position.copy(centre).addScaledVector(normal, size[axis] / 2);
+        } else h.position.copy(centre);
       }
     }
   }
@@ -207,7 +218,10 @@ export class SectionGizmo extends EventTarget {
     const proxies = [];
     this.group.traverse((o) => o.userData.handle && shown(o) && proxies.push(o));
     this._ray(e);
-    return this._raycaster.intersectObjects(proxies, false)[0] ?? null;
+    const hits = this._raycaster.intersectObjects(proxies, false);
+    // A nearly edge-on box ring can project over a face or the centre handle.
+    return (this.sections.mode === 'box' ? hits.find((hit) => hit.object.userData.handle !== this.boxRing) : null)
+      ?? hits[0] ?? null;
   }
 
   _down(e) {
@@ -228,17 +242,20 @@ export class SectionGizmo extends EventTarget {
   _start(h, ray, point, e) {
     const s = this.sections;
     const { kind } = h.userData;
-    if (kind === 'move' || kind === 'rotate') {
+    if (kind === 'move') {
       const index = s.active;
       const origin = s.origin(index);
-      const quaternion = s.planes[index].quaternion.clone();
-      if (kind === 'move') {
-        const normal = s.normal(index);
-        const s0 = closestOnLine(ray, origin, normal);
-        return s0 === null ? null : { index, origin, normal, offset: s.planes[index].offset, s0 };
-      }
-      const axis = new THREE.Vector3().setComponent(AXIS_KEYS.indexOf(h.userData.axis), 1).applyQuaternion(quaternion);
-      const rotation = { index, origin, quaternion, axis };
+      const normal = s.normal(index);
+      const s0 = closestOnLine(ray, origin, normal);
+      return s0 === null ? null : { index, origin, normal, offset: s.planes[index].offset, s0 };
+    }
+    if (kind === 'rotate') {
+      const index = s.active;
+      const box = h === this.boxRing;
+      const origin = box ? h.position.clone() : s.origin(index);
+      const quaternion = box ? null : s.planes[index].quaternion.clone();
+      const axis = box ? Z : new THREE.Vector3().setComponent(AXIS_KEYS.indexOf(h.userData.axis), 1).applyQuaternion(quaternion);
+      const rotation = { index, origin, quaternion, axis, yaw: box ? s.boxYaw : null };
       if (Math.abs(axis.dot(ray.direction)) < RING_EDGE_SIN) {
         // An edge-on ring projects to a line. The picked side supplies the direction along it.
         const line = axis.clone().cross(ray.direction).normalize();
@@ -253,17 +270,17 @@ export class SectionGizmo extends EventTarget {
       return from ? { ...rotation, plane, from } : null;
     }
     const box = s.box.clone();
+    const yaw = s.boxYaw;
     if (kind === 'face') {
-      const { axis, sign } = h.userData;
-      const normal = new THREE.Vector3().setComponent(AXIS_KEYS.indexOf(axis), sign);
+      const normal = h.userData.normal.clone();
       const at = h.position.clone();
       const s0 = closestOnLine(ray, at, normal);
-      return s0 === null ? null : { box, normal, at, s0 };
+      return s0 === null ? null : { box, yaw, normal, at, s0 };
     }
     const facing = this.camera.getWorldDirection(new THREE.Vector3());
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(facing, box.getCenter(new THREE.Vector3()));
     const from = ray.intersectPlane(plane, new THREE.Vector3());
-    return from ? { box, plane, from } : null;
+    return from ? { box, yaw, plane, from } : null;
   }
 
   _move(e) {
@@ -286,6 +303,7 @@ export class SectionGizmo extends EventTarget {
         if (!to) return;
         angle = Math.atan2(d.axis.dot(new THREE.Vector3().crossVectors(d.from, to)), d.from.dot(to));
       }
+      if (d.yaw !== null) return s.setBoxYaw(d.yaw + angle);
       const quaternion = new THREE.Quaternion().setFromAxisAngle(d.axis, angle).multiply(d.quaternion);
       // Turn about the gizmo point: the plane keeps passing through it.
       const normal = Z.clone().applyQuaternion(quaternion);
@@ -294,15 +312,11 @@ export class SectionGizmo extends EventTarget {
       const along = closestOnLine(ray, d.at, d.normal);
       if (along === null) return;
       const { axis, sign } = d.handle.userData;
-      const box = d.box.clone();
       const least = 1e-3 * Math.max(...s.modelBox.getSize(new THREE.Vector3()).toArray(), 1e-3);
-      const moved = (sign > 0 ? d.box.max[axis] : d.box.min[axis]) + sign * (along - d.s0);
-      if (sign > 0) box.max[axis] = Math.max(moved, box.min[axis] + least);
-      else box.min[axis] = Math.min(moved, box.max[axis] - least);
-      s.setBox(box);
+      s.setBox(resizeBoxFace(d.box, d.yaw, axis, sign, along - d.s0, least), d.yaw);
     } else {
       const to = ray.intersectPlane(d.plane, new THREE.Vector3());
-      if (to) s.setBox(d.box.clone().translate(to.sub(d.from)));
+      if (to) s.setBox(d.box.clone().translate(to.sub(d.from)), d.yaw);
     }
   }
 

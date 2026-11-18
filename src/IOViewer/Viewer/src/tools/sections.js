@@ -22,7 +22,9 @@ export class Sections extends EventTarget {
     this.planes = [];
     this.active = -1; // plane that carries the gizmo
     this.box = null;
+    this.boxYaw = 0;
     this.boxMode = 'keepInside';
+    this.fill = false;
     this.gizmoVisible = true;
     this._mode = 'off';
     if (initial) this.restore(initial);
@@ -39,6 +41,7 @@ export class Sections extends EventTarget {
     });
     this.active = this.planes.length ? 0 : -1;
     this.box = box ? new THREE.Box3(new THREE.Vector3().fromArray(box.min), new THREE.Vector3().fromArray(box.max)) : null;
+    this.boxYaw = 0;
     this.boxMode = cutInside ? 'cutInside' : 'keepInside';
     this.gizmoVisible = false;
     this.setMode(this.box ? 'box' : this.planes.length ? 'planes' : 'off');
@@ -116,11 +119,20 @@ export class Sections extends EventTarget {
     return sectionPlane(this.normal(i), this.center, plane.offset, plane.flipped);
   }
 
-  setBox(box) {
+  // Bounds describe the unrotated dimensions about the box centre. Explicit fits start on the world axes.
+  setBox(box, yaw = 0) {
     if (box.isEmpty()) throw new RangeError('The section box is empty.');
+    yaw = normalizeYaw(yaw);
     this.box = box.clone();
+    this.boxYaw = yaw;
     this._mode = 'box';
     this._changed(true);
+  }
+
+  setBoxYaw(yaw) {
+    if (!this.box) return;
+    this.boxYaw = normalizeYaw(yaw);
+    this._changed(this.mode === 'box');
   }
 
   setBoxMode(mode) {
@@ -153,10 +165,16 @@ export class Sections extends EventTarget {
     this._changed(false);
   }
 
+  setFill(enabled) {
+    this.fill = !!enabled;
+    this._changed(false);
+  }
+
   reset() {
     this.planes = [];
     this.active = -1;
     this.box = null;
+    this.boxYaw = 0;
     this._mode = 'off';
     this._changed(true);
   }
@@ -167,14 +185,24 @@ export class Sections extends EventTarget {
       const planes = this.planes.flatMap((plane, i) => (plane.enabled ? [this.clipPlane(i)] : []));
       return { planes, intersection: false };
     }
-    if (this._mode === 'box' && this.box) return boxPlanes(this.box, this.boxMode);
+    if (this._mode === 'box' && this.box) {
+      const clip = boxPlanes(this.box, this.boxMode, this.boxYaw);
+      if (!clip.intersection && this.boxYaw !== 0) {
+        // The rotated box's axes and the world axes are all the separating axes for this Z-only rotation.
+        const center = this.box.getCenter(new THREE.Vector3());
+        const half = this.box.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+        const c = Math.abs(Math.cos(this.boxYaw)), s = Math.abs(Math.sin(this.boxYaw));
+        half.set(c * half.x + s * half.y, s * half.x + c * half.y, half.z);
+        clip.bounds = new THREE.Box3(center.clone().sub(half), center.add(half));
+      }
+      return clip;
+    }
     return { planes: [], intersection: false };
   }
 
   // True when the current section cuts the whole of `box` (an element's box) away.
-  isCut(box) {
-    const { planes, intersection } = this.clipping();
-    return boxFullyClipped(box, planes, intersection);
+  isCut(box, { planes, intersection, bounds } = this.clipping()) {
+    return (bounds && !box.isEmpty() && !bounds.intersectsBox(box)) || boxFullyClipped(box, planes, intersection);
   }
 
   _plane(i) {
@@ -190,4 +218,9 @@ export class Sections extends EventTarget {
     }
     this.dispatchEvent(new Event('change'));
   }
+}
+
+function normalizeYaw(yaw) {
+  if (!Number.isFinite(yaw)) throw new RangeError('The section box angle must be finite.');
+  return yaw >= -Math.PI && yaw <= Math.PI ? yaw : THREE.MathUtils.euclideanModulo(yaw + Math.PI, 2 * Math.PI) - Math.PI;
 }

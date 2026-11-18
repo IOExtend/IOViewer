@@ -68,7 +68,7 @@ function planeRow(sections, i) {
  * The «Сечения» panel and the section tools: toolbar `plane` / `box` / `resetSections`, context menu
  * «Бокс сечения по объекту» / «Сбросить сечения». Tools and panel stay off for a model with no geometry.
  */
-export function mountSections({ root, shell, toolbar, contextMenu, sections, selection }) {
+export function mountSections({ root, shell, toolbar, contextMenu, sections, selection, canFill }) {
   let axis = 'z'; // axis for new planes, chosen in the panel
   const addPlane = () => {
     if (sections.addPlane(axis) !== null) return;
@@ -97,9 +97,18 @@ export function mountSections({ root, shell, toolbar, contextMenu, sections, sel
   const fit = el('button', 'ioviewer-text-button', t('sections.fitSelection'));
   fit.type = 'button';
   fit.addEventListener('click', fitSelection);
+  const angle = el('input', 'ioviewer-section-slider');
+  Object.assign(angle, { type: 'range', min: '-180', max: '180', step: '1' });
+  angle.addEventListener('input', () => sections.setBoxYaw(Number(angle.value) * Math.PI / 180));
+  const degrees = el('span');
+  degrees.setAttribute('aria-hidden', 'true');
+  const yaw = el('label', 'ioviewer-section-row');
+  yaw.append(el('span', '', t('sections.boxYaw')), angle, degrees);
   const boxBlock = el('div', 'ioviewer-section-block');
-  boxBlock.append(boxMode.element, fit);
+  boxBlock.append(boxMode.element, yaw, fit);
   const gizmo = checkbox(t('sections.showGizmo'), (on) => sections.setGizmoVisible(on));
+  const fill = checkbox(t('sections.fill'), (on) => sections.setFill(on));
+  if (!canFill) fill.element.title = t('sections.fillUnavailable');
 
   let rows = [];
   const update = () => {
@@ -114,7 +123,13 @@ export function mountSections({ root, shell, toolbar, contextMenu, sections, sel
     rows.forEach((r) => r.update());
     empty.hidden = rows.length > 0;
     boxMode.update(sections.boxMode);
+    angle.value = String(Math.round(sections.boxYaw * 180 / Math.PI));
+    degrees.textContent = `${angle.value}°`;
+    angle.setAttribute('aria-valuetext', degrees.textContent);
     gizmo.input.checked = sections.gizmoVisible;
+    fill.input.checked = sections.fill;
+    const cuts = sections.mode === 'box' || (sections.mode === 'planes' && sections.planes.some((plane) => plane.enabled));
+    fill.input.disabled = !canFill || !cuts;
     toolbar.setActive('plane', sections.mode === 'planes');
     toolbar.setActive('box', sections.mode === 'box');
   };
@@ -124,7 +139,7 @@ export function mountSections({ root, shell, toolbar, contextMenu, sections, sel
     icon: icons.sections,
     title: t('panel.sections'),
     visible: !sections.modelBox.isEmpty(),
-    render: (body) => body.append(mode.element, planesBlock, boxBlock, gizmo.element),
+    render: (body) => body.append(mode.element, planesBlock, boxBlock, fill.element, gizmo.element),
   });
   sections.addEventListener('change', update);
   selection.addEventListener('change', updateFit);
