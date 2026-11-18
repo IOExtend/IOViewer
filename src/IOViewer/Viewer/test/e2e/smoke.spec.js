@@ -84,6 +84,58 @@ for (const pickFloat of [true, false]) {
   });
 }
 
+test('adaptive orbit compacts a cell on the GPU and full detail and picking still use every slot', async ({ page }) => {
+  await page.addInitScript(() => { window.IOVIEWER_TEST = { mergedCap: 0, minRepeats: 1, cellExtent: 1 }; });
+  const { errors } = await open(page, 'orbit-detail');
+  const result = await page.evaluate(() => {
+    const { scene, controls, picker } = window.__ioviewer;
+    const { camera, target } = controls;
+    const { renderer } = picker;
+    scene.elementBox(1).getCenter(target);
+    camera.position.copy(target);
+    camera.position.y -= 4;
+    camera.lookAt(target);
+    controls.resize();
+    camera.updateMatrixWorld();
+
+    const coords = [0, 1, 3].map((i) => {
+      const p = scene.elementBox(i).getCenter(target.clone()).project(camera);
+      return [Math.floor((p.x + 1) * innerWidth / 2), Math.floor((1 - p.y) * innerHeight / 2)];
+    });
+    const before = renderer.getRenderTarget();
+    const targetBuffer = new picker._target.constructor(innerWidth, innerHeight);
+    const read = ([x, y]) => {
+      const pixel = new Uint8Array(4);
+      renderer.readRenderTargetPixels(targetBuffer, x, innerHeight - 1 - y, 1, 1, pixel);
+      return Array.from(pixel);
+    };
+    const draw = () => {
+      renderer.setRenderTarget(targetBuffer);
+      renderer.render(scene.root.parent, camera);
+      return { colors: coords.map(read), background: read([0, 0]), stats: scene.drawStats() };
+    };
+    try {
+      const full = draw();
+      scene.setDetail(scene.detailThreshold(camera, innerHeight, 34), innerHeight);
+      const compact = draw();
+      const far = picker.pick(...coords[0])?.element;
+      scene.setDetail(0);
+      return { cells: scene.memory().cells, full, compact, far, restored: draw() };
+    } finally {
+      scene.setDetail(0);
+      renderer.setRenderTarget(before);
+      targetBuffer.dispose();
+    }
+  });
+  expect(result.cells).toBe(1);
+  expect(result.full.colors[0]).not.toEqual(result.full.background);
+  expect(result.compact.colors).toEqual([result.compact.background, ...result.full.colors.slice(1)]);
+  expect(result.compact.stats).toEqual({ drawn: 24, inView: 48, draws: 1 });
+  expect(result.far).toBe(0);
+  expect(result.restored).toEqual(result.full);
+  expect(errors).toEqual([]);
+});
+
 test('empty document shows "no geometry"', async ({ page }) => {
   const { errors, requests } = await open(page, 'empty');
 

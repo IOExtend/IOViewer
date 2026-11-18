@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 const matrix = new THREE.Matrix4();
 const frustum = new THREE.Frustum();
-const BINS = 32; // half-octave bins of the on-screen radius, from 1/16 px up
+export const BINS = 32; // half-octave bins of the on-screen radius, from 1/16 px up
 
 // The camera's six frustum planes as [nx, ny, nz, d] x 6 in `out`; a point p is inside a plane when n·p + d >= 0.
 export function frustumPlanes(camera, out = new Float64Array(24)) {
@@ -16,6 +16,12 @@ export function frustumPlanes(camera, out = new Float64Array(24)) {
 export function outsideFrustum(p, x, y, z, r) {
   for (let k = 0; k < 24; k += 4) if (p[k] * x + p[k + 1] * y + p[k + 2] * z + p[k + 3] < -r) return true;
   return false;
+}
+
+// A containing sphere inside all six planes lets its instances skip their own frustum tests.
+export function insideFrustum(p, x, y, z, r) {
+  for (let k = 0; k < 24; k += 4) if (p[k] * x + p[k + 1] * y + p[k + 2] * z + p[k + 3] < r) return false;
+  return true;
 }
 
 /**
@@ -50,8 +56,16 @@ export function detailThreshold(pixels, cost, budget) {
     const p = pixels[i];
     if (p < 0) continue;
     total += cost[i];
-    bins[31 - Math.clz32(Math.max(1, Math.min(p * p * 256, 0x7fffffff)))] += cost[i]; // octave of (16 p)^2
+    bins[detailBin(p)] += cost[i];
   }
+  return thresholdFromBins(bins, total, budget);
+}
+
+export function detailBin(pixels) {
+  return 31 - Math.clz32(Math.max(1, Math.min(pixels * pixels * 256, 0x7fffffff))); // octave of (16 p)^2
+}
+
+export function thresholdFromBins(bins, total, budget) {
   if (total <= budget) return 0;
   let sum = 0;
   let top = true;

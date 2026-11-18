@@ -8,6 +8,7 @@
 // PERF_PROFILE=1 also writes a CPU profile of each model's whole run; PERF_GPU: see playwright.perf.config.js.
 // PERF_STARTUP_ONLY=1 stops after the first rendered frame and writes only the startup measurements.
 // PERF_PICK_BOUNDS_ONLY=1 compares full-cell and bounded picking with the same fixed camera and pixels.
+// PERF_ORBIT_DETAIL_ONLY=1 compares cell and instance detail from the same camera and triangle budget.
 // After all runs, one table across them is printed and written with every result to <PERF_OUT>/ladder-<label>.{md,json}.
 import { test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -25,6 +26,7 @@ const VARIANTS = list(process.env.PERF_VARIANTS);
 const LABEL = process.env.PERF_LABEL ?? 'run';
 const STARTUP_ONLY = process.env.PERF_STARTUP_ONLY === '1';
 const PICK_BOUNDS_ONLY = process.env.PERF_PICK_BOUNDS_ONLY === '1';
+const ORBIT_DETAIL_ONLY = process.env.PERF_ORBIT_DETAIL_ONLY === '1';
 const ORBIT_MS = 5000;
 const REPO = fileURLToPath(new URL('../../../../../', import.meta.url));
 const LIBRARY = path.join(REPO, 'src', 'IOViewer');
@@ -147,6 +149,7 @@ function orbit(page, ms, zoom, fullDetail = false) {
     controls.resize();
     const deltas = [];
     const drawn = [];
+    const triangles = [];
     const thresholds = [];
     await new Promise((resolve) => {
       let start = 0;
@@ -157,6 +160,7 @@ function orbit(page, ms, zoom, fullDetail = false) {
           deltas.push(now - last);
           const stats = scene.drawStats(); // of the render that ran earlier in this frame
           drawn.push(stats.inView ? stats.drawn / stats.inView : 1);
+          triangles.push(stats.drawn);
           thresholds.push(motionDetail?.minPixels ?? 0);
         }
         const a = (now - last) * 0.0008;
@@ -175,14 +179,16 @@ function orbit(page, ms, zoom, fullDetail = false) {
     camera.position.sub(target).divideScalar(zoom).add(target);
     controls.resize();
     motionDetail.budget = budget;
-    return { deltas, drawn, thresholds };
+    return { deltas, drawn, triangles, thresholds };
   }, { ms, zoom, fullDetail });
 }
 
-const fps = ({ deltas, drawn, thresholds }) => ({
+const fps = ({ deltas, drawn, triangles, thresholds, prepare }) => ({
   frames: deltas.length,
   drawnMedian: median(drawn),
   drawnMin: Math.min(...drawn),
+  trianglesMedian: median(triangles),
+  ...(prepare ? { prepareP95Ms: quantile(prepare, 0.95) } : {}),
   thresholdMedianPx: median(thresholds),
   thresholdMaxPx: Math.max(...thresholds),
   medianFps: 1000 / median(deltas),
@@ -191,6 +197,77 @@ const fps = ({ deltas, drawn, thresholds }) => ({
   p95Ms: quantile(deltas, 0.95),
   maxMs: Math.max(...deltas),
 });
+
+// Read one pixel after each draw so both modes finish the same camera poses independently of display pacing.
+function fixedOrbit(page, start) {
+  return page.evaluate((start) => {
+    const { scene, controls, picker, motionDetail } = window.__ioviewer;
+    const { renderer } = picker;
+    const { camera, target } = controls;
+    const frame = new picker._target.constructor(innerWidth, innerHeight);
+    const previous = renderer.getRenderTarget();
+    const rgba = new Uint8Array(4);
+    const deltas = [], drawn = [], triangles = [], thresholds = [], prepare = [];
+    const x = start[0] - target.x, y = start[1] - target.y;
+    try {
+      renderer.setRenderTarget(frame);
+      for (let i = 0; i < 72; i++) {
+        const angle = i / 72 * 4;
+        camera.position.set(target.x + x * Math.cos(angle) - y * Math.sin(angle),
+          target.y + x * Math.sin(angle) + y * Math.cos(angle), start[2]);
+        camera.lookAt(target);
+        controls.resize();
+        const at = performance.now();
+        const cut = scene.detailThreshold(camera, innerHeight, motionDetail.budget);
+        scene.setDetail(cut, innerHeight);
+        prepare.push(performance.now() - at);
+        renderer.render(scene.root.parent, camera);
+        renderer.readRenderTargetPixels(frame, 0, 0, 1, 1, rgba);
+        scene.setDetail(0);
+        const { drawn: count, inView } = scene.drawStats();
+        deltas.push(performance.now() - at);
+        drawn.push(inView ? count / inView : 1);
+        triangles.push(count);
+        thresholds.push(cut);
+      }
+    } finally {
+      scene.setDetail(0);
+      renderer.setRenderTarget(previous);
+      frame.dispose();
+    }
+    return { deltas, drawn, triangles, thresholds, prepare };
+  }, start);
+}
+
+async function compareOrbitDetail(page) {
+  const start = await page.evaluate(() => {
+    const { scene, controls } = window.__ioviewer;
+    if (typeof scene._instanceDetail !== 'boolean') throw new Error('Export the model with the current viewer bundle.');
+    return controls.camera.position.toArray();
+  });
+  const cases = [
+    ['fixedCell', false, false], ['fixedInstance', true, false],
+    ['adaptiveInstance', true, true], ['adaptiveCell', false, true],
+  ];
+  const result = {};
+  for (const [name, instance, adaptive] of cases) {
+    await page.evaluate(({ start, instance }) => {
+      const { scene, controls } = window.__ioviewer;
+      scene._instanceDetail = instance;
+      controls.camera.position.fromArray(start);
+      controls.camera.lookAt(controls.target);
+      controls.resize();
+    }, { start, instance });
+    await page.evaluate(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const { scene, motionDetail } = window.__ioviewer;
+      motionDetail._cost = 0;
+      motionDetail.budget = Math.min(scene.totalCost, 20e6);
+    });
+    result[name] = fps(await (adaptive ? orbit(page, ORBIT_MS, 1) : fixedOrbit(page, start)));
+  }
+  return result;
+}
 
 // A still frame, 10 times: request a render, 2 animation frames, then a 1-px readPixels so the GPU has finished.
 // Returns the median and slowest time, whether every one was drawn in full, and the draw calls of the last one.
@@ -367,6 +444,7 @@ for (const run of RUNS) {
       }
       save(result);
       if (result.pickBounds) console.log(JSON.stringify({ model: result.model, renderer: result.renderer, ...result.pickBounds }));
+      else if (result.orbitDetail) console.log(JSON.stringify({ model: result.model, renderer: result.renderer, memory: result.memory, ...result.orbitDetail }));
       else if (!STARTUP_ONLY) console.log(table(result));
     };
     if (STARTUP_ONLY) {
@@ -375,6 +453,12 @@ for (const run of RUNS) {
     }
     if (PICK_BOUNDS_ONLY) {
       result.pickBounds = await comparePickBounds(page);
+      await finish();
+      return;
+    }
+    if (ORBIT_DETAIL_ONLY) {
+      result.orbitDetail = await compareOrbitDetail(page);
+      result.memory = await page.evaluate(() => window.__ioviewer.scene.memory());
       await finish();
       return;
     }
@@ -516,6 +600,13 @@ test.afterAll(() => {
         return `${n(sample.p50Ms)} / ${n(sample.p95Ms)}`;
       },
     ])),
+  ] : ORBIT_DETAIL_ONLY ? [
+    ...['fixedCell', 'fixedInstance', 'adaptiveCell', 'adaptiveInstance'].map((mode) => [
+      `${mode} orbit p95 ms / drawn share / median triangles`, (r) => {
+        const sample = r.orbitDetail[mode];
+        return `${n(sample.p95Ms)} / ${n(sample.drawnMedian * 100)} % / ${n(sample.trianglesMedian, 0)}`;
+      },
+    ]),
   ] : [
     ...startupRows,
     ['full-detail still frame ms, median (max of 10)', (r) => still(r.stillFrame)],

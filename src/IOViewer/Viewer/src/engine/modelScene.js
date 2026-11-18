@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ModelDataError } from '../data.js';
-import { detailThreshold, frustumPlanes, outsideFrustum, viewMetrics } from './culling.js';
+import { BINS, detailBin, frustumPlanes, insideFrustum, outsideFrustum, thresholdFromBins, viewMetrics } from './culling.js';
 import { GRID, normalsView, octEncodeInto, positionsView } from './quantize.js';
 import {
   CHUNK_VERTICES, F32, MERGED_CAP, bakeChunk, bakeSource, drawSpan, indexArray, placeSlot, planShapes, prefixByRadius, sortByRadius,
@@ -24,6 +24,7 @@ const CELL_EXTENT = 0.1;
 const MAX_CELLS = 8192; // remainder draws at most
 const INSTANCED_COST = 1.4; // an instanced triangle against a merged one (measured 1.58 / 1.16 ns per triangle)
 const PICK_ROUNDING = 2 ** -20; // conservative float32 error for the shader's short matrix products
+const DETAIL_STRIDE = 17; // a column-major mat4 followed by its original slot
 
 // True when the linear part of instance i (12 floats per instance, columns first) has a negative determinant.
 export function isMirrored(matrices, i) {
@@ -130,6 +131,7 @@ export class ModelScene {
     this._opacity = 1;
     this._picking = false;
     this._pickBounds = true;
+    this._instanceDetail = true;
     this._pickFrustum = null;
     this._textures = new Map();
     this._elementOf = data.view(instances.element).slice(); // own copy: the BIN block is released after load
@@ -320,6 +322,7 @@ export class ModelScene {
       unit.mesh.material = material;
       this._showUnit(unit);
     }
+    for (const unit of this._compactCells) this._cellAttributes(unit, false);
     try {
       return fn();
     } finally {
@@ -333,6 +336,7 @@ export class ModelScene {
         unit.mesh.visible = false;
         if (unit.lines) unit.lines.visible = false;
       }
+      for (const unit of this._compactCells) this._cellAttributes(unit, true);
     }
   }
 
@@ -377,29 +381,101 @@ export class ModelScene {
     this._changed('appearance');
   }
 
-  // While minPixels > 0, renders leave out slots whose bounding sphere is smaller on screen than minPixels (radius, CSS
-  // px, taken at the nearest point of its chunk) in a view `viewHeight` CSS px high; 0 draws everything shown again.
-  // A unit whose largest shown slot is below the cut (as detailThreshold measured it for this frame) is hidden for the
-  // frame, so three skips it whole instead of submitting an empty draw (a few microseconds each, thousands of cells).
+  // Cut below minPixels using the measured instance bounds for cells and the size-ordered span for merged chunks.
+  // A wholly cut unit is hidden before Three submits it. Reset to 0 to restore every shown instance.
   setDetail(minPixels, viewHeight = 1) {
     this._minPixels = minPixels;
     this._viewHeight = viewHeight;
     for (const unit of this._cut) this._showUnit(unit);
     this._cut.length = 0;
+    for (const unit of this._detailCells) unit.detailCount = null;
+    this._detailCells.length = 0;
+    for (const unit of this._compactCells) this._cellAttributes(unit, false);
+    this._compactCells.length = 0;
     const scales = this._unitScale;
-    if (!(minPixels > 0) || !scales) return;
     this._unitScale = null; // measured for this frame only
+    if (!(minPixels > 0) || !scales) return;
     this._cutInView = 0;
     this._cutFrame = null; // the frame that draws with this cut, set by the first unit it draws
     this._units.forEach((unit, u) => {
       if (!(scales[u] >= 0) || unit.shown === 0) return;
       if (unit.dirty) this._span(unit);
-      if (this._slotRadius[unit.slotBase + unit.first] * scales[u] >= minPixels) return;
+      if (unit.cell && this._instanceDetail) {
+        if (unit.detailHigh >= minPixels && this._detailCell(unit, minPixels)) return;
+      } else if (this._slotRadius[unit.slotBase + unit.first] * scales[u] >= minPixels) return;
       unit.mesh.visible = false;
       if (unit.lines) unit.lines.visible = false;
       this._cut.push(unit);
       this._cutInView += unitTriangles(unit, unit.first, unit.last + 1);
     });
+  }
+
+  _detailCell(unit, minPixels) {
+    if (unit.detailLow >= minPixels) {
+      unit.detailCount = Math.min(unit.detailEnd, unit.last + 1);
+      this._detailCells.push(unit);
+      return true;
+    }
+    const { slotBase, last } = unit;
+    const indices = this._detailIndices;
+    let count = 0;
+    let small = false;
+    let compactNeeded = false;
+    for (let j = 0; j <= last; j++) {
+      const pixels = this._pixels[slotBase + j];
+      if (pixels < 0) continue; // WebGL already clips off-screen and hidden holes in a native prefix
+      if (pixels < minPixels) small = true;
+      else {
+        indices[count++] = j;
+        compactNeeded ||= small;
+      }
+    }
+    if (!count) return false;
+    unit.detailCount = compactNeeded ? count : indices[count - 1] + 1;
+    this._detailCells.push(unit);
+    if (!compactNeeded) return true;
+    const compact = (unit.compact ??= this._compactCell(unit.n));
+    const array = compact.buffer.array;
+    let dirty = count > compact.count;
+    for (let j = 0; j < count; j++) {
+      const dst = j * DETAIL_STRIDE;
+      const slot = slotBase + indices[j];
+      if (j < compact.count && array[dst + 16] === slot) continue;
+      const src = indices[j] * 12;
+      for (let c = 0; c < 4; c++) {
+        for (let a = 0; a < 3; a++) array[dst + c * 4 + a] = unit.matrices[src + c * 3 + a];
+      }
+      array[dst + 15] = 1;
+      array[dst + 16] = slot;
+      dirty = true;
+    }
+    compact.count = count;
+    if (dirty) {
+      compact.buffer.clearUpdateRanges();
+      compact.buffer.addUpdateRange(0, count * DETAIL_STRIDE);
+      compact.buffer.needsUpdate = true;
+    }
+    this._cellAttributes(unit, true);
+    this._compactCells.push(unit);
+    return true;
+  }
+
+  _compactCell(capacity) {
+    const buffer = new THREE.InstancedInterleavedBuffer(new Float32Array(capacity * DETAIL_STRIDE), DETAIL_STRIDE);
+    buffer.setUsage(THREE.DynamicDrawUsage);
+    this._detailBytes += buffer.array.byteLength;
+    return {
+      buffer, count: 0,
+      matrix: new THREE.InterleavedBufferAttribute(buffer, 16, 0),
+      slots: new THREE.InterleavedBufferAttribute(buffer, 1, 16),
+    };
+  }
+
+  _cellAttributes(unit, compact) {
+    const matrix = compact ? unit.compact.matrix : unit.matrixAttribute;
+    unit.mesh.instanceMatrix = matrix;
+    if (unit.lines) unit.lines.instanceMatrix = matrix;
+    unit.mesh.geometry.setAttribute('slotBase', compact ? unit.compact.slots : unit.slotAttribute);
   }
 
   // Cost (triangles) of drawing everything.
@@ -415,8 +491,10 @@ export class ModelScene {
     camera.updateMatrixWorld();
     const planes = frustumPlanes(camera, this._planes);
     const view = viewMetrics(camera, viewHeight, this._detailView);
-    const pixels = this._pixels.fill(-1);
+    const pixels = this._pixels;
+    const bins = this._detailBins.fill(0);
     const alpha = this._state.image.data;
+    const box = this._boxes;
     const scales = (this._unitScale = new Float64Array(this._units.length).fill(-1)); // for setDetail
     let visible = 0;
     for (let u = 0; u < this._units.length; u++) {
@@ -426,14 +504,78 @@ export class ModelScene {
       const near = nearDepth(view, s);
       const scale = view[7] ? (near > 0 ? view[6] / near : Infinity) : view[6];
       scales[u] = scale;
-      for (let slot = unit.slotBase; slot < unit.slotBase + unit.n; slot++) {
-        if (alpha[slot * 4 + 3] === 0) continue;
-        pixels[slot] = this._slotRadius[slot] * scale;
-        visible += this._slotCost[slot];
+      const perInstance = unit.cell && this._instanceDetail;
+      const testFrustum = perInstance && !insideFrustum(planes, s[0], s[1], s[2], s[3] + unit.pickPadding);
+      const stop = unit.slotBase + unit.n;
+      let uniform = -1;
+      if (perInstance) {
+        const largest = this._slotRadius[unit.slotBase];
+        const smallest = this._slotRadius[stop - 1];
+        const depth = near + s[3];
+        const extent = Math.abs(view[3]) * s[4] + Math.abs(view[4]) * s[5] + Math.abs(view[5]) * s[6];
+        const nearest = depth - extent - largest;
+        const farthest = depth + extent - smallest;
+        const high = Math.fround(view[7] ? (nearest > 0 ? largest * view[6] / nearest : Infinity) : largest * scale);
+        const low = Math.fround(view[7] ? (farthest > 0 ? smallest * view[6] / farthest : Infinity) : smallest * scale);
+        if (detailBin(low) === detailBin(high)) uniform = high;
+      }
+      // A cell in one bin has one size decision. If its bounds are in view, count its shown slots at once.
+      if (uniform >= 0 && !testFrustum) {
+        unit.detailLow = unit.detailHigh = uniform;
+        unit.detailEnd = unit.n;
+        const cost = this._slotCost[unit.slotBase] * unit.shown;
+        bins[detailBin(uniform)] += cost;
+        visible += cost;
+        continue;
+      }
+      let count = 0;
+      let min = Infinity, max = -1, end = 0;
+      for (let slot = unit.slotBase; slot < stop; slot++) {
+        if (alpha[slot * 4 + 3] === 0) {
+          if (perInstance) pixels[slot] = -1;
+          continue;
+        }
+        const r = this._slotRadius[slot];
+        let slotScale = scale;
+        if (perInstance) {
+          const i = this._slotInstance[slot] * 6;
+          const x = (box[i] + box[i + 3]) * 0.5, y = (box[i + 1] + box[i + 4]) * 0.5, z = (box[i + 2] + box[i + 5]) * 0.5;
+          if (testFrustum && outsideFrustum(planes, x, y, z, r + unit.pickPadding)) {
+            pixels[slot] = -1;
+            continue;
+          }
+          end = slot - unit.slotBase + 1;
+          if (uniform >= 0) {
+            count++;
+            continue;
+          }
+          const depth = (x - view[0]) * view[3] + (y - view[1]) * view[4] + (z - view[2]) * view[5] - r;
+          slotScale = view[7] ? (depth > 0 ? view[6] / depth : Infinity) : view[6];
+        }
+        const size = slotScale === Infinity ? Infinity : Math.fround(r * slotScale);
+        if (perInstance) {
+          pixels[slot] = size;
+          min = Math.min(min, size);
+          max = Math.max(max, size);
+        }
+        const cost = this._slotCost[slot];
+        bins[detailBin(size)] += cost;
+        visible += cost;
+      }
+      if (perInstance) {
+        if (count) {
+          min = max = uniform;
+          const cost = count * this._slotCost[unit.slotBase];
+          bins[detailBin(uniform)] += cost;
+          visible += cost;
+        }
+        unit.detailLow = min;
+        unit.detailHigh = max;
+        unit.detailEnd = end;
       }
     }
     this.visibleCost = visible;
-    return detailThreshold(pixels, this._slotCost, budget);
+    return thresholdFromBins(bins, visible, budget);
   }
 
   // What the latest render drew, in triangles: { drawn, inView, draws } over the units it drew (inView: their shown
@@ -466,7 +608,8 @@ export class ModelScene {
       if (!object?.visible || !frustum.intersectsSphere(sphere.set(sphere.center.fromArray(unit.sphere), unit.sphere[3]))) continue;
       object.onBeforeRender(renderer, null, camera, object.geometry, object.material, null);
       for (let k = unit.first; k < unit.end; k++) {
-        const slot = unit.slotBase + k;
+        const slot = unit.cell && unit.mesh.instanceMatrix === unit.compact?.matrix
+          ? unit.compact.slots.getX(k) : unit.slotBase + k;
         if (this._state.image.data[slot * 4 + 3]) drawn.push(this._slotInstance[slot]);
       }
     }
@@ -477,11 +620,13 @@ export class ModelScene {
   memory() {
     const merged = this._units[this._chunkCount]?.slotBase ?? this._slotInstance.length; // the cells' slots come last
     return {
-      gpuBytes: this._mergedBytes + this._instancedBytes + this._lineBytes + this._stateBytes,
+      gpuBytes: this._mergedBytes + this._instancedBytes + this._lineBytes + this._stateBytes + this._detailBytes,
       mergedBytes: this._mergedBytes,
       instancedBytes: this._instancedBytes,
       stateBytes: this._stateBytes,
       lineBytes: this._lineBytes,
+      detailBytes: this._detailBytes,
+      detailSourceBytes: (this._slotInstance.length - merged) * 48,
       chunks: this._chunkCount,
       cells: this._units.length - this._chunkCount,
       mergedInstances: merged,
@@ -617,6 +762,11 @@ export class ModelScene {
     this._frameViewAt = NaN;
     this._units = [];
     this._cut = []; // units the detail cut hides for the current frame
+    this._detailCells = []; // unit counts changed for this frame
+    this._compactCells = []; // units using a different attribute buffer for this frame
+    this._detailIndices = new Uint16Array(PER_CELL);
+    this._detailBins = new Float64Array(BINS);
+    this._detailBytes = 0;
     this._unitScale = null;
     this._cutInView = 0;
     this._cutFrame = -1;
@@ -729,20 +879,24 @@ export class ModelScene {
     geometry.setAttribute('position', data.q); // unread by the shaders; three builds a wireframe index only with it
     geometry.setAttribute('normal', data.normal);
     if (data.uv) geometry.setAttribute('uv', data.uv);
-    geometry.setAttribute('slotBase', attr(Float32Array.from({ length: n }, (_, j) => slotBase + j), 1, false, THREE.InstancedBufferAttribute));
+    const slotAttribute = attr(Float32Array.from({ length: n }, (_, j) => slotBase + j), 1, false, THREE.InstancedBufferAttribute);
+    geometry.setAttribute('slotBase', slotAttribute);
     geometry.setIndex(data.index);
     const s = chunkSphere(this._boxes, members);
     const sphere = new THREE.Sphere(new THREE.Vector3(s[0], s[1], s[2]), s[3]);
     geometry.boundingSphere = sphere; // set, so three never computes one from the positions
     const mesh = new THREE.InstancedMesh(geometry, bucket.material, 0);
     const m = new Float32Array(n * 16); // three's column-major 4 x 4 from the 3 x 4 columns
+    const sourceMatrices = new Float32Array(n * 12);
     let pickPadding = 0;
     for (let j = 0; j < n; j++) {
       const e = members[j] * 12;
       for (let c = 0; c < 4; c++) {
-        m[j * 16 + c * 4] = matrices[e + c * 3];
-        m[j * 16 + c * 4 + 1] = matrices[e + c * 3 + 1];
-        m[j * 16 + c * 4 + 2] = matrices[e + c * 3 + 2];
+        for (let a = 0; a < 3; a++) {
+          const value = matrices[e + c * 3 + a];
+          m[j * 16 + c * 4 + a] = value;
+          sourceMatrices[j * 12 + c * 3 + a] = value;
+        }
       }
       m[j * 16 + 15] = 1;
       for (let a = e; a < e + 3; a++) {
@@ -758,6 +912,8 @@ export class ModelScene {
     const unit = {
       bucket, mesh, lines: null, slotBase, n, sphere: s, shown: 0, first: 0, last: -1, end: 0, dirty: false,
       cell: true, triangles: data.triangles, lastFrame: -Infinity, pickPadding: Math.sqrt(3) * pickPadding,
+      detailCount: null, detailLow: Infinity, detailHigh: -1, detailEnd: 0,
+      compact: null, matrices: sourceMatrices, matrixAttribute: mesh.instanceMatrix, slotAttribute,
     };
     mesh.onBeforeRender = (renderer, scene, camera) => this._range(unit, renderer, camera, mesh);
     mesh.visible = false;
@@ -860,6 +1016,8 @@ export class ModelScene {
           end--;
         }
       }
+    } else if (unit.cell && unit.detailCount !== null) {
+      end = unit.detailCount;
     } else if (this._minPixels > 0 && end > unit.first) {
       const frame = renderer.info.render.frame;
       if (frame !== this._frameViewAt) {
@@ -1073,7 +1231,7 @@ function nearDepth(view, s) {
   return (s[0] - view[0]) * view[3] + (s[1] - view[1]) * view[4] + (s[2] - view[2]) * view[5] - s[3];
 }
 
-// Sphere (x, y, z, r) around the boxes of the instances: centre of their joint box, radius to its corners.
+// Centre and sphere radius of the joined bounds, followed by the box's half-extents for view-depth bounds.
 function chunkSphere(boxes, members) {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
@@ -1083,5 +1241,6 @@ function chunkSphere(boxes, members) {
       max[a] = Math.max(max[a], boxes[i * 6 + 3 + a]);
     }
   }
-  return Float64Array.of((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2);
+  const x = (max[0] - min[0]) / 2, y = (max[1] - min[1]) / 2, z = (max[2] - min[2]) / 2;
+  return Float64Array.of((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2, Math.hypot(x, y, z), x, y, z);
 }

@@ -70,7 +70,8 @@ for ($trial = 1; $trial -le 3; $trial++) {
 Each `ladder-<label>.json` contains both workloads, with separate `perf-<label>-<model>.json` files for each page.
 Use `readyMs` for navigation to first frame submission, `orbit.p95Ms` and `orbitFull.p95Ms` for the p95 interval
 between animation frames, and `pickMs` for the median pick at the fitted scale. The adaptive orbit reports
-the median share of in-view instances drawn in `orbit.drawnMedian`. `memory.gpuBytes` counts the scene's GPU buffers
+the median share of submitted triangles relative to the full spans of cells and chunks in view in `orbit.drawnMedian`.
+`memory.gpuBytes` counts the scene's GPU buffers
 and slot textures, and `heapMB` samples Chromium's JavaScript heap just after load. Divide byte counts by 1,048,576
 for MiB. The harness's `htmlMB` and `heapMB` fields already use MiB.
 
@@ -134,5 +135,28 @@ Export Synthetic-1M the same way with `--elements 1000000` to reproduce the mill
 
 The median triangle count for Synthetic-400k hits fell from 4,046,612 to 62,948. On Synthetic-1M, with 96 million
 triangles in the model, it fell from 10,339,788 to 159,872. All sample pairs matched.
-Schependomlaan draws only merged chunks, so both runs submitted 247,472 triangles. This change applies to picking.
-Adaptive orbit continues to use its existing detail cut. [Instancing and picking issue](https://github.com/IOExtend/IOViewer/issues/12)
+Schependomlaan draws only merged chunks, so both runs submitted 247,472 triangles. [Instancing and picking issue](https://github.com/IOExtend/IOViewer/issues/12)
+
+## Per-instance orbit detail
+
+Set `PERF_ORBIT_DETAIL_ONLY=1` and run the harness on the current Synthetic-400k, Synthetic-1M and Schependomlaan
+exports. The fixed-budget comparison completes 72 identical camera poses per mode using an offscreen render and a
+one-pixel readback. Both modes get the same budget of up to 20 million weighted triangles. The adaptive comparison
+uses the normal controller and reports animation-frame intervals from the same starting view.
+
+| Workload | GPU | Fixed frame p95, ms, cell / instance | Fixed median triangles, cell / instance | Adaptive frame p95, ms, cell / instance | Adaptive median drawn share, cell / instance |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Synthetic-400k | Radeon | 34.7 / 35.2 | 12.36 M / 12.28 M | 33.5 / 50.3 | 25.5% / 32.0% |
+| Synthetic-1M | Radeon | 26.1 / 24.1 | 7.60 M / 5.27 M | 50.0 / 50.0 | 8.0% / 5.6% |
+| Synthetic-400k | RTX 4080 | 14.0 / 14.2 | 12.36 M / 12.28 M | 16.8 / 33.4 | 100% / 100% |
+| Synthetic-1M | RTX 4080 | 9.2 / 10.9 | 7.60 M / 5.27 M | 33.4 / 33.4 | 56.1% / 100% |
+| Schependomlaan | Radeon | 2.2 / 1.9 | 247,472 / 247,472 | 16.8 / 16.8 | 100% / 100% |
+| Schependomlaan | RTX 4080 | 33.2 / 0.7 | 247,472 / 247,472 | 16.8 / 16.8 | 100% / 100% |
+
+These are single runs per GPU. Both paths submit identical geometry in the merged control, which shows the
+variance in the timed frames. On Synthetic-1M, CPU preparation at fixed budget took 4.7 / 8.7 ms p95 on Radeon
+and 4.3 / 7.1 ms on RTX 4080. More precise selection trades CPU preparation for fewer submitted triangles.
+
+Instance detail keeps 48 bytes of CPU transform data per instanced slot and allocates reusable CPU/GPU draw buffers
+as needed. The Radeon run on Synthetic-1M retained 45.8 MiB of source transforms and allocated 18.8 MiB of compact
+draw data on each side. Read `memory.detailSourceBytes` and `memory.detailBytes` for these totals.
