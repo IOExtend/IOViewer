@@ -11,7 +11,7 @@ import { selectInRect, screenBoxes } from './select/boxSelect.js';
 import { mountUI } from './ui/app.js';
 import { Sections } from './tools/sections.js';
 import { SectionGizmo } from './tools/sectionGizmo.js';
-import { boxFullyClipped } from './tools/sectionMath.js';
+import { SectionCaps } from './tools/sectionCaps.js';
 import { mountSections } from './ui/sectionsPanel.js';
 import { Measure } from './tools/measure.js';
 import { MeasureSnap } from './tools/measureSnap.js';
@@ -38,7 +38,7 @@ function showMessage(text) {
 try {
   const meta = readModelMeta(document, startup);
   if (meta.title) document.title = meta.title;
-  const context = canvas.getContext('webgl2', { antialias: true });
+  const context = canvas.getContext('webgl2', { antialias: true, stencil: true });
   if (context) start(loadModelData(document, startup, meta), context);
   else showMessage(t('noWebGL'));
 } catch (error) {
@@ -48,14 +48,16 @@ try {
 
 function start(data, context) {
   const renderer = new THREE.WebGLRenderer({
-    canvas, context, antialias: true, logarithmicDepthBuffer: needsLogarithmicDepth(data.meta),
+    canvas, context, antialias: true, stencil: true, logarithmicDepthBuffer: needsLogarithmicDepth(data.meta),
   });
   renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.autoClearStencil = false; // the cap pass clears its stencil per face
   renderer.localClippingEnabled = true;
 
   const world = new THREE.Scene();
   const initialBackground = '#1f2228';
-  world.background = new THREE.Color(initialBackground);
+  const background = new THREE.Color(initialBackground);
+  renderer.setClearColor(background, 1);
   const sky = new THREE.HemisphereLight('#ffffff', '#8a8f99', 1.6);
   sky.position.set(0, 0, 1);
   world.add(sky);
@@ -82,6 +84,8 @@ function start(data, context) {
   world.add(scene.root);
   // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
   const sections = new Sections(scene, scene.visibleBox(), data.meta.sections);
+  const canFillSections = context.getContextAttributes()?.stencil === true;
+  let sectionCaps;
   const sectionGizmo = new SectionGizmo(sections, canvas);
   world.add(sectionGizmo.group); // outside scene.root: the picking id pass renders only the model
   const uiRoot = document.getElementById('ioviewer-ui');
@@ -129,7 +133,10 @@ function start(data, context) {
       grids.update(controls.camera, rect);
       motionDetail.begin(controls.camera, rect.height, performance.now());
       firstRender?.('renderStart');
-      renderer.render(world, controls.camera);
+      if (sections.fill && canFillSections) {
+        sectionCaps ??= new SectionCaps(scene, sections, data);
+        sectionCaps.render(renderer, world, controls.camera);
+      } else renderer.render(world, controls.camera);
       if (firstRender) {
         firstRender('renderEnd');
         firstRender = undefined;
@@ -196,7 +203,7 @@ function start(data, context) {
   const selection = new Selection();
   selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
   const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection, measure });
-  mountSections({ root: uiRoot, ...ui, sections, selection });
+  mountSections({ root: uiRoot, ...ui, sections, selection, canFill: canFillSections });
   const { meta } = data;
   const restoreLinkedModels = mountLinks({ ...ui, files: meta.linkedFiles ?? [], elements: meta.elements, scene });
   mountViews({ ...ui, controls, scene, sections, selection, restoreLinkedModels,
@@ -205,7 +212,8 @@ function start(data, context) {
   world.add(clashes.group); // overlay, like the measure
   const timeliner = mountTimeliner({ root: uiRoot, ...ui, timeliner: meta.timeliner, elements: meta.elements, scene });
   const setBackground = (color) => {
-    const { r, g, b } = world.background.set(color);
+    renderer.setClearColor(background.set(color), 1);
+    const { r, g, b } = background;
     // The equality point of the white and black contrast ratios against a linear sRGB background.
     const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     const text = luminance > Math.sqrt(0.0525) - 0.05 ? '#000' : '#fff';
@@ -260,8 +268,8 @@ function start(data, context) {
     }
     const box = new THREE.Box3();
     const found = selectInRect(rect, mode, screenBoxes(scene, controls.camera, canvas.getBoundingClientRect()));
-    const { planes, intersection } = sections.clipping(); // once, not per element
-    const shown = found.filter((i) => !boxFullyClipped(scene.elementBox(i, box), planes, intersection));
+    const clip = sections.clipping(); // once, not per element
+    const shown = found.filter((i) => !sections.isCut(scene.elementBox(i, box), clip));
     selection.set(ctrl ? [...selection.values(), ...shown] : shown);
   });
 

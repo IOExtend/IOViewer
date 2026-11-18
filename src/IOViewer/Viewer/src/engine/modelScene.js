@@ -287,6 +287,10 @@ export class ModelScene {
     return this._slotOf.length;
   }
 
+  get slotCount() {
+    return this._slotInstance.length;
+  }
+
   // Where instance i is drawn (its chunk mesh and slot; null and -1 without vertices) and its element (-1 = none).
   instance(i) {
     const slot = this._slotOf[i];
@@ -310,9 +314,9 @@ export class ModelScene {
     return this._slotInstance[slot];
   }
 
-  // Runs fn with `material` on every chunk's triangles (and triangles shown in wireframe mode), e.g. for picking.
-  withMaterial(material, fn, pickCamera = null) {
-    this._picking = true;
+  // Picking uses every shown triangle. Section stencils use the same ranges as the visible frame.
+  withMaterial(material, fn, { pickCamera = null, section = false } = {}) {
+    this._picking = !section;
     if (pickCamera && this._pickBounds && this._units.length > this._chunkCount) {
       this._pickFrustum = frustumPlanes(pickCamera, this._planes);
       const { x, y, z } = pickCamera.position;
@@ -320,9 +324,12 @@ export class ModelScene {
     }
     for (const unit of this._units) {
       unit.mesh.material = material;
-      this._showUnit(unit);
+      if (section) {
+        unit.mesh.visible = (unit.mesh.visible || !!unit.lines?.visible) && unit.bucket.material.opacity > 0;
+        if (unit.lines) unit.lines.visible = false;
+      } else this._showUnit(unit);
     }
-    for (const unit of this._compactCells) this._cellAttributes(unit, false);
+    if (!section) for (const unit of this._compactCells) this._cellAttributes(unit, false);
     try {
       return fn();
     } finally {
@@ -336,7 +343,7 @@ export class ModelScene {
         unit.mesh.visible = false;
         if (unit.lines) unit.lines.visible = false;
       }
-      for (const unit of this._compactCells) this._cellAttributes(unit, true);
+      if (!section) for (const unit of this._compactCells) this._cellAttributes(unit, true);
     }
   }
 
@@ -379,6 +386,10 @@ export class ModelScene {
     this._opacity = opacity;
     for (const bucket of this._buckets) this._applyOpacity(bucket);
     this._changed('appearance');
+  }
+
+  get opacity() {
+    return this._opacity;
   }
 
   // Cut below minPixels using the measured instance bounds for cells and the size-ordered span for merged chunks.

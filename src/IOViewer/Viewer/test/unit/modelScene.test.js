@@ -403,7 +403,7 @@ test('a pick draws only through the last cell slot intersecting its tile, in ori
     return scene.withMaterial(pick, () => {
       mesh.onBeforeRender(renderer, null, c, mesh.geometry, pick);
       return mesh.count;
-    }, c);
+    }, { pickCamera: c });
   };
   assert.equal(drawCount(0), 1);
   assert.equal(drawCount(4), 2);
@@ -427,7 +427,7 @@ test('the pick tile includes encoded geometry extending beyond the authored boun
   scene.withMaterial(pick, () => {
     mesh.onBeforeRender(renderer, null, c, mesh.geometry, pick);
     assert.equal(mesh.count, 1);
-  }, c);
+  }, { pickCamera: c });
 });
 
 test('orbit compacts visible nearby cell instances while picking and the still frame use all slots', () => {
@@ -447,7 +447,11 @@ test('orbit compacts visible nearby cell instances while picking and the still f
   assert.deepEqual([slots.getX(0), slots.getX(1)], [scene.instance(1).slot, scene.instance(3).slot]);
   assert.equal(mesh.instanceMatrix.data.array[17 + 12], 2);
   const pick = new THREE.MeshBasicMaterial();
-  scene.withMaterial(pick, () => assert.equal(mesh.instanceMatrix, nativeMatrix), c);
+  scene.withMaterial(pick, () => {
+    assert.ok(mesh.visible);
+    assert.equal(mesh.geometry.getAttribute('slotBase'), slots);
+  }, { section: true });
+  scene.withMaterial(pick, () => assert.equal(mesh.instanceMatrix, nativeMatrix), { pickCamera: c });
   assert.equal(mesh.geometry.getAttribute('slotBase'), slots);
   scene.setDetail(0);
   assert.equal(mesh.instanceMatrix, nativeMatrix);
@@ -497,7 +501,7 @@ test('a unit the detail cut leaves empty is hidden for that frame, counted in vi
     assert.ok(small.visible);
     small.onBeforeRender({ info: { render: { frame: 8 } } }, null, c, small.geometry, pick);
     assert.equal(small.geometry.drawRange.count, 36);
-  }, c);
+  }, { pickCamera: c });
   assert.equal(small.visible, false);
   assert.deepEqual(scene.drawStats(), { drawn: 12, inView: 24, draws: 1 });
   scene.setDetail(0);

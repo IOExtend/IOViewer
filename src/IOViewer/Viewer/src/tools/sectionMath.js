@@ -34,7 +34,7 @@ export function planeFromAxis(axis, box, offset, flipped) {
  * them is cut). cutInside: the same planes turned to face out, intersection (cut only what is inside all six):
  * with the inward planes an intersection would cut only points outside every face, which a box has none of.
  */
-export function boxPlanes(box, mode) {
+export function boxPlanes(box, mode, yaw = 0) {
   if (mode !== 'keepInside' && mode !== 'cutInside') throw new RangeError(`Unknown box mode: ${mode}`);
   const { min, max } = box;
   const inward = [
@@ -45,8 +45,29 @@ export function boxPlanes(box, mode) {
     new THREE.Plane(new THREE.Vector3(0, 0, 1), -min.z),
     new THREE.Plane(new THREE.Vector3(0, 0, -1), max.z),
   ];
+  if (yaw !== 0) {
+    const center = box.getCenter(new THREE.Vector3());
+    for (const plane of inward) {
+      const distance = plane.distanceToPoint(center);
+      plane.normal.applyAxisAngle(AXES.z, yaw);
+      plane.constant = distance - plane.normal.dot(center);
+    }
+  }
   if (mode === 'keepInside') return { planes: inward, intersection: false };
   return { planes: inward.map((plane) => plane.negate()), intersection: true };
+}
+
+// A box rotated about Z retains its centre. In box axes, changing one side moves the midpoint; map that shift
+// to world axes so the opposite face remains in place.
+export function resizeBoxFace(box, yaw, axis, sign, offset, minimum) {
+  const resized = box.clone();
+  if (sign > 0) resized.max[axis] = Math.max(box.max[axis] + offset, box.min[axis] + minimum);
+  else resized.min[axis] = Math.min(box.min[axis] - offset, box.max[axis] - minimum);
+  if (yaw !== 0) {
+    const shift = resized.getCenter(new THREE.Vector3()).sub(box.getCenter(new THREE.Vector3()));
+    resized.translate(shift.clone().applyAxisAngle(AXES.z, yaw).sub(shift));
+  }
+  return resized;
 }
 
 function corners(box) {

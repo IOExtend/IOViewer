@@ -130,3 +130,10 @@ The model's up axis is +Z. The interface is in Russian when the browser language
 - H hides the selection, I isolates it, Shift+H shows everything, F zooms to the selection (or fits the model), Esc
   stops the viewpoint tour, closes the open menu or popup, clears the measurement, or clears the selection. Each
   Esc press handles one action.
+
+In the **Sections** panel, enable **Fill cut faces** to fill the cross-sections of consistently wound, closed meshes.
+The fill is visual. Picking and measurement continue to use model triangles. Large models take extra work while
+fill is enabled.
+
+Turn a section box around Z with the blue ring or the **Rotation around Z** slider. Face handles resize along the
+box's rotated axes. Fitting a new box or restoring a saved section starts from its axis-aligned bounds.

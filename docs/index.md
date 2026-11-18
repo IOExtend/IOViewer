@@ -15,7 +15,7 @@ The generated HTML is a single file with no external dependencies that works off
 - **Large models**: geometry merged into spatial chunks per material with few draw calls; hiding, selection and colouring are per-object data, not geometry rebuilds.
 - **Navigation**: orbit around the point under the cursor, pan with the middle or right button, zoom to the cursor, perspective or orthographic camera, and a view cube that follows the camera.
 - **Selection**: click, Ctrl+click, window and crossing box selection, context menu, hotkeys (H, I, Shift+H, F, Esc), model tree by category with search and a properties panel.
-- **Sections**: up to six section planes moved and rotated with an in-scene gizmo, or a section box that keeps or cuts its inside, with face handles and a box around the selection.
+- **Sections**: up to six section planes or a section box that rotates around Z and keeps or cuts its inside. Fill cut faces of closed meshes on demand.
 - **Tools**: point-to-point distance, display modes (materials, textures, white, wireframe), grid lines and global opacity.
 - **Coordination data**: saved viewpoints and a viewpoint tour, clash results, a 4D schedule player and linked-file visibility.
 - **Russian and English interface**, chosen from the browser language.
