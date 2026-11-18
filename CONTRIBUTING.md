@@ -83,6 +83,12 @@ fails when it differs from the committed file. The end-to-end tests need the
 .NET SDK and a Chromium for Playwright (`npx playwright install chromium`).
 Fixtures are in `tests/fixtures/viewer`.
 
+CI also runs the smoke, selection and section tests in Firefox and builds `tests/fixtures/viewer/generate-fixtures.cs`
+and `tools/SyntheticModel/SyntheticModel.cs`. To run the Firefox project locally, build the viewer, install Firefox
+with `npx playwright install firefox` and run `npx playwright test --project=firefox`. On Linux, install browser
+system dependencies with `npx playwright install --with-deps chromium firefox` and prefix the Firefox command with
+`xvfb-run -a` on machines without a display.
+
 `npm run perf` runs the manual performance harness in a visible Chromium
 window (for example `PERF_LADDER=25000,200000` measures synthetic models made
 by `tools/SyntheticModel`); its settings are described at the top of
