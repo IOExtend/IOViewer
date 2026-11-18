@@ -3,6 +3,8 @@ using IOViewer.Cli;
 using IOViewer.Exporters;
 using IOViewer.Importers;
 using IOViewer.Model;
+using NwcIO;
+using NwcIO.Model;
 using RvtIO.Scene;
 using Xunit;
 
@@ -404,6 +406,59 @@ public class ModelAndCliIntegrationTests
             {
                 if (File.Exists(file)) File.Delete(file);
             }
+        }
+    }
+
+    [Fact]
+    public void Cli_ConvertNwcToHtml_ReadsTheModelThroughNwcIO()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.nwc");
+        string html = Path.ChangeExtension(input, ".html");
+        string json = Path.ChangeExtension(input, ".json");
+        try
+        {
+            var root = new NwcNode { Id = 0, Name = "Model", Class = "Model" };
+            root.Children.Add(new NwcNode { Id = 1, Name = "Test layer", Class = "LcRevitLayer", Tag = 52, Parent = root });
+            NwcDocument.Create(
+                new NwcFileInfo { LoaderPlugin = "LcNwcLoaderPlugin:lcldrevit" }, rootNode: root).Save(input);
+
+            Assert.Equal(0, Program.Main([input, "--json", json]));
+            var scene = JsonViewerImporter.Load(json).Scene;
+            Assert.Empty(scene.Validate());
+            Assert.Equal(Path.GetFileName(input), Assert.Single(scene.Models).Key);
+            Assert.Contains(scene.Elements, element => element.Name == "Test layer");
+            Assert.True(File.Exists(html));
+        }
+        finally
+        {
+            File.Delete(input);
+            File.Delete(html);
+            File.Delete(json);
+        }
+    }
+
+    [Fact]
+    public void Cli_MalformedNwc_ReportsLoadFailureWithoutWritingHtml()
+    {
+        string input = Path.Combine(Path.GetTempPath(), $"test_model_{Guid.NewGuid():N}.nwc");
+        string html = Path.ChangeExtension(input, ".html");
+        using var errors = new StringWriter();
+        var originalError = Console.Error;
+        try
+        {
+            File.WriteAllText(input, "invalid Navisworks input");
+            Console.SetError(errors);
+
+            Assert.Equal(3, Program.Main([input]));
+            Assert.Contains("Error: Failed to load", errors.ToString());
+            Assert.DoesNotContain("Unsupported input file extension", errors.ToString());
+            Assert.False(File.Exists(html));
+        }
+        finally
+        {
+            Console.SetError(originalError);
+            File.Delete(input);
+            File.Delete(html);
         }
     }
 

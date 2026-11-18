@@ -6,6 +6,10 @@ API between minor releases.
 
 ## [Unreleased]
 
+### Added
+
+- `ioviewer` reads Navisworks `.nwc` caches through `NwcIO.Scene` 0.13.0.
+
 ## [0.3.1] - 2026-11-13
 
 ### Fixed
