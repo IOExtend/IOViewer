@@ -27,13 +27,41 @@ The model data is the IOScene scene model, referenced by the `IOViewer` package.
 ### Viewer document (`IOViewer.Model`)
 
 - `ViewerDocument`: a `Scene` plus what only the viewer uses: `SectionPlanes`, `SectionBox` and `HiddenModelKeys`, the
-  keys of the linked models hidden at start. `Title` reads and writes `Scene.Title`.
+  keys of the linked models hidden at start. `ViewpointStates` adds optional state to saved cameras. `Title` reads and
+  writes `Scene.Title`.
 - `ViewerSectionPlane`: Cutting plane defined by axis or custom normal. `Offset` is the signed distance in metres
   from the scene origin along its unit normal. By default the plane cuts the side the normal points to. `Inverted`
   cuts the opposite side.
 - `ViewerSectionBox`: 6-sided clipping volume in scene coordinates. `Inverted` cuts inside the box.
   Exported HTML opens in box mode when the box is enabled, or in planes mode with the first six enabled planes.
   Both are available if the document supplies both. Editing handles start hidden.
+
+#### Saved viewpoint state
+
+Use a unique `SceneViewpoint.Id` and the same key in `ViewerDocument.ViewpointStates`. A `ViewerViewpointState` can
+restore clipping, element visibility and linked-file checkboxes. The view list and the tour apply the same state.
+
+```csharp
+doc.Scene.Viewpoints.Add(new SceneViewpoint
+{
+    Id = "mep-review",
+    Name = "MEP review",
+    Camera = new SceneCamera { Position = new(8, -12, 6), Target = new(0, 0, 2) },
+});
+doc.ViewpointStates["mep-review"] = new ViewerViewpointState
+{
+    SectionPlanes = [new ViewerSectionPlane(ViewerSectionAxis.Z, 4)],
+    HiddenElementIds = [42],
+    HiddenModelKeys = ["structure.rvt"],
+};
+```
+
+IDs refer to `SceneElement.Id`, and linked models use `SceneModel.Key`. The example assumes element `42` and linked
+model `structure.rvt` already exist in the scene. Each supplied list replaces its layer. Use an empty list to clear
+its hides, or `null` to preserve the current layer. Use `SectionPlanes = []` with no box to clear clipping, or leave
+both clipping properties null to keep it. An enabled section box takes priority over the planes. The 4D schedule
+continues to control its own layer. Viewer JSON keeps the state, and old camera-only views preserve current clipping
+and visibility.
 
 ### Exporters (`IOViewer.Exporters`)
 

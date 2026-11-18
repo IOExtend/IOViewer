@@ -41,6 +41,9 @@ public sealed class ViewerDocument
     /// </summary>
     public List<string> HiddenModelKeys { get; set; } = [];
 
+    /// <summary>Optional viewer state keyed by a unique, non-null <see cref="SceneViewpoint.Id"/> in this scene.</summary>
+    public Dictionary<string, ViewerViewpointState> ViewpointStates { get; set; } = [];
+
     /// <summary>Title of the scene: reads and writes <see cref="SceneDocument.Title"/>.</summary>
     [JsonIgnore]
     public string Title

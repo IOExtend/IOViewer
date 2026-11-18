@@ -11,6 +11,8 @@ API between minor releases.
 - `ioviewer` reads Navisworks `.nwc` caches through `NwcIO.Scene` 0.13.0.
 - Standalone HTML opens with the section box or cutting planes saved in `ViewerDocument`.
 - Change or reset the viewport background color from the display menu.
+- Saved viewpoints can restore clipping, hidden elements and linked-file checkboxes. The viewpoint list and the
+  tour both use the saved state.
 
 ### Fixed
 

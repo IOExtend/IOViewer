@@ -19,12 +19,15 @@ export function rowButton(className, text) {
  * projection becomes orthographic only for a viewpoint marked so). «Тур по видам» flies through all of them in turn,
  * pausing 3 s at each, round and round, until stopped by its button or by any press, wheel or key.
  */
-export function mountViews({ shell, toolbar, controls, views }) {
+export function mountViews({ shell, toolbar, controls, scene, sections, restoreLinkedModels, views }) {
   let tour = null; // { next, frame, timer }
   const tourButton = el('button', 'ioviewer-text-button ioviewer-tour');
   tourButton.type = 'button';
 
   function go(view) {
+    if (view.sections != null) sections.restore(view.sections);
+    if (view.hiddenElements != null) scene.setHiddenElements(view.hiddenElements);
+    if (view.hiddenModelKeys != null) restoreLinkedModels(view.hiddenModelKeys);
     const orthographic = view.camera.projection === 'orthographic';
     controls.setProjection(orthographic ? 'orthographic' : 'perspective');
     toolbar.setActive('projection', orthographic);

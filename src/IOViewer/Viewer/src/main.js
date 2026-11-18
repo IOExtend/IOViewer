@@ -164,11 +164,11 @@ function start(data, context) {
   const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection, measure });
   mountSections({ root: uiRoot, ...ui, sections, selection });
   const { meta } = data;
-  mountViews({ ...ui, controls, views: meta.viewpoints ?? [] });
+  const restoreLinkedModels = mountLinks({ ...ui, files: meta.linkedFiles ?? [], elements: meta.elements, scene });
+  mountViews({ ...ui, controls, scene, sections, restoreLinkedModels, views: meta.viewpoints ?? [] });
   const clashes = mountClashes({ ...ui, tests: meta.clashTests ?? [], elements: meta.elements, scene, controls, selection });
   world.add(clashes.group); // overlay, like the measure
   const timeliner = mountTimeliner({ root: uiRoot, ...ui, timeliner: meta.timeliner, elements: meta.elements, scene });
-  mountLinks({ ...ui, files: meta.linkedFiles ?? [], elements: meta.elements, scene });
   const setBackground = (color) => {
     const { r, g, b } = world.background.set(color);
     // The equality point of the white and black contrast ratios against a linear sRGB background.

@@ -45,6 +45,12 @@ const records = (value) => Array.isArray(value) && value.every(object);
 const vector = (value) => Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number');
 const box = (value) => object(value) && vector(value.min) && vector(value.max);
 
+const sectionState = (state) => state == null || (object(state) && records(state.planes)
+  && state.planes.every((plane) => vector(plane.normal) && plane.normal.every(Number.isFinite)
+    && plane.normal.some((value) => value !== 0) && Number.isFinite(plane.offset))
+  && (state.box == null || (box(state.box) && state.box.max.every(Number.isFinite)
+    && state.box.min.every((value, i) => Number.isFinite(value) && value <= state.box.max[i]))));
+
 function validateMeta(meta) {
   if (!object(meta) || !records(meta.elements) || !records(meta.geometries) || !records(meta.materials) || !object(meta.instances)) {
     throw new ModelDataError('META must describe elements, geometries, materials and instances.');
@@ -80,17 +86,18 @@ function validateMeta(meta) {
       throw new ModelDataError('Invalid META material.');
     }
   }
+  const elementIndices = (values) => values == null || (Array.isArray(values) &&
+    values.every((i) => Number.isInteger(i) && i >= 0 && i < meta.elements.length));
   if (meta.grids?.some((grid) => !vector(grid.start) || !vector(grid.end))
-    || meta.viewpoints?.some((view) => !vector(view.camera?.position) || !vector(view.camera?.target))
+    || meta.viewpoints?.some((view) => !vector(view.camera?.position) || !vector(view.camera?.target)
+      || !sectionState(view.sections) || !elementIndices(view.hiddenElements)
+      || (view.hiddenModelKeys != null && (!Array.isArray(view.hiddenModelKeys) ||
+        !view.hiddenModelKeys.every((key) => typeof key === 'string'))))
     || meta.clashTests?.some((test) => !records(test.clashes) || test.clashes.some((clash) => !vector(clash.point)))) {
     throw new ModelDataError('Invalid META grids, viewpoints or clashes.');
   }
-  const { sections } = meta;
-  if (sections != null && (!object(sections) || !records(sections.planes)
-    || sections.planes.some((plane) => !vector(plane.normal) || typeof plane.offset !== 'number')
-    || (sections.box != null && !box(sections.box)))) {
-    throw new ModelDataError('Invalid META sections.');
-  }
+  if (meta.linkedFiles?.some((file) => !elementIndices(file.members))) throw new ModelDataError('Invalid META linked file members.');
+  if (!sectionState(meta.sections)) throw new ModelDataError('Invalid META sections.');
 }
 
 export function readModelMeta(doc = document, startup) {

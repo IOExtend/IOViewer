@@ -977,6 +977,89 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
+    public void Viewpoints_WriteSectionsAndResolveElementAndLinkedModelReferences()
+    {
+        var doc = GeoreferencedModel();
+        const long elementId = 9007199254740993;
+        doc.Scene.Elements.Add(new SceneElement { Id = elementId, ModelId = 2, Name = "Linked column" });
+        doc.Scene.Models.Add(new SceneModel { Id = 3, Key = "other.rvt", Name = "Structure", Path = "structure.rvt" });
+        doc.Scene.Elements.Add(new SceneElement { Id = 102, ModelId = 3, Name = "Other column" });
+        doc.Scene.Viewpoints[0].Id = "section";
+        doc.Scene.Viewpoints.Add(new SceneViewpoint { Id = "box", Name = "Other" });
+        doc.Scene.Viewpoints.Add(new SceneViewpoint { Id = "clear", Name = "Other" });
+        doc.Scene.Viewpoints.Add(new SceneViewpoint { Name = "Camera only" });
+        doc.ViewpointStates["section"] = new()
+        {
+            SectionPlanes = [new ViewerSectionPlane(ViewerSectionAxis.X, OffsetX + 7, inverted: true)],
+            HiddenElementIds = [elementId],
+            HiddenModelKeys = ["other.rvt"],
+        };
+        doc.ViewpointStates["box"] = new()
+        {
+            SectionBox = new ViewerSectionBox(new(OffsetX + 2, OffsetY + 3, -1), new(OffsetX + 8, OffsetY + 10, 2), inverted: true),
+            HiddenElementIds = [],
+        };
+        doc.ViewpointStates["clear"] = new() { SectionPlanes = [] };
+
+        var meta = ViewerHtml.Export(doc).Meta;
+        var views = meta.GetProperty("viewpoints");
+        var plane = views[0].GetProperty("sections").GetProperty("planes")[0];
+        Assert.Equal(2, plane.GetProperty("offset").GetDouble());
+        Assert.True(plane.GetProperty("flipped").GetBoolean());
+        Assert.Equal(1, views[0].GetProperty("hiddenElements")[0].GetInt32());
+        Assert.Equal("other.rvt", views[0].GetProperty("hiddenModelKeys")[0].GetString());
+        var box = views[1].GetProperty("sections");
+        Assert.Equal([-3, -4.5, -1], Vec(box.GetProperty("box").GetProperty("min")));
+        Assert.True(box.GetProperty("cutInside").GetBoolean());
+        Assert.Equal(0, views[1].GetProperty("hiddenElements").GetArrayLength());
+        Assert.False(views[1].TryGetProperty("hiddenModelKeys", out _));
+        Assert.Equal(0, views[2].GetProperty("sections").GetProperty("planes").GetArrayLength());
+        Assert.False(views[3].TryGetProperty("sections", out _));
+        Assert.False(meta.TryGetProperty("sections", out _));
+
+        var links = meta.GetProperty("linkedFiles");
+        Assert.Equal("structure.rvt", links[0].GetProperty("key").GetString());
+        Assert.Equal(1, links[0].GetProperty("members")[0].GetInt32());
+        Assert.Equal(2, links[1].GetProperty("members")[0].GetInt32());
+        Assert.Equal(0, ViewerHtml.Export(doc, new HtmlViewerOptions { IncludeViewpoints = false })
+            .Meta.GetProperty("viewpoints").GetArrayLength());
+    }
+
+    [Theory]
+    [InlineData("camera", "no saved camera")]
+    [InlineData("duplicate", "more than one saved camera")]
+    [InlineData("element", "unknown element 404")]
+    [InlineData("model", "unknown linked model or the host")]
+    [InlineData("section", "offset must be finite")]
+    public void Viewpoints_RejectInvalidStateBeforeWriting(string invalid, string message)
+    {
+        var doc = GeoreferencedModel();
+        doc.Scene.Viewpoints[0].Id = "view";
+        var state = new ViewerViewpointState();
+        doc.ViewpointStates[invalid == "camera" ? "missing" : "view"] = state;
+        switch (invalid)
+        {
+            case "duplicate":
+                doc.Scene.Viewpoints.Add(new SceneViewpoint { Id = "view" });
+                break;
+            case "element":
+                state.HiddenElementIds = [404];
+                break;
+            case "model":
+                state.HiddenModelKeys = ["center"];
+                break;
+            case "section":
+                state.SectionPlanes = [new ViewerSectionPlane(ViewerSectionAxis.Z, double.PositiveInfinity)];
+                break;
+        }
+
+        using var output = new MemoryStream();
+        var error = Assert.Throws<InvalidDataException>(() => HtmlViewerExporter.Export(doc, output));
+        Assert.Contains(message, error.Message);
+        Assert.Equal(0, output.Length);
+    }
+
+    [Fact]
     public void Export_200kElements_DoesNotBuildWholeString()
     {
         const int count = 200_000;

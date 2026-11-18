@@ -55,7 +55,31 @@ public class JsonAndImportTests
         Assert.Equal((ViewerSectionAxis.Z, Vector3d.UnitZ, 2.5, true, true), (plane.Axis, plane.Normal, plane.Offset, plane.Enabled, plane.Inverted));
         Assert.Equal((new Vector3d(-1, -2, -3), new Vector3d(4, 5, 6), false), (imported.SectionBox!.Min, imported.SectionBox.Max, imported.SectionBox.Enabled));
         Assert.Equal(["mep.rvt"], imported.HiddenModelKeys);
+        Assert.Empty(imported.ViewpointStates);
         Assert.Contains("\"SectionBox\": {\n    \"Min\": [\n      -1,", json.ReplaceLineEndings("\n"), StringComparison.Ordinal); // vectors are arrays
+    }
+
+    [Fact]
+    public void ViewerJson_RoundTripsOptionalViewpointState()
+    {
+        var doc = SampleDocument();
+        doc.Scene.Viewpoints.Add(new SceneViewpoint { Id = "review", Name = "Review" });
+        doc.ViewpointStates.Add("review", new ViewerViewpointState
+        {
+            SectionPlanes = [],
+            SectionBox = new ViewerSectionBox(new(1, 2, 3), new(4, 5, 6)),
+            HiddenElementIds = [1],
+        });
+
+        using var output = new MemoryStream();
+        JsonViewerExporter.Export(doc, output);
+        output.Position = 0;
+        var restored = JsonViewerImporter.Load(output).ViewpointStates["review"];
+        Assert.NotNull(restored.SectionPlanes);
+        Assert.Empty(restored.SectionPlanes);
+        Assert.Equal(new Vector3d(1, 2, 3), restored.SectionBox!.Min);
+        Assert.Equal([1L], restored.HiddenElementIds);
+        Assert.Null(restored.HiddenModelKeys);
     }
 
     [Fact]
