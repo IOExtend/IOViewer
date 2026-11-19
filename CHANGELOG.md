@@ -8,6 +8,7 @@ API between minor releases.
 
 ### Added
 
+- Direct `.rvt` imports include building storeys and straight, circular and multi-segment grid axes through `RvtIO.Scene` 0.5.1.
 - `ioviewer` reads Navisworks `.nwc` caches through `NwcIO.Scene` 0.13.0.
 - Standalone HTML opens with the section box or cutting planes saved in `ViewerDocument`.
 - Change or reset the viewport background color from the display menu.
