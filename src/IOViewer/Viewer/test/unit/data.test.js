@@ -17,6 +17,14 @@ const emptyMeta = {
 };
 const emptyMetaBlock = { textContent: JSON.stringify(emptyMeta) };
 
+test('accepts ordered grid paths and requires at least two finite points', () => {
+  const read = (grids) => readModelMeta({ getElementById: () => ({ textContent: JSON.stringify({ ...emptyMeta, grids }) }) });
+  const grids = [{ start: [0, 0, 0], end: [1, 0, 0] }, { points: [[0, 0, 0], [1, 1, 0], [2, 1, 0]] }];
+  assert.deepEqual(read(grids).grids, grids);
+  assert.throws(() => read([{ points: [[0, 0, 0]] }]), ModelDataError);
+  assert.throws(() => read([{ points: [[0, 0, 0], [1, 0, null]] }]), ModelDataError);
+});
+
 test('accepts optional source identity and rejects malformed model or level keys', () => {
   const read = (meta) => readModelMeta({ getElementById: () => ({ textContent: JSON.stringify(meta) }) });
   const meta = { ...emptyMeta, models: [{ id: 0, name: 'Architecture' }], elements: [{ levelId: 4 }, { modelId: 0 }] };
