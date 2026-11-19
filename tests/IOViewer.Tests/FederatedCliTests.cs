@@ -52,6 +52,7 @@ public sealed class FederatedCliTests : IDisposable
         {
             ModelId = 1,
             Lines = [new() { Start = Vector3d.Zero, End = Vector3d.UnitX, Elevation = 1 }],
+            Paths = [new() { Name = "Arc", Points = [new(0, 0, 0), new(1, 0, 0), new(2, 1, 0)] }],
         });
         services.Scene.Schedules.Add(new()
         {
@@ -97,6 +98,7 @@ public sealed class FederatedCliTests : IDisposable
         Assert.Equal(new Vector3d(10, 22, 4), scene.Instances[2].Transform!.Value.Translation);
         Assert.Equal(new Vector3d(10, 24, 4), scene.Instances[2].Transform!.Value.Apply(new(2, 0, 0)));
         Assert.Equal(new Vector3d(10, 21, 3), Assert.Single(Assert.Single(scene.Grids).Lines).End);
+        Assert.Equal([new(10, 20, 3), new(10, 21, 3), new(9, 22, 3)], Assert.Single(scene.Grids[0].Paths!).Points);
         Assert.Equal([3L, 4L], scene.Schedules[0].Tasks[0].Children[0].ElementIds);
         var clash = scene.ClashTests[0].Clashes[0];
         Assert.Equal((3L, 4L), (clash.Element1Id, clash.Element2Id));

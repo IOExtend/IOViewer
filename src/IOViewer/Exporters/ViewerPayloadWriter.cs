@@ -183,6 +183,11 @@ internal sealed class ViewerPayloadWriter
                 if (!IsFinite(line.Start - _rtcOffset) || !IsFinite(line.End - _rtcOffset))
                     throw new InvalidDataException($"Grid line '{line.Name}' has a non-finite endpoint.");
             }
+            foreach (var path in _scene.Grids.SelectMany(g => g.Paths ?? []))
+            {
+                if (path.Points.Count < 2 || path.Points.Any(point => !IsFinite(point - _rtcOffset)))
+                    throw new InvalidDataException($"Grid path '{path.Name}' needs at least two finite points.");
+            }
         }
         if (_options.IncludeClashes)
         {
@@ -898,6 +903,16 @@ internal sealed class ViewerPayloadWriter
                 WriteVector(w, "end", line.End - _rtcOffset);
                 w.WriteEndObject();
             }
+            foreach (var path in _scene.Grids.SelectMany(g => g.Paths ?? []))
+            {
+                w.WriteStartObject();
+                w.WriteString("name", path.Name);
+                w.WriteStartArray("points");
+                foreach (var point in path.Points)
+                    WriteVector(w, null, point - _rtcOffset);
+                w.WriteEndArray();
+                w.WriteEndObject();
+            }
         }
         w.WriteEndArray();
     }
@@ -1048,10 +1063,11 @@ internal sealed class ViewerPayloadWriter
         w.WriteEndArray();
     }
 
-    private static void WriteVector(Utf8JsonWriter w, string name, Vector3d v)
+    private static void WriteVector(Utf8JsonWriter w, string? name, Vector3d v)
     {
         if (!IsFinite(v)) throw new InvalidDataException($"The '{name}' vector is not finite in viewer coordinates.");
-        w.WriteStartArray(name);
+        if (name == null) w.WriteStartArray();
+        else w.WriteStartArray(name);
         w.WriteNumberValue(v.X);
         w.WriteNumberValue(v.Y);
         w.WriteNumberValue(v.Z);
