@@ -3,12 +3,11 @@ import { edgeParameter, featureEdges, SNAP_RADIUS, visibleEdgeRanges } from '../
 import { isClipped } from '../tools/sectionMath.js';
 
 export function meshSnapCandidates(hit, camera, rect, clientX, clientY, sections) {
-  const { view, node, element } = hit;
+  const { view, shift, element } = hit;
   const { position, index, tags } = view;
   const triangles = tags ? index.filter((_, i) => tags[Math.floor(i / 3)] === element) : index;
   const { vertices, edges } = featureEdges(position, triangles);
   const matrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-  const shift = new THREE.Vector3().fromArray(node.shift ?? [0, 0, 0]);
   const { planes, intersection } = sections.clipping();
   const x = clientX - rect.left, y = clientY - rect.top;
   const points = new Map();

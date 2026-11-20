@@ -11,6 +11,11 @@ internal static class ClusterSourceWriter
 {
     private const int RecordIndices = 8192 * 3;
     private const uint Signature = 0x33534d49; // IMS3
+    private const uint SharedSignature = 0x34534d49; // IMS4
+
+    // shortcut: share translations within each baked linear transform, until streamed draws carry full matrices.
+    private readonly record struct ShapeKey(int Geometry, Vector3d X, Vector3d Y, Vector3d Z);
+    private readonly record struct ShapeRecord(long Offset, BoundingBox3d Bounds, int Vertices, int Indices, bool Closed);
 
     internal static long Save(ViewerDocument doc, string target, HtmlViewerOptions options)
     {
@@ -37,12 +42,23 @@ internal static class ClusterSourceWriter
         var geometries = scene.Geometries.ToDictionary(geometry => geometry.Id);
         var materials = scene.Materials.ToDictionary(material => material.Id);
         var textures = scene.Textures.Select((texture, index) => (texture.Id, index)).ToDictionary(texture => texture.Id, texture => texture.index);
+        var canonical = FindEqualMeshes(geometries, scene.Instances);
+        ShapeKey Key(SceneInstance instance, Transform3d t) => new(canonical[instance.GeometryId], t.XAxis, t.YAxis, t.ZAxis);
+        var uses = new Dictionary<ShapeKey, int>();
+        foreach (var instance in scene.Instances)
+        {
+            if (!canonical.ContainsKey(instance.GeometryId)) continue;
+            var key = Key(instance, instance.Transform ?? Transform3d.Identity);
+            uses[key] = uses.GetValueOrDefault(key) + 1;
+        }
+        var templates = uses.Where(entry => entry.Value > 1).ToDictionary(entry => entry.Key, _ => new List<ShapeRecord>());
+        bool sharedFormat = templates.Count > 0;
         var closed = new Dictionary<int, bool>();
         var bounds = scene.ComputeBounds();
         var origin = bounds.IsEmpty ? Vector3d.Zero : bounds.Center;
         if (!double.IsFinite(origin.X) || !double.IsFinite(origin.Y) || !double.IsFinite(origin.Z))
             throw new InvalidDataException("Non-finite scene origin.");
-        writer.Write(Signature);
+        writer.Write(sharedFormat ? SharedSignature : Signature);
         writer.Write(origin.X);
         writer.Write(origin.Y);
         writer.Write(origin.Z);
@@ -65,12 +81,30 @@ internal static class ClusterSourceWriter
                 ? textures.GetValueOrDefault(textureId, -1) : -1;
             var transform = instance.Transform ?? Transform3d.Identity;
             var rebased = transform with { Translation = transform.Translation - origin };
+            var template = canonical.ContainsKey(geometry.Id) ? templates.GetValueOrDefault(Key(instance, transform)) : null;
+            bool hasNormals = geometry.Normals?.Count == geometry.Vertices.Count;
+            bool hasUvs = geometry.UVs?.Count == geometry.Vertices.Count;
+            var shift = Vector3d.Zero;
+            if (template is not null)
+            {
+                var anchor = geometry.Vertices[0];
+                shift = RoundPoint(rebased.Apply(anchor));
+                if (template.Count > 0)
+                {
+                    foreach (var record in template)
+                    {
+                        WriteHeader(record.Bounds, record.Vertices, record.Indices, record.Closed, record.Offset);
+                        triangles += record.Indices / 3;
+                    }
+                    continue;
+                }
+                rebased = transform with { Translation = Vector3d.Zero };
+            }
             var nx = Vector3d.Cross(transform.YAxis, transform.ZAxis);
             var ny = Vector3d.Cross(transform.ZAxis, transform.XAxis);
             var nz = Vector3d.Cross(transform.XAxis, transform.YAxis);
             bool mirrored = Vector3d.Dot(transform.XAxis, nx) < 0;
             bool hasIndices = geometry.Indices.Count != 0;
-            bool hasNormals = geometry.Normals?.Count == geometry.Vertices.Count;
             int count = hasIndices ? geometry.Indices.Count : geometry.Vertices.Count / 3 * 3;
             if (count % 3 != 0) throw new InvalidDataException($"Invalid triangle indices in geometry {geometry.Id}.");
             if (!closed.TryGetValue(geometry.Id, out bool solid))
@@ -94,10 +128,8 @@ internal static class ClusterSourceWriter
                     {
                         slot = vertices.Count;
                         remap.Add(index, slot);
-                        var p = rebased.Apply(geometry.Vertices[index]);
-                        var point = new Vector3d((float)p.X, (float)p.Y, (float)p.Z);
-                        if (!float.IsFinite((float)point.X) || !float.IsFinite((float)point.Y) || !float.IsFinite((float)point.Z))
-                            throw new InvalidDataException($"Non-finite vertex in geometry {geometry.Id}.");
+                        var p = template is null ? geometry.Vertices[index] : geometry.Vertices[index] - geometry.Vertices[0];
+                        var point = RoundPoint(rebased.Apply(p));
                         vertices.Add(point);
                         box = box.Encapsulate(point);
                         if (hasNormals)
@@ -105,22 +137,13 @@ internal static class ClusterSourceWriter
                             var n = geometry.Normals![index];
                             normals.Add(((nx * n.X + ny * n.Y + nz * n.Z) * (mirrored ? -1 : 1)).Normalized());
                         }
-                        if (texture >= 0) uvs.Add(geometry.UVs![index]);
+                        if (texture >= 0 || (template is not null && hasUvs)) uvs.Add(geometry.UVs![index]);
                     }
                     indices.Add(slot);
                 }
-                WriteVector(writer, box.Min);
-                WriteVector(writer, box.Max);
-                writer.Write(vertices.Count);
-                writer.Write(length);
-                writer.Write(color.R);
-                writer.Write(color.G);
-                writer.Write(color.B);
-                writer.Write(color.A);
-                writer.Write(hasNormals ? 1 : 0);
-                writer.Write(instance.ElementId);
-                writer.Write(texture);
-                writer.Write(solid ? 1 : 0);
+                long offset = template is null ? -1 : writer.BaseStream.Position;
+                template?.Add(new ShapeRecord(offset, box, vertices.Count, length, solid));
+                WriteHeader(box, vertices.Count, length, solid, offset);
                 foreach (var p in vertices) WriteVector(writer, p);
                 foreach (var n in normals) WriteVector(writer, n);
                 foreach (int i in indices) writer.Write(i);
@@ -133,6 +156,27 @@ internal static class ClusterSourceWriter
                 }
                 triangles += length / 3;
                 start += length;
+            }
+
+            void WriteHeader(BoundingBox3d box, int vertexCount, int indexCount, bool isClosed, long shapeOffset)
+            {
+                WriteVector(writer, template is null ? box.Min : RoundBounds(box.Min + shift, false));
+                WriteVector(writer, template is null ? box.Max : RoundBounds(box.Max + shift, true));
+                writer.Write(vertexCount);
+                writer.Write(indexCount);
+                writer.Write(color.R);
+                writer.Write(color.G);
+                writer.Write(color.B);
+                writer.Write(color.A);
+                writer.Write(hasNormals ? 1 : 0);
+                writer.Write(instance.ElementId);
+                writer.Write(texture);
+                writer.Write((isClosed ? 1 : 0) | (sharedFormat && (texture >= 0 || (template is not null && hasUvs)) ? 2 : 0));
+                if (sharedFormat)
+                {
+                    writer.Write(shapeOffset);
+                    WriteVector(writer, shift);
+                }
             }
         }
         if (triangles == 0) throw new InvalidDataException("The source contains no triangle geometry.");
@@ -148,6 +192,60 @@ internal static class ClusterSourceWriter
         writer.BaseStream.Position = reviewEnd;
         if (options.IncludeProperties) WriteElements(scene, writer);
         return triangles;
+    }
+
+    private static Vector3d RoundPoint(Vector3d p)
+    {
+        var point = new Vector3d((float)p.X, (float)p.Y, (float)p.Z);
+        if (!double.IsFinite(point.X) || !double.IsFinite(point.Y) || !double.IsFinite(point.Z))
+            throw new InvalidDataException("Non-finite vertex or placement in clustered geometry.");
+        return point;
+    }
+
+    private static Vector3d RoundBounds(Vector3d p, bool upper)
+    {
+        static float Outward(double value, bool upper)
+        {
+            var rounded = (float)value;
+            return upper && rounded < value ? MathF.BitIncrement(rounded)
+                : !upper && rounded > value ? MathF.BitDecrement(rounded) : rounded;
+        }
+        RoundPoint(p);
+        return new(Outward(p.X, upper), Outward(p.Y, upper), Outward(p.Z, upper));
+    }
+
+    private static Dictionary<int, int> FindEqualMeshes(Dictionary<int, SceneGeometry> geometries, IEnumerable<SceneInstance> instances)
+    {
+        var used = instances.Select(instance => instance.GeometryId).Distinct().Select(id => geometries.GetValueOrDefault(id))
+            .Where(mesh => mesh is { Topology: SceneTopology.Triangles } && mesh.Vertices.Count >= 3).Select(mesh => mesh!);
+        var canonical = new Dictionary<int, int>();
+        foreach (var group in used.GroupBy(mesh => (mesh.Vertices.Count, mesh.Indices.Count, mesh.Normals?.Count, mesh.UVs?.Count)))
+        {
+            if (!group.Skip(1).Any())
+            {
+                var mesh = group.First();
+                canonical.Add(mesh.Id, mesh.Id);
+                continue;
+            }
+            var candidates = new Dictionary<int, List<SceneGeometry>>();
+            foreach (var mesh in group)
+            {
+                var hash = new HashCode();
+                foreach (var vertex in mesh.Vertices) hash.Add(vertex);
+                foreach (var index in mesh.Indices) hash.Add(index);
+                if (mesh.Normals is { } normals) foreach (var normal in normals) hash.Add(normal);
+                if (mesh.UVs is { } uvs) foreach (var uv in uvs) hash.Add(uv);
+                var key = hash.ToHashCode();
+                if (!candidates.TryGetValue(key, out var matches)) candidates.Add(key, matches = []);
+                var equal = matches.Find(candidate => candidate.Vertices.SequenceEqual(mesh.Vertices)
+                    && candidate.Indices.SequenceEqual(mesh.Indices) && Same(candidate.Normals, mesh.Normals) && Same(candidate.UVs, mesh.UVs));
+                if (equal is null) matches.Add(mesh);
+                canonical.Add(mesh.Id, equal?.Id ?? mesh.Id);
+            }
+        }
+        return canonical;
+
+        static bool Same<T>(IReadOnlyList<T>? a, IReadOnlyList<T>? b) => a is null ? b is null : b is not null && a.SequenceEqual(b);
     }
 
     // Tessellation can duplicate vertices at normal and UV seams.

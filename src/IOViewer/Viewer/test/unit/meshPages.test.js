@@ -4,9 +4,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { buildMeshPages, focusBounds } from '../../build-mesh-pages.js';
-import { MESH_FORMAT, pageBytes, validateMeshPages, viewsOfPage } from '../../src/stream/meshPages.js';
+import { INSTANCE_BYTES, MESH_FORMAT, pageBytes, readPlacements, validateMeshPages, viewsOfPage } from '../../src/stream/meshPages.js';
 
 const bounds = { min: [0, 0, 0], max: [1, 1, 0] };
+
+test('a shared shape has one byte range and instance batches validate their own placement data', () => {
+  const shape = { vertices: 3, indices: 3, offset: 0 };
+  const node = { ...bounds, ...shape, shape: 0, count: 2, pick: true, members: [0, 1],
+    children: [], error: 0, opaque: 3, groups: [{ count: 3 }] };
+  const manifest = { ...bounds, format: MESH_FORMAT, origin: [0, 0, 0], pages: [node], roots: [0],
+    elements: ['1', '2'].map((id) => ({ ...bounds, id, offset: 0, size: 0 })),
+    bytes: 2 * INSTANCE_BYTES, shapes: [shape], shapeBytes: pageBytes(3, 3), triangles: 2 };
+  assert.equal(validateMeshPages(manifest), manifest);
+  assert.throws(() => validateMeshPages({ ...manifest, pages: [{ ...node, shape: 1 }] }), /instance batch/);
+  assert.throws(() => validateMeshPages({ ...manifest, triangles: 1 }), /totals/);
+  const data = new DataView(new ArrayBuffer(manifest.bytes));
+  data.setUint8(19, 255);
+  data.setUint8(INSTANCE_BYTES + 19, 255);
+  data.setFloat32(INSTANCE_BYTES, 2, true);
+  data.setUint32(INSTANCE_BYTES + 12, 1, true);
+  assert.deepEqual([...readPlacements(data.buffer, node).offset], [0, 0, 0, 2, 0, 0]);
+  assert.deepEqual([...readPlacements(data.buffer, node).elements], [0, 1]);
+  data.setUint32(INSTANCE_BYTES + 12, 2, true);
+  assert.throws(() => readPlacements(data.buffer, node), /instance data/);
+});
 
 test('a cluster tree covers every leaf exactly once and bounds its error and byte ranges', () => {
   const page = { ...bounds, offset: 0, vertices: 3, indices: 3, opaque: 3, error: 0, children: [] };

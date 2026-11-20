@@ -3,6 +3,7 @@ import { validateReviewMeta } from '../data.js';
 
 export const MESH_FORMAT = 'ioviewer-mesh-clusters-1';
 export const PAGE_TRIANGLES = 8192;
+export const INSTANCE_BYTES = 20; // xyz, element slot, RGBA
 export const ROOT_BYTES = 48 * MIB;
 export const MESH_MANIFEST_BYTES = 64 * MIB;
 export const align4 = (bytes) => (bytes + 3) & ~3;
@@ -11,7 +12,8 @@ export const pageBytes = (vertices, indices, pick = false, uv = false) => {
   const end = pick ? align4(mesh) + (indices / 3) * 4 : mesh;
   return uv ? align4(end) + vertices * 8 : end;
 };
-export const sizeOfPage = ({ vertices, indices, pick, uv }) => pageBytes(vertices, indices, pick, uv);
+export const sizeOfPage = ({ vertices, indices, pick, uv, count }) => count === undefined ? pageBytes(vertices, indices, pick, uv) : count * INSTANCE_BYTES;
+export const residentBytes = (page, shapes) => sizeOfPage(page) + (page.shape === undefined ? 0 : sizeOfPage(shapes[page.shape]));
 export const MAX_PAGE_BYTES = pageBytes(PAGE_TRIANGLES * 3, PAGE_TRIANGLES * 3);
 export const isPoint = (p) => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
 export const isBounds = (value) => isPoint(value?.min) && isPoint(value?.max) && value.min.every((v, i) => v <= value.max[i]);
@@ -30,6 +32,19 @@ export function validateMeshPages(manifest) {
     throw new Error('Invalid mesh cluster manifest.');
   }
   const parent = new Uint8Array(manifest.pages.length);
+  let shapeBytes = 0;
+  if (manifest.shapes !== undefined) {
+    if (!Array.isArray(manifest.shapes) || !manifest.shapes.length) throw new Error('Invalid mesh shapes.');
+    for (const shape of manifest.shapes) {
+      if (!shape || !count(shape.vertices) || !count(shape.indices) || shape.indices > PAGE_TRIANGLES * 3
+        || shape.indices % 3 || shape.vertices > shape.indices || shape.offset !== shapeBytes
+        || (shape.uv !== undefined && typeof shape.uv !== 'boolean') || shape.pick !== undefined || shape.count !== undefined) {
+        throw new Error('Invalid mesh shape.');
+      }
+      shapeBytes += sizeOfPage(shape);
+    }
+  }
+  if ((manifest.shapeBytes ?? 0) !== shapeBytes) throw new Error('Invalid mesh shape byte total.');
   if (manifest.review !== undefined) {
     if (!manifest.review || typeof manifest.review !== 'object' || Array.isArray(manifest.review)) throw new Error('Invalid mesh review.');
     validateReviewMeta({ ...manifest.review, elements: manifest.elements ?? [] });
@@ -49,6 +64,13 @@ export function validateMeshPages(manifest) {
         || page.members.some((member, i) => !Number.isInteger(member) || member < 0 || member >= manifest.elements.length
           || (i > 0 && member <= page.members[i - 1]))))
       || (page.children.length === 0 && page.error !== 0)) throw new Error(`Invalid mesh cluster page ${id}.`);
+    if (page.shape !== undefined || page.count !== undefined) {
+      const shape = Number.isSafeInteger(page.shape) && manifest.shapes?.[page.shape];
+      if (!shape || !count(page.count) || page.indices * page.count > PAGE_TRIANGLES * 3 || page.children.length
+        || page.vertices !== shape.vertices || page.indices !== shape.indices || page.uv !== shape.uv
+        || (page.opaque !== 0 && page.opaque !== page.indices) || page.groups?.length !== 1
+        || (page.pick && !page.members)) throw new Error(`Invalid mesh instance batch ${id}.`);
+    }
     if (page.groups !== undefined) {
       let at = 0;
       if (page.children.length || !Array.isArray(page.groups) || !page.groups.length || page.groups.some((group) => {
@@ -61,7 +83,7 @@ export function validateMeshPages(manifest) {
       }) || at !== page.indices) throw new Error(`Invalid mesh groups at page ${id}.`);
     }
     length += sizeOfPage(page);
-    if (!page.children.length) triangles += page.indices / 3;
+    if (!page.children.length) triangles += page.indices / 3 * (page.count ?? 1);
     for (const child of page.children) {
       if (!Number.isSafeInteger(child) || child < 0 || child >= id || parent[child] || manifest.pages[child].error > page.error) {
         throw new Error(`Invalid cluster hierarchy at page ${id}.`);
@@ -70,12 +92,13 @@ export function validateMeshPages(manifest) {
       parent[child] = 1;
     }
   }
-  let pinned = 0;
+  let pinned = 0, overview = 0;
   for (const root of manifest.roots) {
     if (!Number.isSafeInteger(root) || root < 0 || root >= parent.length || parent[root]) throw new Error('Invalid mesh cluster root.');
     if (!contains(manifest, manifest.pages[root])) throw new Error('A root exceeds the scene bounds.');
     parent[root] = 1;
-    pinned += sizeOfPage(manifest.pages[root]);
+    overview += sizeOfPage(manifest.pages[root]);
+    pinned += residentBytes(manifest.pages[root], manifest.shapes);
   }
   let propertyBytes = 0;
   for (const element of manifest.elements ?? []) {
@@ -87,7 +110,7 @@ export function validateMeshPages(manifest) {
     propertyBytes += element.size;
   }
   if (!parent.every(Boolean) || !count(length) || length !== manifest.bytes || triangles !== manifest.triangles || pinned > ROOT_BYTES
-    || (manifest.overview !== undefined && manifest.overview !== pinned) || propertyBytes !== (manifest.propertyBytes ?? 0)) {
+    || (manifest.overview !== undefined && (manifest.overview !== overview || shapeBytes > 0)) || propertyBytes !== (manifest.propertyBytes ?? 0)) {
     throw new Error('Invalid cluster coverage or byte totals.');
   }
   return manifest;
@@ -103,4 +126,22 @@ export function viewsOfPage(buffer, { vertices, indices, pick, uv }) {
     tags: pick ? new Uint32Array(buffer, align4(vertices * 22 + indices * 2), indices / 3) : null,
     uv: uv ? new Float32Array(buffer, align4(pageBytes(vertices, indices, pick)), vertices * 2) : null,
   };
+}
+
+export function readPlacements(buffer, page) {
+  if (buffer.byteLength !== sizeOfPage(page)) throw new Error('Truncated mesh instance batch.');
+  const data = new DataView(buffer), offset = new Float32Array(page.count * 3);
+  const rgba = new Uint8Array(page.count * 4), elements = page.pick ? new Uint32Array(page.count) : null;
+  for (let i = 0; i < page.count; i++) {
+    const at = i * INSTANCE_BYTES;
+    for (let axis = 0; axis < 3; axis++) offset[i * 3 + axis] = data.getFloat32(at + 4 * axis, true);
+    rgba.set(new Uint8Array(buffer, at + 16, 4), i * 4);
+    if (elements) elements[i] = data.getUint32(at + 12, true);
+    if ((rgba[i * 4 + 3] === 255) !== Boolean(page.opaque)) throw new Error('Invalid instance alpha.');
+  }
+  const members = new Set(elements ?? []);
+  if (!offset.every(Number.isFinite) || (elements && (members.size !== page.members.length || page.members.some((i) => !members.has(i))))) {
+    throw new Error('Invalid mesh instance data.');
+  }
+  return { offset, rgba, elements };
 }

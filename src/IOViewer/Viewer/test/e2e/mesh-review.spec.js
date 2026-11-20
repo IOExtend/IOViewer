@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, rmdir } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildMeshPages } from '../../build-mesh-pages.js';
@@ -17,10 +17,16 @@ let folder;
 
 test.beforeAll(async () => {
   folder = await mkdtemp(join(tmpdir(), 'ioviewer-mesh-review-'));
+  const measure = JSON.parse(await readFile(join(generated, 'measure-snap.json')));
+  measure.Meshes[0].Color = { R: 230, G: 20, B: 20, A: 255 };
+  measure.Meshes[1].Color = { R: 20, G: 230, B: 20, A: 255 };
+  measure.Meshes[1].Transform = { ...measure.Meshes[0].Transform, Translation: { X: 5, Y: 0, Z: 0 } };
+  const repeated = join(folder, 'repeated.json');
+  await writeFile(repeated, JSON.stringify(measure));
   for (const [name, input, ...args] of [
     ['review', join(generated, 'bcf-model.json'), '--bcf', join(fixturesDir, '../bcf/review.bcfzip')],
     ['textures', join(fixturesDir, 'textured.json')],
-    ['measure', join(generated, 'measure-snap.json')],
+    ['measure', repeated],
   ]) {
     const source = join(folder, `${name}.ivmesh`);
     execFileSync('dotnet', [cli, input, '-o', source, ...args], { stdio: 'pipe' });
@@ -30,9 +36,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (!folder) return;
+  await rm(join(folder, 'repeated.json'), { force: true });
   for (const name of ['review', 'textures', 'measure']) {
     await rm(join(folder, `${name}.ivmesh`), { force: true });
-    for (const file of ['meshes.bin', 'manifest.json', 'elements.bin']) await rm(join(folder, name, file), { force: true });
+    for (const file of ['meshes.bin', 'shapes.bin', 'manifest.json', 'elements.bin']) await rm(join(folder, name, file), { force: true });
     await rmdir(join(folder, name)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
   }
   await rmdir(folder);
@@ -206,8 +213,36 @@ test('stream textures retain UVs and the standard display toolbar controls their
   });
 });
 
-test('stream measurement snaps to a vertex, midpoint and edge on a fetched mesh', async ({ page }) => {
+test('stream instances keep their own colors, picking and visibility and support snapping', async ({ page }) => {
   await withViewer(page, 'measure', async () => {
+    const instances = await page.evaluate(() => {
+      const { controls, scene, manifest, stats } = window.__ioviewerMeshLod;
+      const box = scene.visibleBox(), center = box.getCenter(box.max.clone());
+      controls.setProjection('orthographic');
+      controls.restoreViewCamera({ position: [center.x, center.y, center.z + 16], target: center.toArray(), up: [0, 1, 0] });
+      controls.camera.updateMatrixWorld();
+      const points = [0, 1].map((i) => {
+        const box = scene.elementBox(i);
+        const p = box.getCenter(box.max.clone()).project(controls.camera);
+        return [(p.x + 1) * innerWidth / 2, (1 - p.y) * innerHeight / 2];
+      });
+      return { points, copies: stats().instanced, shapes: manifest.shapes.length };
+    });
+    expect(instances.copies).toBe(2);
+    expect(instances.shapes).toBe(1);
+    await frame(page);
+    const red = await sample(page, instances.points[0]);
+    const green = await sample(page, instances.points[1]);
+    expect(red[0]).toBeGreaterThan(red[1] + 60);
+    expect(green[1]).toBeGreaterThan(green[0] + 60);
+    await page.mouse.click(...instances.points[1]);
+    await expect(page.locator('#ioviewer-properties')).toContainText('Pipe 1');
+    await page.keyboard.press('h');
+    await expect.poll(() => shown(page, 'Pipe 1')).toBe(false);
+    await frame(page);
+    const hidden = await sample(page, instances.points[1]);
+    expect(hidden[1]).toBeLessThan(green[1] - 60);
+    expect(await shown(page, 'Pipe 0')).toBe(true);
     const coords = await page.evaluate(() => {
       const { controls, scene } = window.__ioviewerMeshLod;
       scene.setVisible([1], false);
