@@ -85,10 +85,9 @@ internal static class ClusterSourceWriter
             bool hasNormals = geometry.Normals?.Count == geometry.Vertices.Count;
             bool hasUvs = geometry.UVs?.Count == geometry.Vertices.Count;
             var shift = Vector3d.Zero;
-            if (template is not null)
+            if (template is not null && SharedTranslation(geometry, rebased) is { } translation)
             {
-                var anchor = geometry.Vertices[0];
-                shift = RoundPoint(rebased.Apply(anchor));
+                shift = translation;
                 if (template.Count > 0)
                 {
                     foreach (var record in template)
@@ -100,6 +99,7 @@ internal static class ClusterSourceWriter
                 }
                 rebased = transform with { Translation = Vector3d.Zero };
             }
+            else template = null;
             var nx = Vector3d.Cross(transform.YAxis, transform.ZAxis);
             var ny = Vector3d.Cross(transform.ZAxis, transform.XAxis);
             var nz = Vector3d.Cross(transform.XAxis, transform.YAxis);
@@ -192,6 +192,27 @@ internal static class ClusterSourceWriter
         writer.BaseStream.Position = reviewEnd;
         if (options.IncludeProperties) WriteElements(scene, writer);
         return triangles;
+    }
+
+    private static Vector3d? SharedTranslation(SceneGeometry geometry, Transform3d rebased)
+    {
+        // Two float32 values can cancel and erase detail that the original world-space vertex retains.
+        const double tolerance = GeometryQuantizer.Step / 2;
+        static bool Preserved(double world, double local, double shift) =>
+            Math.Abs((double)(float)world - (float)((float)local + shift)) <= tolerance;
+
+        var anchor = geometry.Vertices[0];
+        var position = rebased.Apply(anchor);
+        var shift = new Vector3d((float)position.X, (float)position.Y, (float)position.Z);
+        var linear = rebased with { Translation = Vector3d.Zero };
+        foreach (var vertex in geometry.Vertices)
+        {
+            var world = rebased.Apply(vertex);
+            var local = linear.Apply(vertex - anchor);
+            if (!Preserved(world.X, local.X, shift.X) || !Preserved(world.Y, local.Y, shift.Y)
+                || !Preserved(world.Z, local.Z, shift.Z)) return null;
+        }
+        return shift;
     }
 
     private static Vector3d RoundPoint(Vector3d p)

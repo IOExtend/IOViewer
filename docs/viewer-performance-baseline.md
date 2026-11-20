@@ -202,7 +202,8 @@ The cluster export reuses meshes that reference the same source geometry and det
 distinct geometry IDs. Coordinates, triangle indices in their original order, normals and UVs are compared at
 source precision. A hash narrows the search and a full comparison confirms each match. Copies with the same
 rotation, scale and handedness share a template even if their translations, materials or element IDs differ.
-Each distinct linear transform is baked separately.
+Each distinct linear transform is baked separately. A placement keeps ordinary coordinates if reconstructing
+its vertices from the template and shift would change any coordinate by more than half the viewer's 1/1024 m grid step.
 
 The builder writes shared meshes to `shapes.bin` and stores their placements in leaf pages. The viewer draws
 opaque and blended batches separately and groups textured batches by texture. Each visible batch uses GPU

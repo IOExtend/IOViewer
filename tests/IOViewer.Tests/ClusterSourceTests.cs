@@ -9,6 +9,40 @@ namespace IOViewer.Tests;
 public class ClusterSourceTests
 {
     [Fact]
+    public void KeepsWorldCoordinatesWhenAReusableTemplateWouldLoseDetail()
+    {
+        var scene = new SceneDocument();
+        scene.Geometries.Add(new SceneGeometry { Id = 1,
+            Vertices = [new(1_000_000, 0, 0), Vector3d.Zero, new(0.01, 1, 0)], Indices = [0, 1, 2] });
+        scene.Geometries.Add(new SceneGeometry { Id = 2,
+            Vertices = [new(-1_000_000, 0, 0), new(-1_000_000, 1, 0), new(-1_000_000, 0, 1)], Indices = [0, 1, 2] });
+        for (int i = 1; i <= 3; i++)
+        {
+            scene.Elements.Add(new SceneElement { Id = i, ModelId = 1 });
+            scene.Instances.Add(new SceneInstance { ElementId = i, GeometryId = i < 3 ? 1 : 2,
+                Transform = Transform3d.Identity with { Translation = new Vector3d(0, i * 10, 0) } });
+        }
+        var directory = Directory.CreateTempSubdirectory();
+        var path = Path.Combine(directory.FullName, "world-precision.ivmesh");
+        try
+        {
+            Assert.Equal(3, ClusterSourceWriter.Save(new ViewerDocument(scene), path, new HtmlViewerOptions()));
+            using var reader = new BinaryReader(File.OpenRead(path));
+            Assert.Equal("IMS4"u8.ToArray(), reader.ReadBytes(4));
+            Assert.Equal(0, reader.ReadDouble());
+            reader.BaseStream.Position = 36 + 56;
+            Assert.Equal(-1, reader.ReadInt64());
+            reader.BaseStream.Position = 36 + 76 + 24;
+            Assert.Equal(0.01f, reader.ReadSingle());
+        }
+        finally
+        {
+            File.Delete(path);
+            directory.Delete();
+        }
+    }
+
+    [Fact]
     public void SharesOnlyIdenticalSourceMeshesAndKeepsPlacementsIndependent()
     {
         var mesh = new SceneGeometry
