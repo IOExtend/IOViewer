@@ -6,13 +6,16 @@
     "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2020 --outfile=dist/viewer.js",
     "test": "node --test test/unit/*.test.js",
     "e2e": "npm run build && playwright test --project=chromium",
-    "perf": "npm run build && playwright test --config playwright.perf.config.js"
+    "perf": "npm run build && playwright test --config playwright.perf.config.js",
+    "stream": "node serve-stream.js",
+    "pack-clusters": "node pack-clusters.js"
   },
   "dependencies": {
     "three": "0.186.1"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "meshoptimizer": "1.3.0"
   }
 }

@@ -6,7 +6,7 @@
 export function resolveClashElements(clash, elements) {
   const found = [];
   for (const [id, name] of [[clash.element1Id, clash.element1Name], [clash.element2Id, clash.element2Name]]) {
-    const index = id != null ? elements.findIndex((e) => e.id === id && !e.mesh) : uniqueName(elements, name);
+    const index = id != null ? elements.findIndex((e) => e.id != null && String(e.id) === String(id) && !e.mesh) : uniqueName(elements, name);
     if (index >= 0 && !found.includes(index)) found.push(index);
   }
   return found;

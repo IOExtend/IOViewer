@@ -91,10 +91,11 @@ void main() {
 }
 
 export class SectionCaps {
-  constructor(model, sections, data) {
+  constructor(model, sections, data, drawStencils) {
     this.model = model;
     this.sections = sections;
     this.data = data;
+    this.drawStencils = drawStencils;
     this._farSide = new THREE.Plane();
     this._surface = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
       color: CAP_COLOR, side: THREE.DoubleSide, forceSinglePass: true,
@@ -109,7 +110,7 @@ export class SectionCaps {
     const crosses = (plane) => Math.abs(plane.distanceToPoint(sections.center)) < extentAlong(sections.modelBox, plane.normal);
     if (model.opacity === 0 || !faces.some(crosses)) return renderer.render(world, camera);
 
-    if (!this._stencils) {
+    if (!this.drawStencils && !this._stencils) {
       const uniforms = { ...model.slotUniforms, closedSlots: { value: closedSlots(model, this.data) } };
       this._stencils = [
         stencilMaterial(uniforms, this._farSide, THREE.BackSide, THREE.IncrementWrapStencilOp),
@@ -137,7 +138,8 @@ export class SectionCaps {
         if (facing > 0) this._farSide.negate();
         renderer.clearStencil();
         // Count signed crossings behind the cap. Outside the solid, front and back cancel.
-        for (const stencil of this._stencils)
+        if (this.drawStencils) this.drawStencils(renderer, camera, this._farSide);
+        else for (const stencil of this._stencils)
           model.withMaterial(stencil, () => renderer.render(model.root, camera), { section: true });
 
         this._surface.quaternion.setFromUnitVectors(Z, plane.normal);

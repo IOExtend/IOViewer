@@ -7,6 +7,9 @@ libraries (MIT, copyright (c) .NET Foundation and Contributors).
 Development and build-time tools (esbuild, Playwright, xunit, xunit.runner.visualstudio, Microsoft.NET.Test.Sdk) are
 not part of the published packages or the generated HTML.
 
+The offline mesh LOD builder also uses meshoptimizer 1.3.0. It is a build-time dependency and ships under the MIT
+license, copyright © 2016–2026 Arseny Kapoulkine. [Source and license](https://github.com/zeux/meshoptimizer/tree/v1.3)
+
 ## three.js 0.186.1
 
 - Source: <https://github.com/mrdoob/three.js>

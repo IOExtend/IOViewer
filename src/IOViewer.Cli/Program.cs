@@ -29,11 +29,11 @@ internal static class Program
 
         Arguments:
           <input>            Path to input 3D model (.glb, .obj, .json, .ifc, .ifczip, .rvt or .nwc).
-          [output]           Destination path for exported file (.html or .json).
+          [output]           Destination path for exported file (.html, .json or .ivmesh for clustered LOD).
                              Default: <input-without-ext>.html.
 
         Options:
-          -o, --output <file> Destination path for exported HTML or JSON file.
+          -o, --output <file> Destination path for exported HTML, JSON or .ivmesh file.
           --add <file> --placement <x,y,z,yaw>
                              Add another model. Translation is in metres and yaw in degrees about +Z.
                              Repeat the pair for each model. Use 0,0,0,0 for an already aligned source.
@@ -237,6 +237,17 @@ internal static class Program
         }
 
         outputPath ??= Path.ChangeExtension(inputPath, ".html");
+        bool meshSource = outputPath.EndsWith(".ivmesh", StringComparison.OrdinalIgnoreCase);
+        if (meshSource && serve)
+        {
+            Console.Error.WriteLine("Error: --serve requires an HTML export. Build the cluster package before serving an .ivmesh source.");
+            return 1;
+        }
+        if (meshSource && File.Exists(outputPath))
+        {
+            Console.Error.WriteLine($"Error: Cluster source already exists: '{Printable(outputPath)}'.");
+            return 3;
+        }
 
         var sw = Stopwatch.StartNew();
         ViewerDocument doc;
@@ -297,7 +308,14 @@ internal static class Program
         try
         {
             EnsureParentDirectory(outputPath);
-            if (outputPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            if (meshSource)
+            {
+                long triangles = ClusterSourceWriter.Save(doc, outputPath, options);
+                Console.WriteLine($"Exported {triangles} source triangles for clustered LOD in {sw.ElapsedMilliseconds} ms.");
+                int undrawn = ViewerPayloadWriter.UndrawnInstances(doc.Scene);
+                if (undrawn > 0) Console.Error.WriteLine($"Warning: {undrawn} non-triangle meshes were skipped.");
+            }
+            else if (outputPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             {
                 JsonViewerExporter.Save(doc, outputPath);
                 Console.WriteLine($"Exported JSON snapshot to '{outputPath}' ({doc.Scene.Instances.Count} meshes, {doc.Scene.Elements.Count} elements) in {sw.ElapsedMilliseconds} ms.");

@@ -18,7 +18,7 @@ function time(text) {
  */
 export function prepareSchedule(timeliner, elements) {
   // A per-mesh stand-in element (`mesh: true`) carries a mesh id, which no task refers to.
-  const indexOf = new Map(elements.flatMap((e, i) => (e.mesh ? [] : [[e.id, i]])));
+  const indexOf = new Map(elements.flatMap((e, i) => e.mesh || e.id == null ? [] : [[String(e.id), i]]));
   const tasks = [];
   for (const task of Array.isArray(timeliner?.tasks) ? timeliner.tasks : []) {
     const start = time(task?.start);
@@ -26,7 +26,7 @@ export function prepareSchedule(timeliner, elements) {
     if (!(start <= end)) continue;
     const type = TASK_TYPES.includes(task.type) ? task.type : 'construct';
     const ids = Array.isArray(task.attachedElements) ? task.attachedElements : [];
-    tasks.push({ name: task.name, type, start, end, elements: ids.filter((id) => indexOf.has(id)).map((id) => indexOf.get(id)) });
+    tasks.push({ name: task.name, type, start, end, elements: ids.map((id) => indexOf.get(String(id))).filter((i) => i !== undefined) });
   }
   const start = tasks.reduce((min, task) => Math.min(min, task.start), Infinity);
   const end = tasks.reduce((max, task) => Math.max(max, task.end), -Infinity);
