@@ -34,9 +34,9 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   const { meta } = data;
   const fitAll = () => controls.fitBox(scene.visibleBox());
   const actions = {
-    hide: () => selection.size && scene.setVisible([...selection.values()], false),
-    isolate: () => selection.size && scene.isolate([...selection.values()]),
-    showAll: () => scene.showAll(),
+    hide: scene.setVisible && (() => selection.size && scene.setVisible([...selection.values()], false)),
+    isolate: scene.isolate && (() => selection.size && scene.isolate([...selection.values()])),
+    showAll: scene.showAll && (() => scene.showAll()),
     // Selection's combined box; nothing selected fits everything shown.
     zoomTo: () => {
       if (!selection.size) return fitAll();
@@ -52,6 +52,7 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   shell.registerPanel('model', {
     icon: icons.model,
     title: t('panel.model'),
+    visible: meta.elements.length > 0 || !!scene.setVisible,
     render: (body) =>
       mountTree(body, {
         elements: meta.elements,
@@ -118,12 +119,14 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
   });
   // Right click on an element that is not selected selects it first, as in Navisworks. With the distance tool on the
   // selection stays: the menu is for the current selection, wherever the click was.
-  controls.addEventListener('contextmenu', (e) => {
+  controls.addEventListener('contextmenu', async (e) => {
     const { x, y } = e.detail;
-    if (measure.active) {
+    if (measure?.active) {
       return openContextMenu(x, y, selection.values().next().value ?? null);
     }
-    const hit = picker.pick(x, y);
+    const pick = picker.pick(x, y);
+    const hit = pick?.then ? await pick : pick;
+    if (hit === undefined) return; // an asynchronous pick was superseded
     if (!hit || hit.element < 0) return openContextMenu(x, y, null);
     if (!selection.has(hit.element)) selection.set([hit.element]);
     openContextMenu(x, y, hit.element);
@@ -141,7 +144,7 @@ export function mountUI({ root, data, scene, controls, picker, selection, measur
       return;
     }
     contextMenu.close();
-    if (action !== 'escape') actions[action]();
+    if (action !== 'escape') actions[action]?.();
   });
   mountStatusBar(document.getElementById('ioviewer-status'), selection, scene.elementCount);
   mountTruncationBanner(root, meta.truncated);

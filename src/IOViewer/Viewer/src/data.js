@@ -9,7 +9,7 @@ export function gridPoints(grid) {
 
 function block(doc, id) {
   const element = doc.getElementById(id);
-  if (!element) throw new Error(`Data block '${id}' is missing.`);
+  if (!element) throw new ModelDataError(`Data block '${id}' is missing.`);
   return element.textContent;
 }
 
@@ -112,6 +112,20 @@ function validateMeta(meta) {
       throw new ModelDataError('Invalid META geometry.');
     }
   }
+  validateReviewMeta(meta);
+  for (const material of meta.materials) {
+    const index = material.texture;
+    if (!vector(material.color) || typeof material.opacity !== 'number'
+      || (index != null && (!Number.isInteger(index) || index < 0 || index >= (meta.textures?.length ?? 0)))) {
+      throw new ModelDataError('Invalid META material.');
+    }
+  }
+}
+
+export function validateReviewMeta(meta) {
+  if (!object(meta) || !records(meta.elements) || (meta.title != null && typeof meta.title !== 'string')) {
+    throw new ModelDataError('Invalid review metadata.');
+  }
   for (const name of ['textures', 'grids', 'viewpoints', 'bcfTopics', 'clashTests', 'linkedFiles', 'models']) {
     if (meta[name] != null && !records(meta[name])) throw new ModelDataError(`Invalid META ${name} list.`);
   }
@@ -119,13 +133,6 @@ function validateMeta(meta) {
     || meta.elements.some(({ modelId, levelId }) => (modelId != null && !Number.isSafeInteger(modelId))
       || (levelId != null && !Number.isSafeInteger(levelId)))) {
     throw new ModelDataError('Invalid META model or level identity.');
-  }
-  for (const material of meta.materials) {
-    const index = material.texture;
-    if (!vector(material.color) || typeof material.opacity !== 'number'
-      || (index != null && (!Number.isInteger(index) || index < 0 || index >= (meta.textures?.length ?? 0)))) {
-      throw new ModelDataError('Invalid META material.');
-    }
   }
   const elementIndices = (values) => values == null || (Array.isArray(values) &&
     values.every((i) => Number.isInteger(i) && i >= 0 && i < meta.elements.length));
@@ -159,17 +166,40 @@ function validateMeta(meta) {
   if (!sectionState(meta.sections)) throw new ModelDataError('Invalid META sections.');
 }
 
-export function readModelMeta(doc = document, startup) {
+export function parseModelMeta(text) {
   let meta;
-  startup?.('metadataStart');
   try {
-    meta = JSON.parse(block(doc, 'ioviewer-meta'));
+    meta = JSON.parse(text);
   } catch (error) {
     throw new ModelDataError(error.message, { cause: error });
   }
   validateMeta(meta);
+  return meta;
+}
+
+export function readModelMeta(doc = document, startup) {
+  startup?.('metadataStart');
+  let text;
+  try {
+    text = block(doc, 'ioviewer-meta');
+  } catch (error) {
+    if (error instanceof ModelDataError) throw error;
+    throw new ModelDataError(error.message, { cause: error });
+  }
+  const meta = parseModelMeta(text);
   startup?.('metadataEnd');
   return meta;
+}
+
+export function binaryViewType(v, binaryLength) {
+  const Type = VIEW_TYPES[v?.t];
+  if (!Type) throw new ModelDataError(`Unknown view type '${v?.t}'.`);
+  const size = Type.BYTES_PER_ELEMENT;
+  if (!(Number.isSafeInteger(v.o) && Number.isSafeInteger(v.n) && v.o >= 0 && v.n >= 0 && v.o % size === 0
+    && v.o + v.n * size <= binaryLength)) {
+    throw new ModelDataError(`View ${JSON.stringify(v)} is outside the ${binaryLength} bytes of binary data.`);
+  }
+  return Type;
 }
 
 export function loadModelData(doc = document, startup, meta = readModelMeta(doc, startup)) {
@@ -184,25 +214,16 @@ export function loadModelData(doc = document, startup, meta = readModelMeta(doc,
     throw new ModelDataError(error.message, { cause: error });
   }
   const binaryLength = bin.length;
-  function viewType(v) {
-    const Type = VIEW_TYPES[v?.t];
-    if (!Type) throw new ModelDataError(`Unknown view type '${v?.t}'.`);
-    const size = Type.BYTES_PER_ELEMENT;
-    if (!(Number.isInteger(v.o) && Number.isInteger(v.n) && v.o >= 0 && v.n >= 0 && v.o % size === 0 && v.o + v.n * size <= binaryLength)) {
-      throw new ModelDataError(`View ${JSON.stringify(v)} is outside the ${binaryLength} bytes of binary data.`);
-    }
-    return Type;
-  }
   let props = null;
   return {
     meta,
     view(v) {
       if (!bin) throw new Error('The binary data has been released.');
-      const Type = viewType(v);
+      const Type = binaryViewType(v, binaryLength);
       return new Type(bin.buffer, v.o, v.n);
     },
     readView(v) {
-      const Type = viewType(v);
+      const Type = binaryViewType(v, binaryLength);
       if (!v.n) return new Type(0);
       if (!bin && !canonical) legacyBin ??= decodeBase64(binElement).bytes;
       const bytes = bin ?? legacyBin;

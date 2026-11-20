@@ -411,14 +411,26 @@ export function unitNormals(s) {
 
 // Area-weighted vertex normals from the faces, as three's computeVertexNormals.
 function vertexNormals(positions, q, indices) {
-  const p = (v, a) => (q ? q.o[a] + positions[v * 3 + a] * q.s : positions[v * 3 + a]);
   const out = new Float32Array(positions.length);
+  const scale = q?.s ?? 1;
   for (let t = 0; t < indices.length; t += 3) {
-    const [a, b, c] = [indices[t], indices[t + 1], indices[t + 2]];
-    const e1 = [0, 1, 2].map((k) => p(b, k) - p(a, k));
-    const e2 = [0, 1, 2].map((k) => p(c, k) - p(a, k));
-    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-    for (const v of [a, b, c]) for (let k = 0; k < 3; k++) out[v * 3 + k] += n[k];
+    const a = indices[t] * 3, b = indices[t + 1] * 3, c = indices[t + 2] * 3;
+    const bx = (positions[b] - positions[a]) * scale;
+    const by = (positions[b + 1] - positions[a + 1]) * scale;
+    const bz = (positions[b + 2] - positions[a + 2]) * scale;
+    const cx = (positions[c] - positions[a]) * scale;
+    const cy = (positions[c + 1] - positions[a + 1]) * scale;
+    const cz = (positions[c + 2] - positions[a + 2]) * scale;
+    const x = by * cz - bz * cy, y = bz * cx - bx * cz, z = bx * cy - by * cx;
+    out[a] += x;
+    out[a + 1] += y;
+    out[a + 2] += z;
+    out[b] += x;
+    out[b + 1] += y;
+    out[b + 2] += z;
+    out[c] += x;
+    out[c + 1] += y;
+    out[c + 2] += z;
   }
   for (let v = 0; v < out.length; v += 3) {
     const l = Math.hypot(out[v], out[v + 1], out[v + 2]) || 1;

@@ -99,6 +99,290 @@ When evaluating instancing and picking, compare full-detail p95 with the same re
 p95 alongside its drawn share. The RTX full-detail range on the synthetic scene is too wide to establish a regression
 threshold from these runs. [Instancing and picking issue](https://github.com/IOExtend/IOViewer/issues/12)
 
+## Multi-gigabyte synthetic model
+
+From the repository root, generate the spatially tiled industrial plant into an empty folder on a volume with more than
+15 GB free. The generator uses a fixed seed to vary each vessel's geometry. It runs the standard HTML exporter on
+one tile at a time and stops when the sum of the tile file sizes reaches 15,000,000,000 bytes.
+
+```powershell
+dotnet run tools/SyntheticModel/TiledSyntheticModel/TiledSyntheticModel.cs -c Release -- D:/work/ioviewer-benchmarks/synthetic-industrial-15gb
+```
+
+Pass a byte target after the output folder for a smaller trial, for example `130000000` for two tiles. Each tile is also
+a standalone HTML export with ordinary format-3 META, BIN and PROPS blocks. `manifest.json` lists the world-space
+bounds and RTC offset of each tile in metres, together with global element ID ranges and file sizes.
+
+The reference generation contains 171 tiles, 1,094,148 elements and 1,186,056,432 triangles. The HTML tiles occupy
+15,000,039,694 bytes in total, including base64 encoding and the viewer. Their decoded BIN blocks total 10,753,286,544 bytes.
+
+### Stream one scene
+
+#### Real IFC and RVT
+
+Export a native source with the regular CLI, using the `.ivmesh` extension for the offline builder. The same command
+accepts an RVT path. Run from the repository root, then from `src/IOViewer/Viewer` for the Node.js commands.
+
+```powershell
+dotnet run --project src/IOViewer.Cli -c Release -f net10.0 -- D:/models/model.ifc -o D:/models/model.ivmesh
+Set-Location src/IOViewer/Viewer
+npm ci
+npm run pack-clusters -- D:/models/model.ivmesh D:/models/model-clusters
+npm run stream -- D:/models/model-clusters
+```
+
+The CLI uses the same IFC and RVT adapters as standalone HTML. It writes rebased indexed mesh records to disk, so
+the handoff does not need one HTML block for the scene. Import still constructs a `SceneDocument` in memory. Only
+triangle meshes enter the cluster package. Triangle positions, material colors and opacity are carried over to the
+full-resolution pages, including UVs when the source supplies them. Authored normals are transformed when present.
+The builder derives missing normals from the triangles. The clustered and standalone viewers share the toolbar,
+model tree, properties panel, context menu, navigation cube, perspective and orthographic controls. The section
+tools clip drawing and picking and support filled cuts through closed meshes. Distance measurement snaps to
+vertices, midpoints and edges on the original mesh. Display modes include materials, textures, white and
+wireframe, with an opacity control.
+
+Current packages carry the original element IDs on leaf triangles and short names, categories, types, levels and
+source IDs in the manifest when the importer supplies them. The tree can search and group these fields without
+requesting any property blocks. The viewer traces the original geometry when selecting, so the displayed LOD
+does not change the hit ID. It requests a property record once a single element is selected. Older annotated
+packages still open with their existing tree fields. Re-export and repack them with the current CLI to carry
+authored textures, grids, linked models, saved views, clashes, BCF and 4D. The `.ivmesh` export accepts the same
+review inputs as HTML, including `--bcf`. Element visibility and isolation use exact page membership; when a
+coarse page contains hidden elements the viewer draws its ready descendants instead. Linked model visibility,
+BCF visibility and 4D playback use independent layers. `--geometry-only` builds omit element and review data
+and retain navigation, clipping, measurement and geometry display modes. The streaming server limits the
+manifest, including embedded review metadata and textures, to 64 MiB.
+
+The builder spatially partitions the input into leaves of at most 8,192 triangles while preserving the source triangles.
+It uses meshoptimizer to construct simplified parent meshes bottom-up in groups of up to four. Parent pages carry
+accumulated simplification errors in metres. The browser chooses a visible cut by projected error with hysteresis and
+keeps drawing a parent until its visible children are resident. It switches the covered branch in a single frame
+with one mesh per branch. A branch already refined stays split until its parent is within one pixel of error,
+regardless of the adaptive threshold for admitting new detail. Parents
+try simplification with locked borders first. Disconnected geometry may need relaxed or grid-based simplification to
+fit a page, so borders at coarse levels need not be watertight. Full detail retains the original mesh.
+
+Initial framing uses triangle-weighted record centres around the core of the scene. **Fit all** uses the complete
+model bounds. The 256 MiB budget accounts for resident and pending page buffers. The initial coarse pages are pinned.
+The viewer requests the next detail level before it reaches the draw threshold and prefetches into a guard band
+while moving. Speculative pages can use free space in the cache. A group blocking currently visible detail can evict
+pages and takes precedence, with a bonus for groups near completion and for pages near the camera target. Upload work
+is capped per frame. Each upload submits one triangle to initialize the page buffers before the full mesh becomes
+eligible for display. Slow frames during movement or refinement can reduce framebuffer scale to 60% per axis.
+The usual draw threshold returns when motion ends, and native resolution returns once the uploads finish.
+Wheel zoom limits the apparent camera distance by the visible model radius in either projection. Perspective pan
+and zoom use the depth of the picked point when it lies beyond the virtual camera target. A miss checks the viewport
+centre to keep gestures responsive after the target has drifted close to the eye.
+The benchmark holds detail responses to verify that the viewer continues to draw the selected region, then orbits the
+model and follows a closer path through it.
+
+```powershell
+$env:PERF_MESH_MODEL = 'D:/models/model-clusters'
+$env:PERF_GPU = 'integrated'
+npx playwright test --config playwright.perf.config.js mesh-lod.perf.js
+```
+
+The real-model check used Chromium 158 at 1920×1080 on the host described above. The camera orbited for 12 seconds
+and moved through the core for 15 seconds. Results are one run per GPU and model.
+
+| Input | Triangles / total pages | GPU | Overview, s | Orbit p95 / max, ms | Close p95 / max, ms | Peak page buffers, MiB |
+| --- | ---: | --- | ---: | ---: | ---: | ---: |
+| 746 MB IFC | 21,380,864 / 5,424 | Radeon | 1.45 | 16.8 / 23.7 | 16.8 / 19.4 | 61.3 |
+| 746 MB IFC | 21,380,864 / 5,424 | RTX 4080 | 1.09 | 16.8 / 21.2 | 16.8 / 19.5 | 61.1 |
+| 931 MB RVT | 7,755,320 / 1,943 | Radeon | 1.18 | 16.8 / 33.3 | 50.0 / 116.7 | 256.0 |
+| 931 MB RVT | 7,755,320 / 1,943 | RTX 4080 | 1.00 | 16.8 / 50.0 | 16.8 / 23.2 | 256.0 |
+
+Both hierarchies retained all triangles returned by their adapters. The RVT adapter reported 3,157 elements without
+drawable geometry and 33 with potentially missing parts. Import and handoff took around 21 seconds for the IFC and
+7 minutes 26 seconds for the RVT. The measurements in the table start at browser navigation to prepared data.
+
+#### Close RVT profile
+
+The second traversal can still request pages. The third traversal holds new requests after the pending pages finish
+and checks that the browser neither downloads nor uploads pages during that route. The report includes GPU time
+from WebGL disjoint timer queries, CPU staging and submission times, and physical framebuffer scale.
+
+~~~powershell
+$env:PERF_MESH_PROFILE_MODEL = 'D:/models/rvt-clusters'
+$env:PERF_GPU = 'integrated'
+$env:PERF_MESH_NATIVE_PIXELS = '1'
+$env:PERF_LABEL = 'rvt-native'
+npx playwright test --config playwright.perf.config.js mesh-profile
+Remove-Item Env:PERF_MESH_NATIVE_PIXELS
+$env:PERF_LABEL = 'rvt-adaptive'
+npx playwright test --config playwright.perf.config.js mesh-profile
+~~~
+
+The 931 MB RVT, Chromium at 1920×1080 on Radeon, one 15-second run per phase and mode.
+
+| Route | Frame p95, native / adaptive, ms | GPU p95, native / adaptive, ms | Frame p99, native / adaptive, ms | Adaptive scale p05 |
+| --- | ---: | ---: | ---: | ---: |
+| First traversal | 33.5 / 33.3 | 30.5 / 23.1 | 66.7 / 33.6 | 0.70 |
+| Second traversal | 50.1 / 33.4 | 38.2 / 25.5 | 83.4 / 50.1 | 0.60 |
+| Resident pages only | 50.0 / 33.4 | 44.0 / 28.7 | 66.7 / 50.1 | 0.70 |
+
+The resident-only case submitted a median of 1.19 million triangles at native resolution and 1.34 million with
+adaptation. CPU submission was 2.5 and 2.4 ms p95. There were no detail requests or uploads during either resident-only route.
+
+#### Rapid approach to a cold area
+
+The camera travels 24× closer in 1.8 seconds, then stops. The harness records the first frame with original leaf
+geometry and the last frame with a nearby parent above six pixels of estimated projected error. Nearby bounds
+are within twice the camera's target distance. These are geometric estimates and include occluded clusters.
+
+| Package | First original leaf, before / after change | Last nearby coarse frame after arrival, with change |
+| --- | ---: | ---: |
+| 746 MB IFC | 383 ms after / 517 ms before arrival | 17 ms |
+| 931 MB RVT | 67 ms after / 1,150 ms before arrival | 1,250 ms |
+| 14.85 GB federation | 517 ms after / 1,150 ms before arrival | 2,050 ms |
+
+One run per version and package, with Chromium on Radeon at 1920×1080. The original implementation had a
+parent above six pixels somewhere in view for the full three-second observation on each package. With the
+change, the federation still had distant parents above that threshold at six seconds. Its geometric page
+cache was at 256 MiB. The approach had no blank frames, and the frame interval p95 was 16.9 ms on IFC,
+33.3 ms on RVT and 33.6 ms on the federation.
+
+On the separate five-route federation benchmark, the updated loader transferred 723 MiB of pages, up from
+276 MiB with the previous review shell. Peak resident and pending pages stayed under 256 MiB. The close
+routes ran at 16.8–33.4 ms p95 with no blank frames.
+
+The later single-cut change passed a pixel test with differently coloured LODs and all-or-nothing coverage.
+Repeated cold approaches drew the first original leaf 583 ms before arrival on IFC and about 1.15–1.18 s before
+arrival on RVT and the federation. Nearby coarse parents were gone at arrival on IFC, after 1.28 s on RVT,
+and after 1.73 s on the federation. Frame interval p95 was 16.8, 33.3 and 33.4 ms respectively.
+
+~~~powershell
+$env:PERF_MESH_MODEL = 'D:/models/federation'
+$env:PERF_GPU = 'integrated'
+npx playwright test --config playwright.perf.config.js mesh-approach
+~~~
+
+#### 14.85 GB federation of real geometry
+
+Build geometry-only packages from current `.ivmesh` exports before composing the benchmark. The script arranges copies
+of the input packages in one scene. It writes each placement's mesh bytes to disk and coalesces the overview pages
+into a separate file for one startup request.
+
+~~~powershell
+npm run pack-clusters -- D:/models/model.ifc.ivmesh D:/models/ifc-geometry --geometry-only
+npm run pack-clusters -- D:/models/model.rvt.ivmesh D:/models/rvt-geometry --geometry-only
+node federate-mesh-pages.js D:/models/federation 14750000000 D:/models/ifc-geometry D:/models/rvt-geometry
+npm run stream -- D:/models/federation 8790
+$env:PERF_FEDERATED_MODEL = 'D:/models/federation'
+$env:PERF_GPU = 'integrated'
+npx playwright test --config playwright.perf.config.js mesh-federation
+~~~
+
+The tested archive contains 14,850,100,406 mesh bytes, 115,929 pages and 458,423,624 source triangles in 31 repeated
+placements from the two real models above. Chromium on Radeon drew the overview in 1.07 s from navigation.
+The eight-second orbit around the whole scene ran at 16.8 ms p95. Across five six-second close routes, p95 ranged
+from 16.8 to 33.3 ms and the worst interval was 66.7 ms. Every route reported zero blank frames. The viewer
+evicted 493 pages and stayed under its 256 MiB page-buffer budget. A page was requested successfully at offset
+14,848,148,992. The budget excludes the manifest, renderer and browser overhead. A single native model of that
+size was unavailable.
+
+With the shared review shell, a repeat of the same benchmark drew its overview in 0.85 s. Orbit p95 was 16.8 ms
+and the five close-route p95 intervals ranged from 16.7 to 33.3 ms. All routes still reported zero blank frames.
+The cache evicted 540 pages without exceeding 256 MiB.
+
+With the review tools enabled in the streaming viewer, the same geometry-only federation drew its overview in
+1.22 s. Orbit p95 was 16.8 ms and the five close-route p95 intervals ranged from 16.8 to 33.4 ms, with zero blank
+frames. The maximum page-buffer charge was 268,435,360 bytes. The annotated IFC and RVT packages both loaded
+original properties and passed the hide, restore and clipped picking checks. Their cold-approach p95 was 16.9 ms.
+
+The browser checks searched the tree, selected an original element and loaded its property groups in the 746 MB IFC
+and a separate 139 MB RVT. A two-cluster fixture checked a distance measurement across the seam and both box clipping
+modes in orthographic projection. The package for the 139 MB RVT contains 4,718,560 triangles. The repeat import of the 931 MB RVT
+for annotation failed with an out-of-memory error inside RvtIO. Its pre-existing geometry package was used for the
+performance checks.
+
+To check properties on a real annotated package and the section plane across a rendered cluster seam, set
+`PERF_MESH_TOOLS_MODEL` to an IFC or RVT cluster directory packed with the default options and run
+`npx playwright test --config playwright.perf.config.js mesh-tools`.
+
+#### Synthetic vessel reference
+
+From `src/IOViewer/Viewer`, pack the generated model once and run the local server. Open the printed address.
+
+```powershell
+npm run pack-clusters -- D:/work/ioviewer-benchmarks/synthetic-industrial-15gb D:/work/ioviewer-benchmarks/industrial-clusters
+npm run stream -- D:/work/ioviewer-benchmarks/industrial-clusters
+```
+
+The packer verifies the topology and quantized lattice of the synthetic vessels. It retains every source position and
+triangle. The 17,100 leaves contain up to 64 vessels each. Full mesh pages contain up to 408 KiB of positions and normals
+with indices reconstructed from the verified shared topology. The packed files contain a 30.6 MB resident instance table,
+7.14 GB of fine geometry, and a manifest that indexes the byte ranges. The original HTML exports stay usable on their own.
+
+The viewer draws all vessels from the resident instance table at overview. It picks among three cached approximations
+and the original mesh using frustum and projected-error tests over spatial roots and leaves. There is hysteresis between
+levels, and the approximated surfaces morph toward the next resolution. The approximate meshes remain drawn while fine
+pages are pending. Each arriving page replaces its approximation with a 140 ms complementary dither. The viewport admits
+at most two new GPU pages per frame and issues at most four page requests at a time. The 256 MiB accounting reserves the
+resident table, its possible GPU uploads and the fine mesh buffers, including in-flight pages. JavaScript object and
+graphics-driver overhead are outside the accounting.
+
+The packer supports the synthetic vessel topology. The clustered view operates on geometry and material colors. The
+standalone HTML exports also include selection, properties, and section tools.
+
+```powershell
+$env:PERF_CLUSTER_MODEL = 'D:/work/ioviewer-benchmarks/industrial-clusters'
+$env:PERF_GPU = 'integrated'
+npx playwright test --config playwright.perf.config.js lod.perf.js
+```
+
+The benchmark holds fine page responses at a fixed camera and verifies that the same vessels are rendered before and
+after refinement. It then flies 2.82 km at the original reference height in 30 seconds and flies 0.79 km close to the
+vessels in 20 seconds. Additional camera jumps fill the cache and verify that eviction stays within the budget.
+
+One reference run per GPU used Chromium 158 at 1920×1080 on the host described above.
+
+| GPU | Overview, s | Flyover p95 / max, ms | Close route p95 / max, ms | Requested fine detail drawn, close route |
+| --- | ---: | ---: | ---: | ---: |
+| Radeon | 1.26 | 16.8 / 66.7 | 16.8 / 33.3 | 98.4% |
+| RTX 4080 | 0.65 | 16.8 / 33.4 | 16.8 / 17.0 | 98.7% |
+
+At the fixed camera, 3,392 vessels were drawn before and after releasing the page responses. Both runs admitted
+216 pages, evicted five and peaked at 255.9 MiB of accounted buffers during the cache pressure check.
+
+### Earlier whole-area reference
+
+Serve the unpacked HTML exports to reproduce the previous whole-area measurements.
+
+```powershell
+npm run stream -- D:/work/ioviewer-benchmarks/synthetic-industrial-15gb
+```
+
+The initial view displays the bounds of every area. Zoom in or double-click an area's bounds to see the actual meshes. The viewer
+prioritizes up to two nearby areas in the frustum, prepares one tile in a worker at a time, and submits up to two mesh
+batches per frame. It frees geometry and material GPU resources on eviction. The 256 MiB cap covers prepared mesh
+buffers including a reservation for the in-flight result. HTML input is limited to 96 MiB per tile and decoded BIN and
+temporary worker allocations are separate from the mesh cap.
+
+This mode supports navigation and material colors for the tiled benchmark format. Element interaction, property panels,
+texture rendering and section tools are available in the ordinary single-tile HTML exports.
+
+To reproduce the whole-model flyover, run from the viewer directory. The test opens the overview, flies 2.82 km across
+12 areas in 30 seconds at a fixed height, then jumps to the opposite side. The report records the animation-frame
+intervals and the share of route time when the priority area has finished uploading all its detail batches.
+
+```powershell
+$env:PERF_STREAM_MODEL = 'D:/work/ioviewer-benchmarks/synthetic-industrial-15gb'
+$env:PERF_GPU = 'integrated'
+npx playwright test --config playwright.perf.config.js stream.perf.js
+```
+
+The reference run used Chromium 158 at 1920×1080 on the Windows host above. Results show one run per GPU.
+
+| GPU | Overview, s | Full detail after a jump, s | Frame interval p95 / max, ms | Priority area fully detailed |
+| --- | ---: | ---: | ---: | ---: |
+| Radeon | 0.95 | 1.55 | 33.3 / 33.5 | 92.1% |
+| RTX 4080 | 0.83 | 1.48 | 16.9 / 17.6 | 95.4% |
+
+Both runs uploaded detail in all 12 route areas and the distant destination, evicted 12 areas, and submitted at most
+7.88 million triangles in a frame during the route. The peak resident mesh size was 198.9 MiB. With the in-flight
+reservation included, the peak budget charge was 227.5 MiB of 256 MiB on both GPUs.
+
 ## Distance measurement hover
 
 On the same machine and Synthetic-400k workload, the harness records 60 paired pick and measurement samples per GPU.

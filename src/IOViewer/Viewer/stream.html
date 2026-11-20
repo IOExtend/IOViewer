@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IOViewer</title>
+<link rel="stylesheet" href="/viewer.css">
+<style>
+  #stream-controls { left: 50%; top: 14px; transform: translateX(-50%); padding: 6px; display: flex; gap: 6px; }
+  #stream-controls > * { background: var(--button); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px; }
+</style>
+<canvas id="ioviewer-canvas" aria-label="3D model"></canvas>
+<div id="ioviewer-ui">
+  <div id="stream-controls" class="ioviewer-floating">
+    <button type="button" id="fit">Fit model</button>
+    <button type="button" id="retry" hidden>Retry downloads</button>
+  </div>
+  <div id="ioviewer-message" role="alert" hidden></div>
+  <div id="ioviewer-status"></div>
+</div>
+<script type="module" src="/stream.js"></script>
+</html>

@@ -5,6 +5,8 @@ import { isClick, orbit, zoomTowards, wheelZoomFactor, boxSelectMode, interpolat
 const ORBIT_SPEED = 0.005; // radians per pixel
 const DEFAULT_DIRECTION = new THREE.Vector3(1, -1, 0.8).normalize();
 const NEAR_MIN = 0.01; // metres
+const MIN_VIEW_DISTANCE = 1e-6;
+const MAX_VIEW_RADII = 64;
 const FAR_MARGIN = 1.05;
 const LINEAR_DEPTH_RATIO = 5000;
 
@@ -241,6 +243,20 @@ export class NavigationControls extends EventTarget {
     this._drag = { id: e.pointerId, button: e.button, mode, pivot, down: point, last: point, moved: false };
   }
 
+  _anchor(x, y) {
+    const point = this.pick(x, y);
+    if (point) return point;
+    const rect = this.dom.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    return x === cx && y === cy ? null : this.pick(cx, cy);
+  }
+
+  _gestureDepth(point, forward) {
+    const cam = this.camera;
+    const hitDepth = point ? point.clone().sub(cam.position).dot(forward) : 0;
+    return Math.max(MIN_VIEW_DISTANCE, cam.position.distanceTo(this.target), hitDepth);
+  }
+
   _move(e) {
     const d = this._drag;
     if (!d || e.pointerId !== d.id) return;
@@ -261,8 +277,12 @@ export class NavigationControls extends EventTarget {
   _pan(dx, dy) {
     const cam = this.camera;
     const height = Math.max(this.dom.clientHeight, 1);
+    if (cam.isPerspectiveCamera && this._drag.depth === undefined) {
+      const { x, y } = this._drag.down;
+      this._drag.depth = this._gestureDepth(this._anchor(x, y), cam.getWorldDirection(new THREE.Vector3()));
+    }
     const worldPerPixel = cam.isPerspectiveCamera
-      ? (2 * cam.position.distanceTo(this.target) * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))) / height
+      ? (2 * this._drag.depth * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))) / (height * cam.zoom)
       : (cam.top - cam.bottom) / cam.zoom / height;
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
@@ -324,10 +344,15 @@ export class NavigationControls extends EventTarget {
     this._stopAnimation();
     const factor = wheelZoomFactor(e.deltaY, e.deltaMode, this.dom.clientHeight);
     const cam = this.camera;
+    const distance = cam.position.distanceTo(this.target);
+    // Beyond this scale the model is only a few pixels wide and pan/zoom stop being useful.
+    const radius = this._visibleBounds()?.sphere.radius ?? 0;
+    const maxDistance = MAX_VIEW_RADII * Math.max(radius, 1e-3);
     if (cam.isOrthographicCamera) {
       const { left, top, width, height } = this.dom.getBoundingClientRect();
       if (!width || !height) return;
-      const zoom = THREE.MathUtils.clamp(cam.zoom / factor, 1e-6, 1e6);
+      const zoom = THREE.MathUtils.clamp(cam.zoom / factor, Math.max(1e-6, Math.min(cam.zoom, distance / maxDistance)), 1e6);
+      if (zoom === cam.zoom) return;
       // Translate in the view plane by the change in the cursor offset. Depth and the pivot distance stay fixed.
       const shift = new THREE.Vector3(
         (2 * (e.clientX - left) / width - 1) * cam.right,
@@ -340,11 +365,20 @@ export class NavigationControls extends EventTarget {
     }
     // One pick per animation frame: notches arriving within a frame zoom towards the same point.
     if (!this._wheelPick) {
-      this._wheelPick = { point: this.pick(e.clientX, e.clientY) };
+      this._wheelPick = { point: this._anchor(e.clientX, e.clientY) };
       requestAnimationFrame(() => (this._wheelPick = null));
     }
-    const point = this._wheelPick.point ?? this.target;
-    const r = zoomTowards(cam.position, this.target, point, factor);
+    const forward = cam.getWorldDirection(new THREE.Vector3());
+    const depth = this._gestureDepth(this._wheelPick.point, forward);
+    if (!Number.isFinite(depth)) return;
+    const minimum = Math.min(NEAR_MIN, Math.max(MIN_VIEW_DISTANCE, radius));
+    const boundedFactor = THREE.MathUtils.clamp(depth * factor, minimum, Math.max(depth, maxDistance)) / depth;
+    if (boundedFactor === 1) return;
+    // Keep the cursor anchor while moving a stale target back to the depth of the model.
+    const target = cam.position.clone().addScaledVector(forward, depth);
+    const point = this._wheelPick.point;
+    const anchor = point && point.clone().sub(cam.position).dot(forward) >= minimum ? point : target;
+    const r = zoomTowards(cam.position, target, anchor, boundedFactor);
     this._set(r.position, r.target);
   }
 }

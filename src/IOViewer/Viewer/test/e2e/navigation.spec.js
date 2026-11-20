@@ -100,6 +100,63 @@ test('wheel zooms by 0.85 per notch and the model stays inside near/far', async 
   expect(covered).toBe(true);
 });
 
+for (const projection of ['perspective', 'orthographic']) {
+  test(`extreme ${projection} zoom out still permits pan and a quick return`, async ({ page }) => {
+    const errors = await open(page);
+    await page.evaluate((kind) => window.__ioviewer.controls.setProjection(kind), projection);
+    const scale = () => page.evaluate(() => {
+      const { camera, controls } = window.__ioviewer;
+      return camera.position.distanceTo(controls.target) / camera.zoom;
+    });
+    const wheel = (count, deltaY) => page.evaluate(({ count, deltaY }) => {
+      const { dom } = window.__ioviewer.controls;
+      for (let i = 0; i < count; i++) {
+        dom.dispatchEvent(new WheelEvent('wheel', { deltaY, clientX: 640, clientY: 400, bubbles: true, cancelable: true }));
+      }
+    }, { count, deltaY });
+    const fit = await scale();
+    await wheel(120, 600);
+    await frame(page);
+    const far = await scale();
+    expect(far / fit).toBeGreaterThan(5);
+    expect(far / fit).toBeLessThan(30);
+
+    const target = () => page.evaluate(() => window.__ioviewer.controls.target.toArray());
+    const before = await target();
+    await drag(page, 'right', [640, 400], [655, 404]);
+    expect(await target()).not.toEqual(before);
+    expect((await scale()) / far).toBeCloseTo(1, 5);
+    await drag(page, 'right', [655, 404], [640, 400]);
+    await wheel(5, -600);
+    await frame(page);
+    expect((await scale()) / fit).toBeLessThan(1);
+    expect(await page.evaluate(() => {
+      const { camera } = window.__ioviewer;
+      return camera.near > 0 && camera.far > camera.near && camera.projectionMatrix.elements.every(Number.isFinite);
+    })).toBe(true);
+    expect(errors).toEqual([]);
+  });
+}
+
+test('pan and wheel recover when the target is a centimetre away but the geometry is farther', async ({ page }) => {
+  await open(page);
+  const depth = 1;
+  await page.evaluate((depth) => {
+    const { controls, camera } = window.__ioviewer;
+    controls.restoreViewCamera({ position: [0, -5, 1], target: [0, -4.99, 1], up: [0, 0, 1] });
+    controls.pick = (x) => x === 640 ? camera.position.clone().set(0, -5 + depth, 1) : null;
+  }, depth);
+  await drag(page, 'right', [640, 400], [740, 400]);
+  const eye = () => page.evaluate(() => window.__ioviewer.controls.camera.position.toArray());
+  expect((await eye())[0]).toBeCloseTo(-2 * depth * Math.tan(Math.PI / 8) * 100 / 800, 6);
+
+  await page.mouse.move(660, 400); // miss under the cursor, with geometry at the centre of the viewport
+  await page.mouse.wheel(0, 100);
+  await frame(page);
+  expect((await eye())[1]).toBeCloseTo(-5 - (1 / 0.85 - 1) * depth, 6);
+  expect(await distance(page)).toBeCloseTo(depth / 0.85, 6);
+});
+
 test('shift drag emits boxselect: dashed overlay for crossing, solid for window', async ({ page }) => {
   await open(page);
   await page.keyboard.down('Shift');

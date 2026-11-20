@@ -76,6 +76,23 @@ internal sealed class ViewerPayloadWriter
         return writer;
     }
 
+    internal static void WriteClusterReview(ViewerDocument doc, HtmlViewerOptions options, Vector3d origin, Stream output)
+    {
+        var writer = new ViewerPayloadWriter(doc, options) { _rtcOffset = origin };
+        var elementIndex = doc.Scene.Elements.Select((element, index) => (element.Id, index))
+            .ToDictionary(element => element.Id, element => element.index);
+        writer._sections = writer.BuildSections(doc.SectionPlanes, doc.SectionBox);
+        writer.BuildViewpointStates(doc.ViewpointStates, elementIndex);
+        writer.ValidateMetadata();
+        using var w = new Utf8JsonWriter(output);
+        w.WriteStartObject();
+        w.WriteString("title", options.Title);
+        writer.WriteOptions(w);
+        writer.WriteTextures(w);
+        writer.WriteReview(w);
+        w.WriteEndObject();
+    }
+
     private SectionState BuildSections(List<ViewerSectionPlane>? planes, ViewerSectionBox? sectionBox)
     {
         var output = new List<(string Axis, Vector3d Normal, double Offset, bool Flipped)>();
@@ -594,50 +611,17 @@ internal sealed class ViewerPayloadWriter
         w.WriteStartObject();
         if (_options.IncludeProperties)
         {
-            var sets = new Dictionary<int, ScenePropertySet>();
-            foreach (var set in _scene.PropertySets) sets.TryAdd(set.Id, set);
-            var referenced = new HashSet<int>();
-            var names = new HashSet<string>();
-            var nextSuffix = new Dictionary<string, int>();
+            var properties = new ViewerProperties(_scene);
             foreach (var el in _scene.Elements)
             {
                 if (el.PropertySetIds.Count == 0) continue;
-                w.WriteStartObject(el.Id.ToString(CultureInfo.InvariantCulture));
-                // Sets with the same name are one group, in the order the element first references them; a property
-                // name used before in the group gets the first free suffix " (2)", " (3)", ...
-                referenced.Clear();
-                var groups = el.PropertySetIds.Where(referenced.Add).Select(id => sets.GetValueOrDefault(id)).OfType<ScenePropertySet>().GroupBy(s => Written(s.Name));
-                foreach (var group in groups)
-                {
-                    w.WriteStartObject(group.Key);
-                    names.Clear();
-                    nextSuffix.Clear();
-                    foreach (var prop in group.SelectMany(s => s.Properties))
-                    {
-                        string written = Written(prop.Name), name = written;
-                        if (!names.Add(name))
-                        {
-                            // Every suffix below nextSuffix[written] is taken, so a name that repeats many times is not
-                            // searched from " (2)" again each time.
-                            int n = nextSuffix.GetValueOrDefault(written, 2);
-                            while (!names.Add(name = string.Create(CultureInfo.InvariantCulture, $"{written} ({n})"))) n++;
-                            nextSuffix[written] = n + 1;
-                        }
-                        // The display string: a value of a kind this version does not know is shown as text.
-                        w.WriteString(name, prop.Value.Text);
-                    }
-                    w.WriteEndObject();
-                }
-                w.WriteEndObject();
+                w.WritePropertyName(el.Id.ToString(CultureInfo.InvariantCulture));
+                properties.Write(w, el);
                 FlushIfLarge(w);
             }
         }
         w.WriteEndObject();
     }
-
-    // The writer writes each lone surrogate as U+FFFD, so names that differ only there are equal in the page.
-    private static string Written(string name) =>
-        name.AsSpan().ContainsAnyInRange('\uD800', '\uDFFF') ? Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(name)) : name;
 
     public void WriteMeta(Stream output)
     {
@@ -651,10 +635,7 @@ internal sealed class ViewerPayloadWriter
         WriteVector(w, "rtcOffset", _rtcOffset);
         WriteBox(w, "bbox", _bounds, _rtcOffset);
 
-        w.WriteStartObject("options");
-        w.WriteBoolean("initialWireframe", _options.InitialWireframe);
-        w.WriteBoolean("initialWhiteMode", _options.InitialWhiteMode);
-        w.WriteEndObject();
+        WriteOptions(w);
 
         if (_writtenMeshes < _drawable)
         {
@@ -691,18 +672,7 @@ internal sealed class ViewerPayloadWriter
         }
         w.WriteEndArray();
 
-        w.WriteStartArray("textures");
-        foreach (var tex in _scene.Textures)
-        {
-            w.WriteStartObject();
-            w.WriteString("mime", tex.MimeType);
-            w.WriteString("data", Convert.ToBase64String(tex.Data));
-            w.WriteNumber("sx", tex.ScaleX);
-            w.WriteNumber("sy", tex.ScaleY);
-            w.WriteEndObject();
-            FlushIfLarge(w);
-        }
-        w.WriteEndArray();
+        WriteTextures(w);
 
         w.WriteStartArray("geometries");
         foreach (var g in _geometries)
@@ -739,6 +709,37 @@ internal sealed class ViewerPayloadWriter
         _instances.Matrix.WriteTo(w);
         w.WriteEndObject();
 
+        WriteReview(w);
+        w.WriteEndObject();
+    }
+
+    private void WriteOptions(Utf8JsonWriter w)
+    {
+        w.WriteStartObject("options");
+        w.WriteBoolean("initialWireframe", _options.InitialWireframe);
+        w.WriteBoolean("initialWhiteMode", _options.InitialWhiteMode);
+        w.WriteEndObject();
+    }
+
+    private void WriteTextures(Utf8JsonWriter w)
+    {
+        w.WriteStartArray("textures");
+        foreach (var tex in _scene.Textures)
+        {
+            w.WriteStartObject();
+            w.WriteString("mime", tex.MimeType);
+            w.WriteString("data", Convert.ToBase64String(tex.Data));
+            w.WriteNumber("sx", tex.ScaleX);
+            w.WriteNumber("sy", tex.ScaleY);
+            w.WriteEndObject();
+            FlushIfLarge(w);
+        }
+        w.WriteEndArray();
+    }
+
+    private void WriteReview(Utf8JsonWriter w)
+    {
+        var host = _scene.Models.Count > 0 ? _scene.Models[0] : null;
         // An element of a linked model carries the model's path, else its name, as the linked file list shows it.
         var links = new Dictionary<int, string?>();
         for (int i = _firstListedModel; i < _scene.Models.Count; i++)
@@ -788,8 +789,6 @@ internal sealed class ViewerPayloadWriter
         WriteTimeLiner(w);
         WriteLinkedFiles(w);
         WriteClashTests(w);
-
-        w.WriteEndObject();
     }
 
     private static void WriteSections(Utf8JsonWriter w, SectionState sections)

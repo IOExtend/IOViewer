@@ -102,7 +102,7 @@ export function mountTree(container, { elements, models, selection, scene, zoomT
     tabRow = next >= 0 ? next : 0;
     spacer.style.height = `${rows.length * ROW_HEIGHT}px`;
     empty.hidden = rows.length > 0 || !flat;
-    filters.update(query, flat && rows.some((index) => scene.instancesOf(index).length > 0));
+    filters.update(query, !!scene.isolate && flat && rows.some((index) => scene.instancesOf(index).length > 0));
     render();
   }
 
@@ -153,7 +153,7 @@ export function mountTree(container, { elements, models, selection, scene, zoomT
       node.setAttribute('aria-posinset', String(flat ? r + 1 : r - groupRows[c]));
       node.setAttribute('aria-setsize', String(flat ? rows.length : groups[c].indices.length));
       node.classList.toggle('tree-child', !flat);
-      node.classList.toggle('tree-hidden', !scene.isVisible(value));
+      node.classList.toggle('tree-hidden', scene.isVisible?.(value) === false);
       node.append(el('span', 'tree-name', element.name || `#${element.id}`), el('span', 'tree-type', element.type ?? ''));
     }
     return node;
@@ -366,7 +366,7 @@ export function mountTree(container, { elements, models, selection, scene, zoomT
     if (last >= 0) reveal(last);
     else render();
   });
-  scene.root.addEventListener('change', (e) => e.detail.kind === 'visibility' && render());
+  scene.root?.addEventListener('change', (e) => e.detail.kind === 'visibility' && render());
 
   rebuild();
 }
