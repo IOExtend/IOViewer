@@ -2,7 +2,7 @@ import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeFileSync } fr
 import { join } from 'node:path';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { splitCells, unitNormals } from './src/engine/chunks.js';
-import { ELEMENT_FIELDS, isBounds, isPoint, MAX_ELEMENT_BYTES, MESH_FORMAT, MESH_MANIFEST_BYTES, PAGE_TRIANGLES, ROOT_BYTES, pageBytes, sizeOfPage, validateMeshPages, viewsOfPage } from './src/stream/meshPages.js';
+import { ELEMENT_FIELDS, INSTANCE_BYTES, isBounds, isPoint, MAX_ELEMENT_BYTES, MESH_FORMAT, MESH_MANIFEST_BYTES, PAGE_TRIANGLES, ROOT_BYTES, pageBytes, residentBytes, sizeOfPage, validateMeshPages, viewsOfPage } from './src/stream/meshPages.js';
 import { validateReviewMeta } from './src/data.js';
 
 const HEADER = 28, RECORD = 40;
@@ -10,6 +10,7 @@ const channel = Array.from({ length: 256 }, (_, i) => {
   const x = i / 255;
   return Math.round(255 * (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4));
 });
+const linearColor = (color) => [channel[color & 255], channel[(color >>> 8) & 255], channel[(color >>> 16) & 255], color >>> 24];
 
 function read(fd, bytes, offset) {
   const buffer = new ArrayBuffer(bytes), data = new Uint8Array(buffer);
@@ -24,19 +25,20 @@ function read(fd, bytes, offset) {
 function recordsOf(fd, includeBim) {
   const header = new DataView(read(fd, HEADER, 0));
   const version = header.getUint32(0, true);
-  const reviewFormat = version === 0x33534d49;
+  const sharedFormat = version === 0x34534d49;
+  const reviewFormat = sharedFormat || version === 0x33534d49;
   const annotated = reviewFormat || version === 0x32534d49;
   if (!annotated && version !== 0x31534d49) throw new Error('Expected an IOViewer .ivmesh source.');
   const origin = [4, 12, 20].map((i) => header.getFloat64(i, true));
   if (!isPoint(origin)) throw new Error('Invalid source origin.');
   const records = [];
   const size = fstatSync(fd).size;
-  const start = HEADER + (annotated ? 8 : 0), recordSize = RECORD + (reviewFormat ? 16 : annotated ? 8 : 0);
+  const start = HEADER + (annotated ? 8 : 0), recordSize = RECORD + (sharedFormat ? 36 : reviewFormat ? 16 : annotated ? 8 : 0);
   const end = annotated ? Number(new DataView(read(fd, 8, HEADER)).getBigInt64(0, true)) : size;
   if (!Number.isSafeInteger(end) || end < start || end > size) throw new Error('Invalid geometry directory offset.');
   const meta = new Float32Array(recordSize / 4), data = new Uint8Array(meta.buffer), counts = new Uint32Array(meta.buffer);
   const recordView = new DataView(meta.buffer);
-  const slots = new Map(), elements = [];
+  const slots = new Map(), elements = [], prototypes = new Map();
   let review, propertiesStart = end, textureCount = 0;
   if (reviewFormat) {
     const length = new DataView(read(fd, 4, end)).getUint32(0, true);
@@ -56,15 +58,26 @@ function recordsOf(fd, includeBim) {
     }
   }
   for (let offset = start; offset < end;) {
+    const recordOffset = offset;
     if (offset + recordSize > end || readSync(fd, data, 0, recordSize, offset) !== recordSize) throw new Error('Truncated mesh record.');
     const min = [...meta.subarray(0, 3)], max = [...meta.subarray(3, 6)];
     const [vertices, indices, rgba, normals] = counts.subarray(6);
     const texture = reviewFormat ? recordView.getInt32(RECORD + 8, true) : -1;
-    const solid = reviewFormat ? recordView.getUint32(RECORD + 12, true) : 0;
-    const bytes = vertices * (12 * (1 + normals) + (texture >= 0 ? 8 : 0)) + indices * 4;
+    const flags = reviewFormat ? recordView.getUint32(RECORD + 12, true) : 0;
+    const uv = sharedFormat ? Boolean(flags & 2) : texture >= 0;
+    const shape = sharedFormat ? Number(recordView.getBigInt64(RECORD + 16, true)) : -1;
+    const shift = shape >= 0 ? [...meta.subarray((RECORD + 24) / 4)] : undefined;
+    const bytes = vertices * (12 * (1 + normals) + (uv ? 8 : 0)) + indices * 4;
     offset += recordSize;
+    const first = shape === recordOffset;
+    const prototype = prototypes.get(shape);
+    const inline = first || shape === -1;
     if (!isBounds({ min, max }) || !vertices || vertices > indices || !indices || indices % 3 || indices > PAGE_TRIANGLES * 3
-      || normals > 1 || solid > 1 || texture < -1 || (includeBim && texture >= textureCount) || bytes > end - offset) throw new Error('Invalid mesh record.');
+      || normals > 1 || flags > (sharedFormat ? 3 : 1) || texture < -1 || (texture >= 0 && !uv)
+      || (includeBim && texture >= textureCount) || (inline && bytes > end - offset)
+      || (shape !== -1 && (!isPoint(shift) || (!first && (!prototype || prototype.vertices !== vertices
+        || prototype.indices !== indices || prototype.normals !== normals || prototype.flags !== flags))))) throw new Error('Invalid mesh record.');
+    if (first) prototypes.set(shape, { offset, vertices, indices, normals, flags });
     let element;
     if (annotated && includeBim) {
       const id = recordView.getBigInt64(RECORD, true).toString();
@@ -83,8 +96,9 @@ function recordsOf(fd, includeBim) {
         }
       }
     }
-    records.push({ min, max, vertices, indices, rgba, normals, offset, bytes, element, texture, solid: !!solid, includeBim });
-    offset += bytes;
+    records.push({ min, max, vertices, indices, rgba, normals, offset: inline ? offset : prototype.offset, bytes, element, texture,
+      solid: Boolean(flags & 1), uv, includeBim, shape, shift });
+    if (inline) offset += bytes;
   }
   if (!records.length) throw new Error('The source contains no triangle geometry.');
   const metadata = new Map();
@@ -161,7 +175,7 @@ function assemble(parts, tagged = false, leaf = false) {
     tags: tagged ? Uint32Array.from([...opaqueTags, ...blendedTags]) : null };
 }
 
-function partFromRecord(fd, record) {
+function partFromRecord(fd, record, local = false) {
   const buffer = read(fd, record.bytes, record.offset), n = record.vertices * 3;
   const position = new Float32Array(buffer, 0, n);
   const index = new Uint32Array(buffer, n * 4 * (1 + record.normals), record.indices);
@@ -170,11 +184,13 @@ function partFromRecord(fd, record) {
   if (normals.some((n) => !Number.isFinite(n))) throw new Error('Invalid mesh normal.');
   const normal = Int16Array.from(normals, (x) => Math.round(Math.max(-1, Math.min(1, x)) * 32767));
   const color = new Uint8Array(record.vertices * 4), a = record.rgba >>> 24;
-  const rgba = [channel[record.rgba & 255], channel[(record.rgba >>> 8) & 255], channel[(record.rgba >>> 16) & 255], a];
+  const rgba = linearColor(record.rgba);
   for (let i = 0; i < color.length; i += 4) color.set(rgba, i);
   const texture = record.includeBim && record.texture >= 0 ? record.texture : undefined;
-  const uv = texture === undefined ? null : new Float32Array(buffer, index.byteOffset + index.byteLength, record.vertices * 2);
+  const uv = record.uv && (texture !== undefined || local)
+    ? new Float32Array(buffer, index.byteOffset + index.byteLength, record.vertices * 2) : null;
   if (uv?.some((value) => !Number.isFinite(value))) throw new Error('Invalid mesh UV.');
+  if (!local && record.shift) for (let i = 0; i < position.length; i++) position[i] += record.shift[i % 3];
   return { position, normal, color, index, uv, texture, solid: record.solid,
     opaque: a === 255 ? index.length : 0, element: record.element };
 }
@@ -256,12 +272,13 @@ function pack(mesh, opaque, blended, tags = null) {
 export async function buildMeshPages(source, destination, includeBim = true) {
   await MeshoptSimplifier.ready;
   const input = openSync(source, 'r');
-  let output;
+  let output, shapeFile;
   try {
     const { origin, records, elements, metadata, review } = recordsOf(input, includeBim);
     mkdirSync(destination);
     output = openSync(join(destination, 'meshes.bin'), 'wx+');
     const pages = [];
+    const shared = new Map(), shapes = [], instances = new Map();
     const weights = Uint32Array.from(records, ({ indices }) => indices / 3);
     const centres = Float64Array.from(records.flatMap(({ min, max }) => min.map((n, i) => (n + max[i]) / 2)));
     let bytes = 0;
@@ -271,23 +288,74 @@ export async function buildMeshPages(source, destination, includeBim = true) {
       bytes += buffer.byteLength;
       return pages.length - 1;
     }
-    const leaves = splitCells(centres, weights, records.keys(), PAGE_TRIANGLES);
+    const batches = new Map(), ordinary = [];
+    for (const [id, record] of records.entries()) {
+      if (record.shape === -1) { ordinary.push(id); continue; }
+      const key = `${record.shape}/${includeBim ? record.texture : -1}/${record.rgba >>> 24 === 255}`;
+      if (!batches.has(key)) batches.set(key, []);
+      batches.get(key).push(id);
+    }
+    const leaves = splitCells(centres, weights, ordinary, PAGE_TRIANGLES);
     let roots = [];
     for (const leaf of leaves) {
       const parts = [...leaf].map((i) => records[i]);
       const mesh = assemble(parts.map((part) => partFromRecord(input, part)), elements.length > 0, true);
       roots.push(write(pack(mesh, mesh.opaque, mesh.blended, mesh.tags), aggregateBounds(parts), 0, []));
     }
+    let shapeBytes = 0;
+    for (const batch of batches.values()) for (const leaf of splitCells(centres, weights, batch, PAGE_TRIANGLES)) {
+      const parts = [...leaf].map((id) => records[id]);
+      const record = parts[0];
+      let shape = shared.get(record.shape);
+      if (shape === undefined) {
+        const part = partFromRecord(input, record, true);
+        const mesh = { ...part, color: new Uint8Array(part.color.length).fill(255) };
+        const { buffer, vertices, indices, uv } = pack(mesh, part.index, []);
+        shapeFile ??= openSync(join(destination, 'shapes.bin'), 'wx');
+        writeFileSync(shapeFile, new Uint8Array(buffer));
+        shape = shapes.length;
+        shapes.push({ vertices, indices, uv, offset: shapeBytes });
+        shapeBytes += buffer.byteLength;
+        shared.set(record.shape, shape);
+      }
+      const { vertices, indices, uv } = shapes[shape];
+      const buffer = new ArrayBuffer(parts.length * INSTANCE_BYTES), data = new DataView(buffer);
+      for (const [i, part] of parts.entries()) {
+        const at = i * INSTANCE_BYTES;
+        for (let axis = 0; axis < 3; axis++) data.setFloat32(at + 4 * axis, part.shift[axis], true);
+        data.setUint32(at + 12, part.element ?? 0, true);
+        new Uint8Array(buffer, at + 16, 4).set(linearColor(part.rgba));
+      }
+      const pick = elements.length > 0 ? true : undefined;
+      const members = pick ? [...new Set(parts.map((part) => part.element))].sort((a, b) => a - b) : undefined;
+      const texture = includeBim && record.texture >= 0 ? record.texture : undefined;
+      const opaque = record.rgba >>> 24 === 255 ? indices : 0;
+      const id = write({ buffer, vertices, indices, uv, opaque, pick, members, shape, count: parts.length,
+        groups: [{ count: indices, closed: record.solid || undefined, texture }] }, aggregateBounds(parts), 0, []);
+      roots.push(id);
+      instances.set(id, parts);
+    }
+    if (instances.size && roots.length > 1) {
+      const pageCentres = Float64Array.from(pages.flatMap(({ min, max }) => min.map((n, i) => (n + max[i]) / 2)));
+      roots = splitCells(pageCentres, new Uint32Array(pages.length).fill(1), roots, 1).map((ids) => ids[0]);
+    }
     console.log(`${roots.length} full-resolution mesh pages`);
     const triangles = weights.reduce((sum, n) => sum + n, 0);
-    while (roots.length > 48 || roots.reduce((sum, id) => sum + sizeOfPage(pages[id]), 0) > ROOT_BYTES / 2) {
+    while (roots.length > 48 || roots.reduce((sum, id) => sum + residentBytes(pages[id], shapes), 0) > ROOT_BYTES / 2) {
       const next = [];
-      for (let i = 0; i < roots.length; i += 4) {
-        const children = roots.slice(i, i + 4);
+      // Separate instance batches can push a level just over the root count limit.
+      const fanout = instances.size && roots.length > 48 ? Math.min(4, Math.ceil(roots.length / 48)) : 4;
+      for (let i = 0; i < roots.length; i += fanout) {
+        const children = roots.slice(i, i + fanout);
         if (children.length === 1) { next.push(children[0]); continue; }
         const group = children.map((id) => pages[id]);
         const bounds = aggregateBounds(group);
-        const mesh = assemble(group.map((page) => ({ ...viewsOfPage(read(output, sizeOfPage(page), page.offset), page), opaque: page.opaque })));
+        const mesh = assemble(children.flatMap((id) => {
+          const page = pages[id];
+          const copies = instances.get(id);
+          return copies ? copies.map((record) => partFromRecord(input, record))
+            : [{ ...viewsOfPage(read(output, sizeOfPage(page), page.offset), page), opaque: page.opaque }];
+        }));
         const limit = Math.min(PAGE_TRIANGLES * 3 - 3, Math.max(6, (mesh.opaque.length + mesh.blended.length) / 5));
         const { opaque, blended, error } = reducedIndices(mesh, limit, bounds);
         next.push(write(pack(mesh, opaque, blended), bounds, error + Math.max(...group.map((p) => p.error)), children));
@@ -315,11 +383,13 @@ export async function buildMeshPages(source, destination, includeBim = true) {
       }
     } finally { if (props !== null) closeSync(props); }
     const manifest = validateMeshPages({ format: MESH_FORMAT, origin, ...bounds, focus: focusBounds(records, bounds), pages, roots, bytes, triangles,
+      ...(shapes.length ? { shapes, shapeBytes } : {}),
       ...((elements.length || review) ? { elements, propertyBytes } : {}), ...(review ? { review } : {}) });
     writeFileSync(join(destination, 'manifest.json'), JSON.stringify(manifest), { flag: 'wx' });
     console.log(`${triangles} triangles, ${pages.length} total pages, ${bytes} bytes`);
     return manifest;
   } finally {
+    if (shapeFile !== undefined) closeSync(shapeFile);
     if (output !== undefined) closeSync(output);
     closeSync(input);
   }

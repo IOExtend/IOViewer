@@ -196,6 +196,31 @@ Both hierarchies retained all triangles returned by their adapters. The RVT adap
 drawable geometry and 33 with potentially missing parts. Import and handoff took around 21 seconds for the IFC and
 7 minutes 26 seconds for the RVT. The measurements in the table start at browser navigation to prepared data.
 
+#### Repeated meshes
+
+The cluster export reuses meshes that reference the same source geometry and detects exact copies stored under
+distinct geometry IDs. Coordinates, triangle indices in their original order, normals and UVs are compared at
+source precision. A hash narrows the search and a full comparison confirms each match. Copies with the same
+rotation, scale and handedness share a template even if their translations, materials or element IDs differ.
+Each distinct linear transform is baked separately. A placement keeps ordinary coordinates if reconstructing
+its vertices from the template and shift would change any coordinate by more than half the viewer's 1/1024 m grid step.
+
+The builder writes shared meshes to `shapes.bin` and stores their placements in leaf pages. The viewer draws
+opaque and blended batches separately and groups textured batches by texture. Each visible batch uses GPU
+instancing, and the page-buffer budget includes its geometry and instance attributes. Properties, selection,
+visibility and measurement still operate on individual placements. Coarse ancestors keep their simplified meshes.
+Existing `.ivmesh` files and ready-made packages remain readable. Re-export the source and repack it to pick up
+instances.
+
+| Input | Placed records using shared meshes | Geometry without / with instances, MB | Peak page buffers, MiB |
+| --- | ---: | ---: | ---: |
+| 746 MB IFC | 1,378 | 594.7 / 586.0 | 90.4 / 98.1 |
+| 139 MB RVT | 1,133 | 297.4 / 279.3 | 107.5 / 91.6 |
+
+Each pair was packed from the same export and retained the same triangle count. Geometry totals include `shapes.bin`.
+Chromium on Radeon measured 16.8 ms p95 across the orbit and close route for both packages in each pair. The extra
+leaf batches changed the cluster hierarchy and the number of resident pages along each route.
+
 #### Close RVT profile
 
 The second traversal can still request pages. The third traversal holds new requests after the pending pages finish

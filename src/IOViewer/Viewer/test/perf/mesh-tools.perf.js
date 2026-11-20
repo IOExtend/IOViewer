@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Vector3 } from 'three';
 import { startStreamServer } from '../../serve-stream.js';
-import { MESH_FORMAT, sizeOfPage, viewsOfPage } from '../../src/stream/meshPages.js';
+import { MESH_FORMAT, readPlacements, sizeOfPage, viewsOfPage } from '../../src/stream/meshPages.js';
 
 test('the section plane cuts both sides of a rendered cluster seam', async ({ page }) => {
   const folder = await mkdtemp(join(tmpdir(), 'ioviewer-section-'));
@@ -105,19 +105,31 @@ test('select a real original element and keep its properties while changing deta
   const folder = process.env.PERF_MESH_TOOLS_MODEL;
   test.skip(!folder, 'Set PERF_MESH_TOOLS_MODEL to an annotated IFC or RVT package.');
   const manifest = JSON.parse(await readFile(join(folder, 'manifest.json')));
-  const leaves = manifest.pages.filter((node) => node.pick);
-  expect(leaves.length).toBeGreaterThan(1);
+  const leaves = manifest.pages.filter((node) => node.pick && (!manifest.shapes || node.shape !== undefined));
+  expect(leaves.length).toBeGreaterThan(0);
   const candidates = [];
   const file = await open(join(folder, 'meshes.bin'));
+  let shapeFile;
+  const readPage = async (handle, node) => {
+    const size = sizeOfPage(node);
+    const buffer = new ArrayBuffer(size);
+    expect((await handle.read(new Uint8Array(buffer), 0, size, node.offset)).bytesRead).toBe(size);
+    return buffer;
+  };
   try {
+    if (manifest.shapes) shapeFile = await open(join(folder, 'shapes.bin'));
     for (let sample = 1; sample <= 12; sample++) {
       const node = leaves[Math.floor(leaves.length * sample / 13)];
-      const size = sizeOfPage(node);
-      const buffer = new ArrayBuffer(size);
-      expect((await file.read(new Uint8Array(buffer), 0, size, node.offset)).bytesRead).toBe(size);
-      const { position, index, color, tags } = viewsOfPage(buffer, node);
+      const buffer = await readPage(file, node);
+      const template = manifest.shapes?.[node.shape];
+      const copies = template ? readPlacements(buffer, node) : null;
+      const slot = copies?.elements.findIndex((i, k) => manifest.elements[i].size && copies.rgba[k * 4 + 3] === 255);
+      if (slot === -1) continue;
+      const { position, index, color, tags } = template
+        ? viewsOfPage(await readPage(shapeFile, template), template) : viewsOfPage(buffer, node);
       for (let i = 0; i < index.length; i += 3) {
-        const element = manifest.elements[tags[i / 3]];
+        const elementIndex = copies ? copies.elements[slot] : tags[i / 3];
+        const element = manifest.elements[elementIndex];
         const [x, y, z] = index.slice(i, i + 3);
         if (!element.size || [x, y, z].some((v) => color[v * 4 + 3] !== 255)) continue;
         const a = new Vector3().fromArray(position, x * 3);
@@ -127,14 +139,16 @@ test('select a real original element and keep its properties while changing deta
         if (normal.lengthSq() < 1e-5) continue;
         normal.normalize();
         const target = a.add(b).add(c).divideScalar(3);
+        if (copies) target.add(new Vector3().fromArray(copies.offset, slot * 3));
         if (target.z <= (manifest.focus ?? manifest).min[2]) continue;
         const camera = { target: target.toArray(), position: target.addScaledVector(normal, 0.2).toArray(),
           up: Math.abs(normal.z) > 0.9 ? [0, 1, 0] : [0, 0, 1] };
-        candidates.push({ camera, id: element.id, index: tags[i / 3] });
+        candidates.push({ camera, id: element.id, index: elementIndex });
         break;
       }
     }
   } finally {
+    await shapeFile?.close();
     await file.close();
   }
   expect(candidates.length).toBeGreaterThan(0);

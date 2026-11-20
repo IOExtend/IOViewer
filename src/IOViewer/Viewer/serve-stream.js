@@ -33,6 +33,12 @@ export async function startStreamServer(folder, port = 0) {
     for (const [id, page] of manifest.pages.entries()) {
       files.set(`/pages/${id}`, { ...info, start: page.offset, size: sizeOfPage(page) });
     }
+    if (manifest.shapes) {
+      const shapes = await fileInfo('shapes.bin', manifest.shapeBytes);
+      for (const [id, shape] of manifest.shapes.entries()) {
+        files.set(`/shapes/${id}`, { ...shapes, start: shape.offset, size: sizeOfPage(shape) });
+      }
+    }
     if (manifest.overview) {
       files.set('/overview.bin', { ...await fileInfo('overview.bin', manifest.overview), start: 0, size: manifest.overview });
     }

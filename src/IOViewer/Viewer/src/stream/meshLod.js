@@ -4,7 +4,7 @@ import { NavigationControls } from '../nav/controls.js';
 import { ViewCube } from '../nav/viewCube.js';
 import { el } from '../ui/dom.js';
 import { MESH_BUDGET, MIB } from './manifest.js';
-import { sizeOfPage, validateMeshPages, viewsOfPage } from './meshPages.js';
+import { readPlacements, residentBytes, sizeOfPage, validateMeshPages, viewsOfPage } from './meshPages.js';
 import { mountMeshTools } from './meshTools.js';
 import { meshScene } from './meshScene.js';
 import { SectionCaps } from '../tools/sectionCaps.js';
@@ -25,13 +25,20 @@ function show(text) {
   message.hidden = false;
 }
 
-async function fetchPage(node, signal) {
+async function fetchRange(path, bytes, signal) {
   const start = profile && performance.now();
-  const response = await fetch(`/pages/${node.id}`, { cache: 'no-store', signal });
-  if (!response.ok || Number(response.headers.get('content-length')) !== node.bytes) throw new Error(`Page ${node.id} failed (${response.status}).`);
+  const response = await fetch(path, { cache: 'no-store', signal });
+  if (!response.ok || Number(response.headers.get('content-length')) !== bytes) throw new Error(`${path} failed (${response.status}).`);
   const data = await response.arrayBuffer();
   if (profile) profile.fetch(performance.now() - start, data.byteLength);
-  return viewsOfPage(data, node);
+  return data;
+}
+
+async function fetchPage(node, signal) {
+  const page = fetchRange(`/pages/${node.id}`, node.bytes, signal);
+  if (!node.template) return viewsOfPage(await page, node);
+  const [placements, shape] = await Promise.all([page, fetchRange(`/shapes/${node.shape}`, node.templateBytes, signal)]);
+  return { ...viewsOfPage(shape, node.template), placements: readPlacements(placements, node) };
 }
 
 const box = ({ min, max }) => new THREE.Box3(new THREE.Vector3(...min), new THREE.Vector3(...max));
@@ -53,7 +60,10 @@ async function start(manifest, context) {
   const bounds = box(manifest);
   const nodes = manifest.pages.map((page, id) => {
     const bytes = sizeOfPage(page);
-    return { ...page, id, box: box(page), bytes, memory: bytes + page.indices * 2 + (page.pick ? page.vertices * 4 : 0) };
+    const template = manifest.shapes?.[page.shape];
+    const memory = residentBytes(page, manifest.shapes) + page.indices * 2
+      + (template ? bytes : page.pick ? page.vertices * 4 : 0);
+    return { ...page, id, box: box(page), bytes, template, templateBytes: template ? sizeOfPage(template) : 0, memory };
   });
   const roots = manifest.roots.map((id) => nodes[id]);
   const pinned = new Set(roots);
@@ -68,7 +78,7 @@ async function start(manifest, context) {
   let bytes = roots.reduce((n, node) => n + node.memory, 0), peak = bytes;
   let wireBudget = false;
   const pageMemory = (node) => node.memory + (wireBudget ? node.indices * 8 : 0);
-  let requested = 0, downloaded = 0, evictions = 0, fallback = 0, exact = 0, visible = 0;
+  let requested = 0, downloaded = 0, evictions = 0, fallback = 0, exact = 0, visible = 0, instanced = 0;
   let coarsePixels = 0, nearbyCoarsePixels = 0;
   let frame = 0, lost = false;
   let lastMove = -Infinity, settleTimer = 0, lastFrame = 0, fastFrames = 0, movingError = BASE_ERROR, threshold = BASE_ERROR;
@@ -144,8 +154,8 @@ async function start(manifest, context) {
     for (const material of appearances.values()) configureMaterial(material);
     requestFrame();
   }
-  function materialFor(tagged, blended, textureId) {
-    const key = `${scene.mode}-${tagged}-${blended}-${textureId}`;
+  function materialFor(tagged, blended, textureId, placed) {
+    const key = `${scene.mode}-${tagged}-${blended}-${textureId}-${placed}`;
     let material = appearances.get(key);
     if (material) return material;
     const white = scene.mode === 'white';
@@ -162,10 +172,10 @@ async function start(manifest, context) {
       }
       map = textures.get(textureId);
     }
-    material = new THREE.MeshLambertMaterial({ vertexColors: tagged || !white, color: white && !tagged ? 0xfafafa : 0xffffff,
+    material = new THREE.MeshLambertMaterial({ vertexColors: placed || tagged || !white, color: white && !tagged && !placed ? 0xfafafa : 0xffffff,
       wireframe: scene.mode === 'wireframe', map });
     material.userData.blended = blended;
-    if (tagged) scene.patchMaterial(material, { white });
+    if (placed || tagged) scene.patchMaterial(material, { white, placed, tagged });
     configureMaterial(material);
     appearances.set(key, material);
     return material;
@@ -176,7 +186,7 @@ async function start(manifest, context) {
     item.mesh.material = item.groups.map((group) => {
       const blended = start >= node.opaque;
       start += group.count;
-      return materialFor(!!node.pick, blended, group.texture);
+      return materialFor(!!node.pick, blended, group.texture, !!node.template);
     });
     item.mode = scene.mode;
   }
@@ -206,12 +216,12 @@ async function start(manifest, context) {
   function renderStencils(renderer, camera, plane) {
     if (!capWorld) {
       capWorld = new THREE.Scene();
-      capMaterials = [false, true].map((tagged) => [
+      capMaterials = [0, 1, 2, 3].map((flags) => [
         [THREE.BackSide, THREE.IncrementWrapStencilOp], [THREE.FrontSide, THREE.DecrementWrapStencilOp],
       ].map(([side, stencilZPass]) => {
         const material = new THREE.MeshBasicMaterial({ side, stencilZPass, stencilWrite: true, clippingPlanes: [plane],
           colorWrite: false, depthWrite: false, depthTest: false });
-        if (tagged) scene.patchMaterial(material, { stencil: true });
+        if (flags) scene.patchMaterial(material, { stencil: true, tagged: Boolean(flags & 1), placed: Boolean(flags & 2) });
         return material;
       }));
     }
@@ -224,7 +234,7 @@ async function start(manifest, context) {
           const invisible = new THREE.MeshBasicMaterial({ visible: false });
           item.stencil = new THREE.Mesh(item.mesh.geometry);
           item.stencil.position.copy(item.mesh.position);
-          item.stencilMaterials = capMaterials[Number(!!node.pick)].map((material) =>
+          item.stencilMaterials = capMaterials[Number(!!node.pick) + 2 * Number(!!node.template)].map((material) =>
             item.groups.map(({ closed }) => closed ? material : invisible));
         }
         item.stencil.material = item.stencilMaterials[pass];
@@ -240,20 +250,27 @@ async function start(manifest, context) {
   window.__ioviewerMeshLod = { controls, manifest, ready, ...tools,
     stats: () => ({ bytes, peak, budget: MESH_BUDGET, requested, evictions, downloaded, visible, exact, fallback,
       coarsePixels, nearbyCoarsePixels, threshold, rasterScale, pending: pending.size,
-      resident: resident.size, triangles: renderer.info.render.triangles, draws: renderer.info.render.calls, failures: [...failed.values()] }) };
+      resident: resident.size, instanced,
+      triangles: renderer.info.render.triangles, draws: renderer.info.render.calls, failures: [...failed.values()] }) };
 
   function stage(node, view, ready = false) {
     if (view.index.some((i) => i >= node.vertices) || view.position.some((value) => !Number.isFinite(value))) {
       throw new Error(`Invalid geometry in page ${node.id}.`);
     }
-    const geometry = new THREE.BufferGeometry();
+    const geometry = node.template ? new THREE.InstancedBufferGeometry() : new THREE.BufferGeometry();
     const attribute = (array, size, normalized = false) => new THREE.BufferAttribute(array, size, normalized)
       .onUpload(function () { this.array = null; });
     geometry.setAttribute('position', attribute(view.position, 3));
     geometry.setAttribute('normal', attribute(view.normal, 3, true));
     geometry.setAttribute('color', attribute(view.color, 4, true));
     if (view.uv) geometry.setAttribute('uv', attribute(view.uv, 2));
-    if (view.tags) {
+    if (view.placements) {
+      const { offset, rgba, elements } = view.placements;
+      geometry.instanceCount = node.count;
+      geometry.setAttribute('placementOffset', new THREE.InstancedBufferAttribute(offset, 3));
+      geometry.setAttribute('placementColor', new THREE.InstancedBufferAttribute(rgba, 4, true));
+      if (elements) geometry.setAttribute('elementIndex', new THREE.InstancedBufferAttribute(Float32Array.from(elements), 1));
+    } else if (view.tags) {
       const elements = new Float32Array(node.vertices);
       for (let i = 0; i < view.index.length; i++) {
         const element = view.tags[Math.floor(i / 3)];
@@ -319,7 +336,7 @@ async function start(manifest, context) {
       pending.add(node);
       requested++;
       fetchPage(node).then((view) => {
-        downloaded += node.bytes;
+        downloaded += node.bytes + node.templateBytes;
         transferred.push({ node, view });
         requestFrame();
       }, (error) => { fail(node, error); requestFrame(); });
@@ -379,6 +396,7 @@ async function start(manifest, context) {
         item.mesh.frustumCulled = false;
         // Three uploads the full vertex and index buffers on the first draw.
         item.mesh.geometry.setDrawRange(0, 3);
+        if (node.template) item.mesh.geometry.instanceCount = 1;
         world.add(item.mesh);
         warm.push(node);
       } catch (error) { fail(node, error); }
@@ -409,9 +427,10 @@ async function start(manifest, context) {
       const projected = projectedError(node);
       if (projected > BASE_ERROR / 2) queue(childrenIn(node, moving ? guard : frustum), projected);
     }
-    fallback = exact = coarsePixels = nearbyCoarsePixels = 0;
+    fallback = exact = instanced = coarsePixels = nearbyCoarsePixels = 0;
     function draw(node) {
       cut.add(node);
+      instanced += node.count ?? 0;
       style(node, resident.get(node));
       if (!node.children.length) exact++;
       if (profile?.coarseMetrics && node.children.length) {
@@ -477,6 +496,7 @@ async function start(manifest, context) {
       item.mode = undefined;
       item.mesh.frustumCulled = true;
       item.mesh.geometry.setDrawRange(0, Infinity);
+      if (node.template) item.mesh.geometry.instanceCount = node.count;
       item.ready = true;
       pending.delete(node);
     }

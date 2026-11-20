@@ -21,7 +21,7 @@ import { meshSnapCandidates } from './meshSnap.js';
 // Trace the original leaves independently of the cut on screen. The nearest hit gives the same element at every LOD.
 export async function pickMeshSurface(ray, roots, nodes, getPage, sections, signal, visible = () => true) {
   const queue = [], p = new THREE.Vector3(), a = p.clone(), b = p.clone(), c = p.clone();
-  const localRay = ray.clone(), shift = new THREE.Vector3();
+  const localRay = ray.clone(), shift = new THREE.Vector3(), base = new THREE.Vector3();
   const clip = sections.clipping();
   const enqueue = (node) => {
     if (sections.isCut(node.box, clip)) return;
@@ -40,26 +40,42 @@ export async function pickMeshSurface(ray, roots, nodes, getPage, sections, sign
       continue;
     }
     const view = await getPage(node, signal);
-    const { position, index, color, tags } = view;
+    const { position, index, color, tags, placements } = view;
     if (index.some((i) => i >= position.length / 3) || position.some((value) => !Number.isFinite(value))) {
       throw new Error('Invalid pick page geometry.');
     }
-    shift.fromArray(node.shift ?? [0, 0, 0]);
-    localRay.origin.copy(ray.origin).sub(shift);
-    for (let i = 0; i < index.length; i += 3) {
-      const element = tags?.[i / 3] ?? null;
-      if (element !== null && !visible(element)) continue;
-      const x = index[i], y = index[i + 1], z = index[i + 2];
-      if (!color[x * 4 + 3] && !color[y * 4 + 3] && !color[z * 4 + 3]) continue;
-      a.fromArray(position, x * 3);
-      b.fromArray(position, y * 3);
-      c.fromArray(position, z * 3);
-      if (!localRay.intersectTriangle(a, b, c, true, p)) continue;
-      p.add(shift);
-      const d = p.distanceToSquared(ray.origin);
-      if (d >= best || isClipped(p, clip.planes, clip.intersection)) continue;
-      best = d;
-      hit = { element, point: p.clone(), view, node };
+    base.fromArray(node.shift ?? [0, 0, 0]);
+    if (placements) {
+      const bounds = new THREE.Box3().setFromArray(position);
+      for (let slot = 0; slot < node.count; slot++) {
+        signal?.throwIfAborted();
+        const element = placements.elements?.[slot] ?? null;
+        if (!placements.rgba[slot * 4 + 3] || (element !== null && !visible(element))) continue;
+        shift.fromArray(placements.offset, slot * 3).add(base);
+        localRay.origin.copy(ray.origin).sub(shift);
+        if (localRay.intersectsBox(bounds)) trace(element);
+      }
+    } else {
+      shift.copy(base);
+      localRay.origin.copy(ray.origin).sub(shift);
+      trace(null);
+    }
+    function trace(placementElement) {
+      for (let i = 0; i < index.length; i += 3) {
+        const element = placements ? placementElement : tags?.[i / 3] ?? null;
+        if (!placements && element !== null && !visible(element)) continue;
+        const x = index[i], y = index[i + 1], z = index[i + 2];
+        if (!placements && !color[x * 4 + 3] && !color[y * 4 + 3] && !color[z * 4 + 3]) continue;
+        a.fromArray(position, x * 3);
+        b.fromArray(position, y * 3);
+        c.fromArray(position, z * 3);
+        if (!localRay.intersectTriangle(a, b, c, true, p)) continue;
+        p.add(shift);
+        const d = p.distanceToSquared(ray.origin);
+        if (d >= best || isClipped(p, clip.planes, clip.intersection)) continue;
+        best = d;
+        hit = { element, point: p.clone(), shift: shift.clone(), view, node };
+      }
     }
   }
   return hit;

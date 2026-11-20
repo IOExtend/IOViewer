@@ -20,7 +20,7 @@ export function meshScene(elements, nodes, bounds, context, setClipping, render)
   for (const node of nodes) {
     node.affected = node.hidden = 0;
     node.total = node.members?.length ?? 0;
-    node.hasTexture = !!node.uv;
+    node.hasTexture = node.groups?.some(({ texture }) => texture !== undefined) ?? !!node.uv;
     node.hasClosed = node.groups?.some((group) => group.closed) ?? false;
     for (const child of node.children) {
       parents[child] = node.id;
@@ -124,22 +124,32 @@ export function meshScene(elements, nodes, bounds, context, setClipping, render)
     affected(node) { return indexed ? node.affected > 0 : changedElements > 0; },
     visibilityAffects(node) { return indexed ? node.hidden > 0 : hiddenElements > 0; },
     fullyHidden(node) { return node.total > 0 && node.total === node.hidden; },
-    patchMaterial(material, { stencil = false, white = false } = {}) {
+    patchMaterial(material, { stencil = false, white = false, placed = false, tagged = true } = {}) {
       const key = material.customProgramCacheKey();
-      material.customProgramCacheKey = () => `${key}-element-${stencil}-${white}`;
+      material.customProgramCacheKey = () => `${key}-element-${stencil}-${white}-${placed}-${tagged}`;
       material.onBeforeCompile = (shader) => {
-        shader.uniforms.elementState = { value: texture };
-        shader.uniforms.elementWidth = { value: width };
-        shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>
-          attribute float elementIndex;
-          uniform highp sampler2D elementState;
-          uniform int elementWidth;`);
-        shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
-          int iovElement = int(elementIndex);
-          vec4 iovState = texelFetch(elementState, ivec2(iovElement % elementWidth, iovElement / elementWidth), 0);
-          #include <project_vertex>
-          if (iovState.a > 0.9) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-          ${stencil ? '' : `${white ? 'vColor.rgb = vec3(0.95);' : ''} if (iovState.a > 0.25) vColor.rgb = iovState.rgb;`}`);
+        if (placed) {
+          shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>
+            attribute vec3 placementOffset;
+            attribute vec4 placementColor;`);
+          shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += placementOffset;');
+          if (!stencil) shader.vertexShader = shader.vertexShader.replace('#include <color_vertex>',
+            `#include <color_vertex>\nvColor = placementColor; ${white ? 'vColor.rgb = vec3(0.95);' : ''}`);
+        }
+        if (tagged) {
+          shader.uniforms.elementState = { value: texture };
+          shader.uniforms.elementWidth = { value: width };
+          shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>
+            attribute float elementIndex;
+            uniform highp sampler2D elementState;
+            uniform int elementWidth;`);
+          shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
+            int iovElement = int(elementIndex);
+            vec4 iovState = texelFetch(elementState, ivec2(iovElement % elementWidth, iovElement / elementWidth), 0);
+            #include <project_vertex>
+            if (iovState.a > 0.9) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+            ${stencil ? '' : `${white && !placed ? 'vColor.rgb = vec3(0.95);' : ''} if (iovState.a > 0.25) vColor.rgb = iovState.rgb;`}`);
+        }
       };
     },
   };
