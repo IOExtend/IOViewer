@@ -3,6 +3,10 @@
 const VIEW_TYPES = { f32: Float32Array, u16: Uint16Array, i16: Int16Array, u32: Uint32Array, i32: Int32Array };
 const CHUNK_CHARS = 4 * 1024 * 1024; // multiple of 4, so every chunk decodes on its own
 
+export function gridPoints(grid) {
+  return grid.points ?? [grid.start, grid.end];
+}
+
 function block(doc, id) {
   const element = doc.getElementById(id);
   if (!element) throw new ModelDataError(`Data block '${id}' is missing.`);
@@ -145,7 +149,11 @@ export function validateReviewMeta(meta) {
       ? Number.isFinite(view.camera.orthographicHeight) && view.camera.orthographicHeight > 0
       : view.camera.projection === 'perspective' && Number.isFinite(view.camera.fov) && view.camera.fov > 0 && view.camera.fov < 180)
     && count(view.missingComponents) && count(view.ambiguousComponents);
-  if (meta.grids?.some((grid) => !vector(grid.start) || !vector(grid.end))
+  const validGrid = (grid) => {
+    const points = gridPoints(grid);
+    return Array.isArray(points) && points.length >= 2 && points.every(finiteVector);
+  };
+  if (meta.grids?.some((grid) => !validGrid(grid))
     || meta.viewpoints?.some((view) => !validView(view))
     || meta.clashTests?.some((test) => !records(test.clashes) || test.clashes.some((clash) => !vector(clash.point)))) {
     throw new ModelDataError('Invalid META grids, viewpoints or clashes.');

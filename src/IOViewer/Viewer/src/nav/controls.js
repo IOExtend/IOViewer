@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { gridPoints } from '../data.js';
 import { isClick, orbit, zoomTowards, wheelZoomFactor, boxSelectMode, interpolateView, poleCrossing } from './math.js';
 
 const ORBIT_SPEED = 0.005; // radians per pixel
@@ -18,9 +19,10 @@ export function needsLogarithmicDepth({ bbox, grids }) {
   if (bounds.isEmpty()) return true;
   const point = new THREE.Vector3();
   for (const grid of grids ?? []) {
-    if (!finitePoint(grid.start) || !finitePoint(grid.end)) return true;
-    bounds.expandByPoint(point.fromArray(grid.start));
-    bounds.expandByPoint(point.fromArray(grid.end));
+    for (const p of gridPoints(grid)) {
+      if (!finitePoint(p)) return true;
+      bounds.expandByPoint(point.fromArray(p));
+    }
   }
   // Inside the bounding sphere, its diameter bounds far. Keep early depth testing when this fits the linear range.
   return bounds.getSize(point).length() * FAR_MARGIN > NEAR_MIN * LINEAR_DEPTH_RATIO;

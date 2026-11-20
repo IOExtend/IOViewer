@@ -120,6 +120,9 @@ internal static class SceneFederation
                 line.End = placement.Apply(line.End);
                 line.Elevation += placement.Translation.Z;
             }
+            foreach (var axisPath in grid.Paths ?? [])
+                for (int i = 0; i < axisPath.Points.Count; i++)
+                    axisPath.Points[i] = placement.Apply(axisPath.Points[i]);
         }
         foreach (var schedule in from.Schedules)
         {

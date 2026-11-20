@@ -63,6 +63,7 @@ public class HtmlViewerExporterTests
             ModelId = 1,
             Name = "Structural Grids",
             Lines = [new SceneGridLine { Name = "Axis 1", Start = new(OffsetX, OffsetY, 0), End = new(OffsetX + 10, OffsetY, 0) }],
+            Paths = [new SceneGridPath { Name = "Axis A", Points = [new(OffsetX, OffsetY, 0), new(OffsetX + 3, OffsetY + 2, 0), new(OffsetX + 7, OffsetY + 3, 0)] }],
         });
 
         scene.Schedules.Add(new SceneSchedule
@@ -159,6 +160,10 @@ public class HtmlViewerExporterTests
         var camera = meta.GetProperty("viewpoints")[0].GetProperty("camera");
         Assert.Equal([20, -32.5, 30], Vec(camera.GetProperty("position")));
         Assert.Equal([-5, -7.5, 0], Vec(meta.GetProperty("grids")[0].GetProperty("start")));
+        var path = meta.GetProperty("grids")[1];
+        Assert.Equal("Axis A", path.GetProperty("name").GetString());
+        Assert.Equal([-5, -7.5, 0, -2, -5.5, 0, 2, -4.5, 0],
+            path.GetProperty("points").EnumerateArray().SelectMany(Vec));
         Assert.Equal("Pour Slab", meta.GetProperty("timeliner").GetProperty("tasks")[0].GetProperty("name").GetString());
         var clash = meta.GetProperty("clashTests")[0].GetProperty("clashes")[0];
         Assert.Equal("Slab vs Column", clash.GetProperty("name").GetString());

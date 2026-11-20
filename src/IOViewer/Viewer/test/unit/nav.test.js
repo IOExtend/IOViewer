@@ -12,6 +12,7 @@ test('logarithmic depth covers a wide model or grids that extend beyond its boun
   assert.equal(needsLogarithmicDepth({ bbox, grids: null }), false);
   assert.equal(needsLogarithmicDepth({ bbox: { ...bbox, max: [48, 0, 0] } }), true);
   assert.equal(needsLogarithmicDepth({ bbox, grids: [{ start: [-2, 0, 0], end: [40, 0, 0] }] }), true);
+  assert.equal(needsLogarithmicDepth({ bbox, grids: [{ points: [[0, 0, 0], [-2, 0, 0], [40, 0, 0]] }] }), true);
   assert.equal(needsLogarithmicDepth({}), true);
 });
 
