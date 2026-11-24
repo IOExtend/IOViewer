@@ -110,7 +110,7 @@ test('IMS2 preserves exact IDs and property ranges and also packs geometry alone
     const annotated = await buildMeshPages(source, review);
     assert.deepEqual(annotated.elements, [{ ...bounds, id: '9007199254740993', name: 'Slab', category: 'Floors', offset: 0, size: property.length }]);
     assert.deepEqual(await readFile(join(review, 'elements.bin')), property);
-    const browserFiles = new Map();
+    const browserFiles = new Map(), progress = [];
     function copy(bytes, target, offset, size = target.length) {
       const part = bytes.subarray(offset, offset + Math.min(size, target.length));
       target.set(part);
@@ -126,8 +126,14 @@ test('IMS2 preserves exact IDs and property ranges and also packs geometry alone
         write: (part) => { bytes = Buffer.concat([bytes, part]); },
         close: () => { browserFiles.set(name, bytes); },
       };
-    });
+    }, true, update => progress.push(update));
     assert.deepEqual(fromRanges, annotated);
+    assert.deepEqual(progress, [
+      { phase: 'triangles', completed: 0, total: 1 },
+      { phase: 'triangles', completed: 1, total: 1 },
+      { phase: 'properties', completed: 0, total: 1 },
+      { phase: 'properties', completed: 1, total: 1 },
+    ]);
     for (const [name, data] of browserFiles) assert.deepEqual(data, await readFile(join(review, name)));
 
     const local = await openMeshPackage(async (name) => new Blob([browserFiles.get(name)]));

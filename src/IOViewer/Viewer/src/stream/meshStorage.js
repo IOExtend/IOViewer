@@ -3,7 +3,7 @@ import { buildMeshPagesFromSource } from './meshBuilder.js';
 const WINDOW_BYTES = 64 * 1024;
 
 // Called in a dedicated worker. The caller owns the empty temporary output directory.
-export async function buildLocalMeshPackage(file, directory, includeBim = true) {
+export async function buildLocalMeshPackage(file, directory, includeBim = true, onProgress) {
   const reader = new FileReaderSync();
   let windowStart = -1, bytes;
   const source = {
@@ -50,7 +50,7 @@ export async function buildLocalMeshPackage(file, directory, includeBim = true) 
           handles.delete(name);
         },
       };
-    }, includeBim);
+    }, includeBim, onProgress);
   } finally {
     for (const handle of handles.values()) handle.close();
   }

@@ -273,7 +273,7 @@ function pack(mesh, opaque, blended, tags = null) {
     members: tags ? [...new Set(tags)].sort((a, b) => a - b) : undefined, groups: mesh.groups };
 }
 
-export async function buildMeshPagesFromSource(input, createFile, includeBim = true) {
+export async function buildMeshPagesFromSource(input, createFile, includeBim = true, onProgress) {
   await MeshoptSimplifier.ready;
   let output, shapeFile;
   try {
@@ -282,12 +282,18 @@ export async function buildMeshPagesFromSource(input, createFile, includeBim = t
     const pages = [];
     const shared = new Map(), shapes = [], instances = new Map();
     const weights = Uint32Array.from(records, ({ indices }) => indices / 3);
+    const triangles = weights.reduce((sum, n) => sum + n, 0);
     const centres = Float64Array.from(records.flatMap(({ min, max }) => min.map((n, i) => (n + max[i]) / 2)));
     let bytes = 0;
+    let writtenTriangles = 0;
     function write({ buffer, ...sizes }, bounds, error, children) {
       output.write(new Uint8Array(buffer));
       pages.push({ ...bounds, ...sizes, error, children, offset: bytes });
       bytes += buffer.byteLength;
+      if (onProgress && children.length === 0) {
+        writtenTriangles += sizes.indices / 3 * (sizes.count ?? 1);
+        onProgress({ phase: 'triangles', completed: writtenTriangles, total: triangles });
+      }
       return pages.length - 1;
     }
     const batches = new Map(), ordinary = [];
@@ -299,6 +305,7 @@ export async function buildMeshPagesFromSource(input, createFile, includeBim = t
     }
     const leaves = splitCells(centres, weights, ordinary, PAGE_TRIANGLES);
     let roots = [];
+    onProgress?.({ phase: 'triangles', completed: 0, total: triangles });
     for (const leaf of leaves) {
       const parts = [...leaf].map((i) => records[i]);
       const mesh = assemble(parts.map((part) => partFromRecord(input, part)), elements.length > 0, true);
@@ -342,12 +349,15 @@ export async function buildMeshPagesFromSource(input, createFile, includeBim = t
       roots = splitCells(pageCentres, new Uint32Array(pages.length).fill(1), roots, 1).map((ids) => ids[0]);
     }
     console.log(`${roots.length} full-resolution mesh pages`);
-    const triangles = weights.reduce((sum, n) => sum + n, 0);
+    let level = 0;
     while (roots.length > 48 || roots.reduce((sum, id) => sum + residentBytes(pages[id], shapes), 0) > ROOT_BYTES / 2) {
       const next = [];
       // Separate instance batches can push a level just over the root count limit.
       const fanout = instances.size && roots.length > 48 ? Math.min(4, Math.ceil(roots.length / 48)) : 4;
+      const total = Math.ceil(roots.length / fanout);
+      level++;
       for (let i = 0; i < roots.length; i += fanout) {
+        onProgress?.({ phase: 'overview', completed: next.length, total, level });
         const children = roots.slice(i, i + fanout);
         if (children.length === 1) { next.push(children[0]); continue; }
         const group = children.map((id) => pages[id]);
@@ -362,6 +372,7 @@ export async function buildMeshPagesFromSource(input, createFile, includeBim = t
         const { opaque, blended, error } = reducedIndices(mesh, limit, bounds);
         next.push(write(pack(mesh, opaque, blended), bounds, error + Math.max(...group.map((p) => p.error)), children));
       }
+      onProgress?.({ phase: 'overview', completed: next.length, total, level });
       roots = next;
       console.log(`${roots.length} pages at the next level`);
     }
@@ -369,7 +380,8 @@ export async function buildMeshPagesFromSource(input, createFile, includeBim = t
     let propertyBytes = 0;
     const props = metadata.size ? createFile('elements.bin') : null;
     try {
-      for (const element of elements) {
+      if (elements.length) onProgress?.({ phase: 'properties', completed: 0, total: elements.length });
+      for (const [index, element] of elements.entries()) {
         if (!element.min) Object.assign(element, { min: [0, 0, 0], max: [0, 0, 0], noGeometry: true });
         const record = metadata.get(element.id);
         element.offset = propertyBytes;
@@ -382,6 +394,7 @@ export async function buildMeshPagesFromSource(input, createFile, includeBim = t
           props.write(encoded);
         }
         propertyBytes += element.size;
+        onProgress?.({ phase: 'properties', completed: index + 1, total: elements.length });
       }
     } finally { props?.close(); }
     const manifest = validateMeshPages({ format: MESH_FORMAT, origin, ...bounds, focus: focusBounds(records, bounds), pages, roots, bytes, triangles,
