@@ -72,6 +72,9 @@ and visibility.
   Embedded element IDs and their clash and schedule references use decimal strings outside JavaScript's safe integer range.
 - `HtmlViewerOptions`: Title, which data to include (properties, viewpoints, grids, 4D schedule, clashes), the initial display mode (`InitialWireframe`, `InitialWhiteMode`), and `MaxMeshVertices`, which is unlimited by default; when a lower limit leaves meshes out, the viewer shows how many were written.
 - `JsonViewerExporter`: Writes a `ViewerDocument` as viewer JSON (`"Kind": "ioviewer"`, `"Format": 2`). A scene alone is written with IOScene's `SceneJson`.
+- `ClusterSourceWriter.Export(document, stream, options)`: Writes the triangle records and review metadata for the
+  clustered viewer into an empty, writable, seekable stream and returns the number of triangles written. The caller
+  retains ownership of the stream.
 
 ### Compute and export clash results
 

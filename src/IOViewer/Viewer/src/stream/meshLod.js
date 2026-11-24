@@ -7,6 +7,7 @@ import { MESH_BUDGET, MIB } from './manifest.js';
 import { readPlacements, residentBytes, sizeOfPage, validateMeshPages, viewsOfPage } from './meshPages.js';
 import { mountMeshTools } from './meshTools.js';
 import { meshScene } from './meshScene.js';
+import { fetchMeshResource } from './meshSource.js';
 import { SectionCaps } from '../tools/sectionCaps.js';
 
 const canvas = document.querySelector('canvas');
@@ -27,7 +28,7 @@ function show(text) {
 
 async function fetchRange(path, bytes, signal) {
   const start = profile && performance.now();
-  const response = await fetch(path, { cache: 'no-store', signal });
+  const response = await fetchMeshResource(path, { cache: 'no-store', signal });
   if (!response.ok || Number(response.headers.get('content-length')) !== bytes) throw new Error(`${path} failed (${response.status}).`);
   const data = await response.arrayBuffer();
   if (profile) profile.fetch(performance.now() - start, data.byteLength);
@@ -45,7 +46,7 @@ const box = ({ min, max }) => new THREE.Box3(new THREE.Vector3(...min), new THRE
 const BASE_ERROR = 1.5, MERGE_ERROR = 1, MOVE_SETTLE = 180;
 
 try {
-  const response = await fetch('/manifest.json');
+  const response = await fetchMeshResource('/manifest.json');
   if (!response.ok) throw new Error(`Manifest: HTTP ${response.status}.`);
   const manifest = validateMeshPages(await response.json());
   if (manifest.review?.title) document.title = manifest.review.title;
@@ -85,7 +86,7 @@ async function start(manifest, context) {
   let rasterScale = 1, lastScaleChange = -Infinity;
   let drawn = new Set();
   if (manifest.overview) {
-    const response = await fetch('/overview.bin', { cache: 'no-store' });
+    const response = await fetchMeshResource('/overview.bin', { cache: 'no-store' });
     if (!response.ok || Number(response.headers.get('content-length')) !== manifest.overview) throw new Error('Invalid overview size.');
     const overview = await response.arrayBuffer();
     if (overview.byteLength !== manifest.overview) throw new Error('Truncated overview.');

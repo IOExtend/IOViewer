@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { buildMeshPages, focusBounds } from '../../build-mesh-pages.js';
+import { buildMeshPagesFromSource } from '../../src/stream/meshBuilder.js';
 import { INSTANCE_BYTES, MESH_FORMAT, pageBytes, readPlacements, validateMeshPages, viewsOfPage } from '../../src/stream/meshPages.js';
+import { openMeshPackage } from '../../src/stream/meshSource.js';
 
 const bounds = { min: [0, 0, 0], max: [1, 1, 0] };
 
@@ -103,6 +105,35 @@ test('IMS2 preserves exact IDs and property ranges and also packs geometry alone
     const annotated = await buildMeshPages(source, review);
     assert.deepEqual(annotated.elements, [{ ...bounds, id: '9007199254740993', name: 'Slab', category: 'Floors', offset: 0, size: property.length }]);
     assert.deepEqual(await readFile(join(review, 'elements.bin')), property);
+    const browserFiles = new Map();
+    function copy(bytes, target, offset, size = target.length) {
+      const part = bytes.subarray(offset, offset + Math.min(size, target.length));
+      target.set(part);
+      return part.length;
+    }
+    const fromRanges = await buildMeshPagesFromSource({
+      length: input.length,
+      read: (target, offset) => copy(input, target, offset, 7),
+    }, (name) => {
+      let bytes = Buffer.alloc(0);
+      return {
+        read: (target, offset) => copy(bytes, target, offset),
+        write: (part) => { bytes = Buffer.concat([bytes, part]); },
+        close: () => { browserFiles.set(name, bytes); },
+      };
+    });
+    assert.deepEqual(fromRanges, annotated);
+    for (const [name, data] of browserFiles) assert.deepEqual(data, await readFile(join(review, name)));
+
+    const local = await openMeshPackage(async (name) => new Blob([browserFiles.get(name)]));
+    const response = await local.fetch('/pages/0');
+    assert.equal(Number(response.headers.get('Content-Length')), browserFiles.get('meshes.bin').length);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), browserFiles.get('meshes.bin'));
+    assert.deepEqual(await (await local.fetch('/elements/0')).json(), JSON.parse(property));
+    assert.equal((await local.fetch('/pages/01')).status, 404);
+    const abort = new AbortController();
+    abort.abort();
+    await assert.rejects(local.fetch('/pages/0', { signal: abort.signal }), { name: 'AbortError' });
     const shape = await buildMeshPages(source, geometry, false);
     assert.equal(shape.elements, undefined);
     const detailed = viewsOfPage(Uint8Array.from(await readFile(join(review, 'meshes.bin'))).buffer, annotated.pages[0]);
