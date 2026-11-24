@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { buildMeshPages, focusBounds } from '../../build-mesh-pages.js';
 import { buildMeshPagesFromSource } from '../../src/stream/meshBuilder.js';
@@ -9,6 +9,13 @@ import { INSTANCE_BYTES, MESH_FORMAT, pageBytes, readPlacements, validateMeshPag
 import { openMeshPackage } from '../../src/stream/meshSource.js';
 
 const bounds = { min: [0, 0, 0], max: [1, 1, 0] };
+const fixtureRoot = resolve(tmpdir());
+
+async function removeFixture(folder) {
+  assert.equal(dirname(resolve(folder)), fixtureRoot);
+  assert.match(basename(folder), /^ioviewer-(mesh|bim)-pages-/);
+  await rm(folder, { recursive: true, force: true, maxRetries: 3 });
+}
 
 test('a shared shape has one byte range and instance batches validate their own placement data', () => {
   const shape = { vertices: 3, indices: 3, offset: 0 };
@@ -51,7 +58,7 @@ test('the initial focus ignores a remote record with less than one percent of th
 });
 
 test('a native geometry record produces the same indexed triangle and preserves alpha', async () => {
-  const folder = await mkdtemp(join(tmpdir(), 'ioviewer-mesh-pages-'));
+  const folder = await mkdtemp(join(fixtureRoot, 'ioviewer-mesh-pages-'));
   const output = join(folder, 'output'), source = join(folder, 'one.ivmesh');
   try {
     const bytes = Buffer.alloc(116);
@@ -75,14 +82,12 @@ test('a native geometry record produces the same indexed triangle and preserves 
     assert.deepEqual([...mesh.normal], [0, 0, 32767, 0, 0, 32767, 0, 0, 32767]);
     assert.deepEqual([...mesh.color], [255, 0, 0, 128, 255, 0, 0, 128, 255, 0, 0, 128]);
   } finally {
-    await Promise.all([source, join(output, 'manifest.json'), join(output, 'meshes.bin')].map((file) => rm(file, { force: true })));
-    await rmdir(output).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-    await rmdir(folder);
+    await removeFixture(folder);
   }
 });
 
 test('IMS2 preserves exact IDs and property ranges and also packs geometry alone', async () => {
-  const folder = await mkdtemp(join(tmpdir(), 'ioviewer-bim-pages-'));
+  const folder = await mkdtemp(join(fixtureRoot, 'ioviewer-bim-pages-'));
   const source = join(folder, 'one.ivmesh'), review = join(folder, 'review'), geometry = join(folder, 'geometry');
   const property = Buffer.from('{"id":"9007199254740993","name":"Slab","category":"Floors","properties":{"Identity":{"Type":"Slab"}}}');
   try {
@@ -142,10 +147,6 @@ test('IMS2 preserves exact IDs and property ranges and also packs geometry alone
     assert.deepEqual(detailed.position, bare.position);
     assert.deepEqual(detailed.index, bare.index);
   } finally {
-    await Promise.all([source, join(review, 'elements.bin'), ...[review, geometry].flatMap((dir) => [
-      join(dir, 'manifest.json'), join(dir, 'meshes.bin'),
-    ])].map((file) => rm(file, { force: true })));
-    for (const dir of [review, geometry]) await rmdir(dir).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-    await rmdir(folder);
+    await removeFixture(folder);
   }
 });
