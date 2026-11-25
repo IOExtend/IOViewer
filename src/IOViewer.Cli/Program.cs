@@ -10,6 +10,7 @@ using IOViewer.Exporters;
 using IOViewer.Importers;
 using IOViewer.Model;
 using NwcIO.Scene;
+using PclIO.Scene;
 using RvtIO.Scene;
 
 namespace IOViewer.Cli;
@@ -17,18 +18,21 @@ namespace IOViewer.Cli;
 internal static class Program
 {
     private const string UsageText = """
-        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.ifczip|input.rvt|input.nwc> [output.html] [options]
+        Usage: ioviewer <input.glb|input.obj|input.json|input.ifc|input.ifczip|input.rvt|input.nwc|point-cloud> [output.html] [options]
                ioviewer --help | --version
 
         Generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers
-        from 3D models (glTF/GLB, Wavefront OBJ, JSON, IFC, Revit, Navisworks). The HTML file
+        from 3D models (glTF/GLB, Wavefront OBJ, JSON, IFC, Revit, Navisworks) and point clouds
+        (E57, LAS/LAZ, PTG, ReCap, PLY, PCD, PTS, PTX, XYZ and more, read with PclIO). The HTML file
         has no external dependencies and works offline. JSON input is viewer JSON,
         an IOScene scene file or an IOViewer 0.1/0.2 snapshot. IFC (.ifc, .ifczip)
         is read with IfcIO, Revit (.rvt) with RvtIO and Navisworks caches (.nwc)
         with NwcIO. Conversion diagnostics are reported as warnings or errors.
 
         Arguments:
-          <input>            Path to input 3D model (.glb, .obj, .json, .ifc, .ifczip, .rvt or .nwc).
+          <input>            Path to input 3D model (.glb, .obj, .json, .ifc, .ifczip, .rvt, .nwc) or point cloud
+                             (.e57, .las, .laz, .ptg, .rcs, .rcp, .ply, .pcd, .pts, .ptx, .xyz, .csv, .sbf, .fls,
+                             .lgsx, .lgs, .srf, .smf, .c3db, .bin, .pnts).
           [output]           Destination path for exported file (.html, .json or .ivmesh for clustered LOD).
                              Default: <input-without-ext>.html.
 
@@ -328,7 +332,7 @@ internal static class Program
                 int undrawn = ViewerPayloadWriter.UndrawnInstances(doc.Scene);
                 if (undrawn > 0)
                 {
-                    Console.Error.WriteLine($"Warning: {undrawn} meshes of lines, points or an unknown kind are not shown; the viewer draws triangles only.");
+                    Console.Error.WriteLine($"Warning: {undrawn} meshes of lines or an unknown kind are not shown; the viewer draws triangles and point clouds.");
                 }
             }
 
@@ -366,8 +370,18 @@ internal static class Program
             ".ifc" or ".ifczip" => FromIfc(path, out diagnostics),
             ".rvt" => FromRvt(path, out diagnostics),
             ".nwc" => FromNwc(path, out diagnostics),
-            _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt, .nwc.")
+            ".e57" or ".las" or ".laz" or ".ptg" or ".rcs" or ".rcp" or ".ply" or ".pcd" or ".pts" or ".ptx"
+                or ".xyz" or ".csv" or ".sbf" or ".fls" or ".lgsx" or ".lgs" or ".srf" or ".smf" or ".c3db" or ".bin" or ".pnts"
+                => FromPcl(path, out diagnostics),
+            _ => throw new NotSupportedException($"Unsupported input file extension: '{ext}'. Supported: .glb, .obj, .json, .ifc, .ifczip, .rvt, .nwc and point clouds (.e57, .las, .laz, .ptg, .rcs, .rcp, .ply, .pcd, .pts, .ptx, .xyz, .csv, .sbf, .fls, .lgsx, .lgs, .srf, .smf, .c3db, .bin, .pnts).")
         };
+    }
+
+    private static ViewerDocument FromPcl(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
+    {
+        var result = PclSceneReader.Read(path);
+        diagnostics = result.Diagnostics;
+        return FromScene(path, result.Document, diagnostics);
     }
 
     private static ViewerDocument FromIfc(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)

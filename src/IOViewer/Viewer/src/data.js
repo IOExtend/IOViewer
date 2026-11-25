@@ -108,8 +108,20 @@ function validateMeta(meta) {
       || g.positions?.t !== (q ? 'u16' : 'f32')
       || (q && (!vector(q.o) || typeof q.s !== 'number'))
       || (g.normals != null && !['f32', 'i16'].includes(g.normals.t))
-      || (g.uvs != null && g.uvs.t !== 'f32')) {
+      || (g.uvs != null && g.uvs.t !== 'f32')
+      || (g.kind != null && g.kind !== 'points')
+      || (g.colors != null && g.colors.t !== 'u8')) {
       throw new ModelDataError('Invalid META geometry.');
+    }
+  }
+  if (meta.points != null) {
+    const p = meta.points;
+    if (!object(p) || !Number.isSafeInteger(p.count) || p.count < 0) throw new ModelDataError('Invalid META point count.');
+    for (const [name, type, length] of [
+      ['geometry', 'u32', p.count], ['material', 'u32', p.count],
+      ['element', 'i32', p.count], ['matrix', 'f32', p.count * 12],
+    ]) {
+      if (p[name]?.t !== type || p[name].n !== length) throw new ModelDataError(`Invalid META point ${name} view.`);
     }
   }
   validateReviewMeta(meta);

@@ -786,7 +786,7 @@ public class HtmlViewerExporterTests
     }
 
     [Fact]
-    public void LinesAndPoints_AreSkippedAndCounted()
+    public void LinesAndUnknown_AreSkipped_PointsAreDrawn()
     {
         var scene = TestScenes.Empty();
         Cube(scene, Vector3d.Zero);
@@ -797,8 +797,9 @@ public class HtmlViewerExporterTests
 
         var view = ViewerHtml.Export(new ViewerDocument(scene), new HtmlViewerOptions { MaxMeshVertices = CubeVertices.Length });
 
-        Assert.Equal(3, ViewerPayloadWriter.UndrawnInstances(scene));
-        Assert.Equal(3, view.Meta.GetProperty("skipped").GetProperty("instances").GetInt32());
+        Assert.Equal(2, ViewerPayloadWriter.UndrawnInstances(scene));
+        Assert.Equal(2, view.Meta.GetProperty("skipped").GetProperty("instances").GetInt32());
+        Assert.Equal(1, view.Meta.GetProperty("points").GetProperty("count").GetInt32());
         Assert.Equal(1, view.InstanceCount);
         Assert.Equal(2, view.Meta.GetProperty("truncated").GetProperty("totalMeshes").GetInt32());
         Assert.Equal(5, view.Meta.GetProperty("elements").GetArrayLength());

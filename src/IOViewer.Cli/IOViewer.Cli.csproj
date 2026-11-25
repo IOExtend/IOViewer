@@ -19,6 +19,7 @@
     <PackageReference Include="IOCoord" />
     <PackageReference Include="IfcIO.Scene" />
     <PackageReference Include="NwcIO.Scene" />
+    <PackageReference Include="PclIO.Scene" />
     <PackageReference Include="RvtIO.Scene" />
   </ItemGroup>
 

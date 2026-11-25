@@ -312,7 +312,7 @@ public class ModelAndCliIntegrationTests
             Assert.Equal(0, code);
             var view = ViewerHtml.Parse(File.ReadAllText(tempHtml));
             Assert.Equal(kind == "legacy" ? 3 : 1, view.InstanceCount);
-            Assert.Equal(kind == "legacy" ? "" : "Warning: 1 meshes of lines, points or an unknown kind are not shown; the viewer draws triangles only.",
+            Assert.Equal(kind == "legacy" ? "" : "Warning: 1 meshes of lines or an unknown kind are not shown; the viewer draws triangles and point clouds.",
                 errors.ToString().Trim());
         }
         finally
