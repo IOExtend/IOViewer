@@ -8,6 +8,10 @@ API between minor releases.
 
 ### Added
 
+- Point clouds render as point sprites: export format 4 carries `points` instances and `kind: "points"` geometries
+  (with optional per-vertex colours); the viewer draws them beside the triangle chunks with shared element visibility,
+  section clipping and bounds. `ioviewer` reads point clouds (E57, LAS/LAZ, PTG, ReCap, PLY, PCD, PTS, PTX, XYZ and more)
+  through `PclIO.Scene` 0.1.1. Points are not picked, measured or detail-cut in this version.
 - Direct `.rvt` imports include building storeys and straight, circular and multi-segment grid axes through `RvtIO.Scene` 0.5.1.
 - `ioviewer` reads Navisworks `.nwc` caches through `NwcIO.Scene` 0.13.0.
 - Standalone HTML opens with the section box or cutting planes saved in `ViewerDocument`.

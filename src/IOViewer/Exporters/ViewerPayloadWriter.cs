@@ -44,6 +44,10 @@ internal sealed class ViewerPayloadWriter
     private readonly List<uint> _instanceMaterial = [];
     private readonly List<int> _instanceElement = [];
     private readonly List<float> _instanceMatrix = [];
+    private readonly List<uint> _pointGeometry = [];
+    private readonly List<uint> _pointMaterial = [];
+    private readonly List<int> _pointElement = [];
+    private readonly List<float> _pointMatrix = [];
     private readonly Dictionary<string, PreparedViewpoint> _viewpointStates = new(StringComparer.Ordinal);
     private readonly List<ViewerBcfTopic> _bcfTopics;
     private readonly Dictionary<ViewerBcfViewpoint, PreparedViewpoint> _bcfStates = [];
@@ -54,6 +58,7 @@ internal sealed class ViewerPayloadWriter
     private int _skipped;
     private int _writtenMeshes;
     private InstanceViews _instances;
+    private InstanceViews _pointViews;
 
     private ViewerPayloadWriter(ViewerDocument doc, HtmlViewerOptions options)
     {
@@ -230,12 +235,13 @@ internal sealed class ViewerPayloadWriter
         }
     }
 
-    /// <summary>Counts the instances the viewer does not draw because their geometry is not made of triangles.</summary>
+    /// <summary>Counts the instances the viewer does not draw because their geometry is neither triangles nor points.</summary>
     public static int UndrawnInstances(SceneDocument scene)
     {
         var topology = new Dictionary<int, SceneTopology>();
         foreach (var geometry in scene.Geometries) topology.TryAdd(geometry.Id, geometry.Topology);
-        return scene.Instances.Count(i => topology.TryGetValue(i.GeometryId, out var t) && t != SceneTopology.Triangles);
+        return scene.Instances.Count(i => topology.TryGetValue(i.GeometryId, out var t)
+            && t != SceneTopology.Triangles && t != SceneTopology.Points);
     }
 
     private Dictionary<long, int> Build()
@@ -302,6 +308,11 @@ internal sealed class ViewerPayloadWriter
         foreach (var instance in _scene.Instances)
         {
             var geometry = geometries[instance.GeometryId];
+            if (geometry.Topology == SceneTopology.Points)
+            {
+                AddPointInstance(geometry, instance, elementIndex);
+                continue;
+            }
             if (geometry.Topology != SceneTopology.Triangles)
             {
                 _skipped++;
@@ -338,7 +349,7 @@ internal sealed class ViewerPayloadWriter
             _instanceGeometry.Add((uint)geometryIndex);
             _instanceMaterial.Add((uint)MaterialIndex(instance));
             _instanceElement.Add(elementIndex.TryGetValue(instance.ElementId, out int index) ? index : -1);
-            AddMatrix(transform, translation);
+            AddMatrix(transform, translation, _instanceMatrix);
             _writtenMeshes++;
         }
 
@@ -347,7 +358,47 @@ internal sealed class ViewerPayloadWriter
             _blob.Add(CollectionsMarshal.AsSpan(_instanceMaterial)),
             _blob.Add(CollectionsMarshal.AsSpan(_instanceElement)),
             _blob.Add(CollectionsMarshal.AsSpan(_instanceMatrix)));
+        _pointViews = new InstanceViews(
+            _blob.Add(CollectionsMarshal.AsSpan(_pointGeometry)),
+            _blob.Add(CollectionsMarshal.AsSpan(_pointMaterial)),
+            _blob.Add(CollectionsMarshal.AsSpan(_pointElement)),
+            _blob.Add(CollectionsMarshal.AsSpan(_pointMatrix)));
         return elementIndex;
+    }
+
+    // A point instance is baked into RTC and written as a points geometry (positions only, no indices, normals or UVs);
+    // the viewer draws it as a point sprite cloud, separate from the merged triangle chunks.
+    private void AddPointInstance(SceneGeometry geometry, SceneInstance instance, Dictionary<long, int> elementIndex)
+    {
+        var transform = instance.Transform ?? Transform3d.Identity;
+        var rtc = new Vector3d[geometry.Vertices.Count];
+        var box = BoundingBox3d.Empty;
+        for (int i = 0; i < rtc.Length; i++)
+        {
+            rtc[i] = transform.Apply(geometry.Vertices[i]) - _rtcOffset;
+            box = box.Encapsulate(rtc[i]);
+        }
+
+        int geometryIndex;
+        Vector3d translation;
+        if (GeometryQuantizer.TryQuantize(rtc, out var origin, out var q))
+        {
+            var local = box.IsEmpty ? box : new BoundingBox3d(box.Min - origin, box.Max - origin);
+            geometryIndex = AddGeometry(q, null, Vector3d.Zero, Array.Empty<int>(), null, null, local, points: true);
+            translation = origin;
+        }
+        else
+        {
+            var min = box.IsEmpty ? Vector3d.Zero : box.Min;
+            var bounds = new BoundingBox3d(Vector3d.Zero, box.Max - min);
+            geometryIndex = AddGeometry(null, Floats(rtc, min), null, Array.Empty<int>(), null, null, bounds, points: true);
+            translation = min;
+        }
+
+        _pointGeometry.Add((uint)geometryIndex);
+        _pointMaterial.Add((uint)MaterialIndex(instance));
+        _pointElement.Add(elementIndex.TryGetValue(instance.ElementId, out int index) ? index : -1);
+        AddMatrix(Transform3d.Identity, translation, _pointMatrix);
     }
 
     private static void CheckIndices(IReadOnlyList<int> indices, int vertexCount, string owner)
@@ -501,7 +552,7 @@ internal sealed class ViewerPayloadWriter
 
     // Returns the index of an identical geometry written before (same bytes and origin), or writes this one. Positions
     // are either grid steps q from origin, or f32 positions (origin null).
-    private int AddGeometry(ushort[]? q, float[]? positions, Vector3d? origin, IReadOnlyList<int> indices, short[]? normals, float[]? uvs, BoundingBox3d bounds)
+    private int AddGeometry(ushort[]? q, float[]? positions, Vector3d? origin, IReadOnlyList<int> indices, short[]? normals, float[]? uvs, BoundingBox3d bounds, bool points = false)
     {
         int vertexCount = (q?.Length ?? positions!.Length) / 3;
         ushort[]? indices16 = null;
@@ -519,6 +570,7 @@ internal sealed class ViewerPayloadWriter
 
         var hasher = new HashCode();
         hasher.Add(origin);
+        hasher.Add(points);
         hasher.AddBytes(Bytes(q));
         hasher.AddBytes(Bytes(positions));
         hasher.AddBytes(Bytes(indices16));
@@ -537,7 +589,8 @@ internal sealed class ViewerPayloadWriter
         foreach (int candidate in candidates)
         {
             var entry = _geometries[candidate];
-            if (entry.Origin == origin
+            if (entry.Points == points
+                && entry.Origin == origin
                 && (q is not null ? Same(q, entry.Positions) : Same(positions, entry.Positions))
                 && (indices16 is not null ? Same(indices16, entry.Indices) : Same(indices32, entry.Indices))
                 && Same(normals, entry.Normals)
@@ -553,7 +606,8 @@ internal sealed class ViewerPayloadWriter
             indices16 is not null ? _blob.Add(indices16) : _blob.Add(indices32),
             normals is null ? null : _blob.Add(normals),
             uvs is null ? null : _blob.Add(uvs),
-            bounds);
+            bounds,
+            points);
         _geometries.Add(written);
         candidates.Add(_geometries.Count - 1);
         return _geometries.Count - 1;
@@ -593,13 +647,13 @@ internal sealed class ViewerPayloadWriter
     }
 
     // Matrix4.elements[0,1,2,4,5,6,8,9,10,12,13,14]: the three axes of t, then the translation, already in RTC.
-    private void AddMatrix(Transform3d t, Vector3d translation)
+    private static void AddMatrix(Transform3d t, Vector3d translation, List<float> target)
     {
         foreach (var axis in (ReadOnlySpan<Vector3d>)[t.XAxis, t.YAxis, t.ZAxis, translation])
         {
-            _instanceMatrix.Add((float)axis.X);
-            _instanceMatrix.Add((float)axis.Y);
-            _instanceMatrix.Add((float)axis.Z);
+            target.Add((float)axis.X);
+            target.Add((float)axis.Y);
+            target.Add((float)axis.Z);
         }
     }
 
@@ -627,7 +681,7 @@ internal sealed class ViewerPayloadWriter
     {
         using var w = new Utf8JsonWriter(output);
         w.WriteStartObject();
-        w.WriteNumber("format", 3);
+        w.WriteNumber("format", _pointGeometry.Count > 0 ? 4 : 3);
         w.WriteString("title", _options.Title);
         var host = _scene.Models.Count > 0 ? _scene.Models[0] : null;
         w.WriteString("author", host?.Author ?? "IOViewer");
@@ -689,6 +743,7 @@ internal sealed class ViewerPayloadWriter
             }
             w.WritePropertyName("indices");
             g.Indices.WriteTo(w);
+            if (g.Points) w.WriteString("kind", "points");
             WriteView(w, "normals", g.Normals);
             WriteView(w, "uvs", g.Uvs);
             WriteBox(w, "bbox", g.Bounds, Vector3d.Zero);
@@ -708,6 +763,21 @@ internal sealed class ViewerPayloadWriter
         w.WritePropertyName("matrix");
         _instances.Matrix.WriteTo(w);
         w.WriteEndObject();
+
+        if (_pointGeometry.Count > 0)
+        {
+            w.WriteStartObject("points");
+            w.WriteNumber("count", _pointGeometry.Count);
+            w.WritePropertyName("geometry");
+            _pointViews.Geometry.WriteTo(w);
+            w.WritePropertyName("material");
+            _pointViews.Material.WriteTo(w);
+            w.WritePropertyName("element");
+            _pointViews.Element.WriteTo(w);
+            w.WritePropertyName("matrix");
+            _pointViews.Matrix.WriteTo(w);
+            w.WriteEndObject();
+        }
 
         WriteReview(w);
         w.WriteEndObject();
@@ -1095,8 +1165,8 @@ internal sealed class ViewerPayloadWriter
 
     private readonly record struct MaterialKey(byte R, byte G, byte B, double Opacity, int? Texture);
 
-    // Origin is META q.o: set for u16 grid-step positions, null for f32.
-    private sealed record GeometryEntry(BlobView Positions, Vector3d? Origin, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds);
+    // Origin is META q.o: set for u16 grid-step positions, null for f32. Points marks a point-sprite geometry (no indices).
+    private sealed record GeometryEntry(BlobView Positions, Vector3d? Origin, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds, bool Points = false);
 
     // An own-vertex mesh baked into RTC: Relative = float32 positions relative to Min, the exact minimum corner; Indices
     // with the winding reversed under a mirroring transform.

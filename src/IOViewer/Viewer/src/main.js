@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadModelData, ModelDataError, readModelMeta } from './data.js';
 import { ModelScene, ModelTooLargeError } from './engine/modelScene.js';
+import { PointScene } from './engine/pointScene.js';
 import { lang, t } from './i18n.js';
 import { NavigationControls, needsLogarithmicDepth } from './nav/controls.js';
 import { ViewCube } from './nav/viewCube.js';
@@ -73,17 +74,40 @@ function start(data, context) {
 
   // Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat, slotLimit,
   // mergedCap, minRepeats, cellExtent, startup (optional phase samples).
+  // A model over what the viewer can draw opens without geometry and says why; the tree and properties still work.
+  let tooLarge = false;
   startup?.('sceneStart');
   const scene = createScene();
+  const points = new PointScene(data);
   startup?.('sceneEnd');
   data.releaseBinary(); // the scene has copied what it needs
+  if (!tooLarge && scene.totalCost === 0 && points.count === 0) showMessage(t('noGeometry'));
   // Starting at the whole model's cost, a GPU that draws it in time orbits at full detail; a slower one shrinks it.
   // Larger models start at about what an integrated GPU draws at 30 fps (a 200k-element model, 19.2e6): from a 1M one's
   // 134e6 the first gesture would take some 20 frames of 200 ms to shrink. A faster GPU grows the budget.
   const motionDetail = new MotionDetail(scene, requestRender, Math.min(scene.totalCost, 20e6));
   world.add(scene.root);
+  world.add(points.root);
+  // Sections and the orbit bounds see the triangle model and the point clouds as one model.
+  const visibleBox = () => {
+    const box = scene.visibleBox();
+    return points.count ? box.union(points.visibleBox()) : box;
+  };
+  const sectionScene = {
+    visibleBox,
+    elementBox: (i, box) => {
+      const b = scene.elementBox(i, box);
+      return points.count ? b.union(points.elementBox(i)) : b;
+    },
+    setClipping: (planes, intersection) => {
+      scene.setClipping(planes, intersection);
+      points.setClipping(planes);
+    },
+  };
   // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
-  const sections = new Sections(scene, scene.visibleBox(), data.meta.sections);
+  const sections = new Sections(sectionScene, visibleBox(), data.meta.sections);
+  points.syncVisibility(scene);
+  points.setClipping(sections.clipping().planes);
   const canFillSections = context.getContextAttributes()?.stencil === true;
   let sectionCaps;
   const sectionGizmo = new SectionGizmo(sections, canvas);
@@ -97,10 +121,10 @@ function start(data, context) {
   function createScene() {
     try {
       const model = new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
-      if (model.totalCost === 0) showMessage(t('noGeometry'));
       return model;
     } catch (error) {
       if (!(error instanceof ModelTooLargeError)) throw error;
+      tooLarge = true;
       showMessage(t('tooLarge').replace('{count}', error.count).replace('{limit}', error.limit));
       const none = (type) => ({ o: 0, n: 0, t: type });
       const instances = { count: 0, geometry: none('u32'), material: none('u32'), element: none('i32'), matrix: none('f32') };
@@ -147,7 +171,10 @@ function start(data, context) {
     });
   }
   scene.root.addEventListener('change', requestRender);
-  sections.addEventListener('change', requestRender);
+  sections.addEventListener('change', () => {
+    points.setClipping(sections.clipping().planes);
+    requestRender();
+  });
   sectionGizmo.addEventListener('change', requestRender);
   measure.addEventListener('change', requestRender);
   measure.addEventListener('previewchange', requestRender);
@@ -187,7 +214,7 @@ function start(data, context) {
   });
   const controls = new NavigationControls(camera, canvas, {
     pick: (x, y) => picker.pick(x, y)?.point ?? null,
-    visibleBox: () => scene.visibleBox(),
+    visibleBox,
   });
   controls.addEventListener('change', () => {
     picker.camera = controls.camera; // swaps with the projection
@@ -196,6 +223,7 @@ function start(data, context) {
   });
   scene.root.addEventListener('change', (e) => {
     if (e.detail.kind !== 'visibility') return; // a highlight must not walk every instance for the bounds
+    points.syncVisibility(scene);
     controls.invalidateBounds();
     controls.resize();
   });
@@ -279,7 +307,7 @@ function start(data, context) {
   });
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   controls.resize(); // also schedules the first frame for an empty model
-  controls.fitBox(scene.visibleBox(), false);
+  controls.fitBox(visibleBox(), false);
   const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
   // The canvas and the view cube take no focus, so a press on them takes it from a panel field or a toolbar button:
@@ -288,6 +316,6 @@ function start(data, context) {
     if (e.target === canvas || viewCube.element.contains(e.target)) document.activeElement?.blur();
   }, true);
 
-  window.__ioviewer = { scene, motionDetail, controls, picker, selection, ui, viewCube, sections, sectionGizmo,
+  window.__ioviewer = { scene, points, motionDetail, controls, picker, selection, ui, viewCube, sections, sectionGizmo,
     measure, measureSnap, grids, clashes, timeliner, ready, get camera() { return controls.camera; } };
 }
