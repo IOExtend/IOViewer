@@ -23,7 +23,8 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
 - Packs geometry compactly: positions quantized to 16-bit steps of 2⁻¹⁰ m (error at most 0.49 mm, 0.85 mm for rotated shared geometry; geometry larger than about 64 m, or shared geometry that an instance scales up, stays 32-bit float), octahedral 16-bit normals, 16- or 32-bit indices, all in one base64 block.
 - Shifts coordinates relative to the model centre (RTC), so georeferenced models with coordinates around 10⁶ m do not jitter.
 - Draws large models with few draw calls: geometry is merged into spatial chunks per material (very large models draw their repeated shapes as instanced copies instead), and hiding, selection and colouring are per-object data, so they never rebuild geometry.
-- Viewer interface in Russian or English, chosen from the browser language:
+- Viewer interface in English, Russian, Spanish, German, French, Portuguese, Italian, Japanese, Korean, and simplified and traditional Chinese. The language picker works offline in standalone HTML. Choose Auto to follow the browser’s preferred languages. Changing the language reloads the viewer with its initial view.
+- Viewer tools
   - model tree with search and filters by source model, level and category, a properties panel and a selected/total counter;
   - toolbar with labelled groups: navigation, sections, measure, display and view;
   - context menu: properties, hide, isolate, show all, zoom to object, section box around the object, copy Id;

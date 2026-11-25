@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { loadModelData, ModelDataError, readModelMeta } from './data.js';
 import { ModelScene, ModelTooLargeError } from './engine/modelScene.js';
-import { lang, t } from './i18n.js';
+import { setupLanguage, t } from './i18n.js';
 import { NavigationControls, needsLogarithmicDepth } from './nav/controls.js';
 import { ViewCube } from './nav/viewCube.js';
 import { Picker } from './engine/picking.js';
@@ -22,7 +22,7 @@ import { mountClashes } from './ui/clashesPanel.js';
 import { mountTimeliner } from './ui/timeliner.js';
 import { mountLinks } from './ui/linksPanel.js';
 
-document.documentElement.lang = lang;
+setupLanguage();
 const canvas = document.getElementById('ioviewer-canvas');
 const testOptions = window.IOVIEWER_TEST ?? {};
 const startup = testOptions.startup;

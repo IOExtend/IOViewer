@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lang, t } from '../i18n.js';
+import { formatCount, setupLanguage, t } from '../i18n.js';
 import { NavigationControls } from '../nav/controls.js';
 import { MESH_BUDGET, MIB } from './manifest.js';
 import { detailInputBytes, detailMeshBytes, FACES, INSTANCE_FLOATS, STEP, VERTICES, validateClusters } from './clusters.js';
@@ -10,10 +10,9 @@ const status = document.querySelector('#ioviewer-status');
 const message = document.querySelector('#ioviewer-message');
 const fit = document.querySelector('#fit');
 const retry = document.querySelector('#retry');
-const ru = lang === 'ru';
-document.documentElement.lang = lang;
+setupLanguage();
 fit.textContent = t('tool.fit');
-retry.textContent = ru ? 'Повторить загрузку' : 'Retry downloads';
+retry.textContent = t('retry');
 
 function show(text) {
   message.textContent = text;
@@ -259,8 +258,9 @@ function start(manifest, instances, context) {
     renderer.render(world, camera);
     resolveReady(performance.now());
     if (animating || transferred.length) requestFrame();
-    status.textContent = ru ? `${Math.ceil(bytes / MIB)} МиБ · точная геометрия ${shown[3]}/${candidates.length}`
-      : `${Math.ceil(bytes / MIB)} MiB · full detail ${shown[3]}/${candidates.length}`;
+    status.textContent = t('streamLod', undefined, {
+      size: formatCount(Math.ceil(bytes / MIB)), shown: formatCount(shown[3]), total: formatCount(candidates.length),
+    });
     retry.hidden = failed.size === 0;
     if (failed.size) retry.title = [...failed.values()].join('\n');
   }

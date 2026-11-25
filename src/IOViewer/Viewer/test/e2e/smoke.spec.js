@@ -160,6 +160,8 @@ test('adaptive orbit compacts a cell on the GPU and full detail and picking stil
 for (const [locale, message, status] of [
   ['ru-RU', 'Нет геометрии', 'Выбрано: 0 · Элементов: 0'],
   ['en-US', 'No geometry', 'Selected: 0 · Elements: 0'],
+  ['ja-JP', 'ジオメトリがありません', '選択済み: 0 · 要素: 0'],
+  ['zh-TW', '沒有幾何圖形', '已選取: 0 · 圖元: 0'],
 ]) {
   test.describe(locale, () => {
     test.use({ locale });
@@ -172,6 +174,23 @@ for (const [locale, message, status] of [
     });
   });
 }
+
+test('standalone HTML switches languages offline and remembers the choice on reload', async ({ page, context }) => {
+  await context.setOffline(true);
+  const { errors, requests } = await open(page, 'building');
+  const picker = page.locator('#ioviewer-language');
+  await expect(picker.locator('option')).toHaveCount(12);
+  await picker.selectOption('de');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+  await expect(page.getByRole('button', { name: 'Modell', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(picker).toHaveValue('de');
+  await picker.selectOption('auto');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
+  await expect(page.getByRole('button', { name: 'Модель', exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+  expect(requests).toEqual([]);
+});
 
 test('startup profiling samples load and first render once', async ({ page }) => {
   await page.addInitScript(() => {
