@@ -82,7 +82,7 @@ export async function pickMeshSurface(ray, roots, nodes, getPage, sections, sign
   return hit;
 }
 
-export function mountMeshTools({ manifest, roots, nodes, bounds, world, controls, canvas, scene, fetchPage, setBackground, canFill, render, ru }) {
+export function mountMeshTools({ manifest, roots, nodes, bounds, world, controls, canvas, scene, fetchPage, setBackground, canFill, render }) {
   const selection = new Selection();
   const root = document.querySelector('#ioviewer-ui');
   const elements = manifest.elements ?? [];
@@ -154,7 +154,7 @@ export function mountMeshTools({ manifest, roots, nodes, bounds, world, controls
     let failed = false;
     if (!preview) {
       note.hidden = false;
-      note.textContent = ru ? 'Поиск элемента…' : 'Finding element…';
+      note.textContent = t('finding');
     }
     try {
       const rect = canvas.getBoundingClientRect();

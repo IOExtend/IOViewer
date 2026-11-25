@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lang, t } from '../i18n.js';
+import { formatCount, setupLanguage, t } from '../i18n.js';
 import { NavigationControls } from '../nav/controls.js';
 import { MAX_TILE_MESH, MESH_BUDGET, MIB, validateManifest } from './manifest.js';
 
@@ -8,10 +8,9 @@ const status = document.querySelector('#ioviewer-status');
 const message = document.querySelector('#ioviewer-message');
 const fit = document.querySelector('#fit');
 const retry = document.querySelector('#retry');
-const ru = lang === 'ru';
-document.documentElement.lang = lang;
+setupLanguage();
 fit.textContent = t('tool.fit');
-retry.textContent = ru ? 'Повторить загрузку' : 'Retry downloads';
+retry.textContent = t('retry');
 
 function show(text) {
   message.textContent = text;
@@ -203,9 +202,10 @@ function start(manifest, context) {
     }
     if (uploaded.length) requestFrame();
     const shown = wanted.filter((key) => resident.get(key)?.next > 0).length;
-    status.textContent = ru
-      ? `Участков ${tiles.length} · Детализация ${shown}/${wanted.length} · ${Math.ceil(bytes / MIB)} МиБ / ${MESH_BUDGET / MIB} МиБ`
-      : `${tiles.length} areas · Detail ${shown}/${wanted.length} · ${Math.ceil(bytes / MIB)} MiB / ${MESH_BUDGET / MIB} MiB`;
+    status.textContent = t('streamTiles', undefined, {
+      areas: formatCount(tiles.length), shown: formatCount(shown), total: formatCount(wanted.length),
+      size: formatCount(Math.ceil(bytes / MIB)), limit: formatCount(MESH_BUDGET / MIB),
+    });
     retry.hidden = failed.size === 0;
     if (failed.size) retry.title = [...failed].map(([key, error]) => `${key.tile.file}: ${error}`).join('\n');
   }

@@ -53,7 +53,8 @@ button {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 2px solid var(--accent-text);
   outline-offset: 1px;
 }
@@ -67,6 +68,18 @@ input:focus-visible {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   pointer-events: auto;
 }
+
+#ioviewer-language {
+  inset: 12px 12px auto auto;
+  z-index: 2;
+  min-height: 36px;
+  max-width: 9.5rem;
+  padding-inline: 8px;
+  color: var(--text);
+  font: inherit;
+}
+
+#ioviewer-ui:has(#ioviewer-language) { --language-space: 44px; }
 
 #ioviewer-message {
   position: absolute;
@@ -393,7 +406,7 @@ input:focus-visible {
    and the buttons take pointer events. */
 .ioviewer-viewcube {
   position: absolute;
-  top: 12px;
+  top: calc(12px + var(--language-space, 0px));
   right: 12px;
   width: 132px;
   height: 132px;
@@ -490,10 +503,10 @@ input:focus-visible {
 /* Properties of the selection, right, below the view cube. */
 #ioviewer-properties {
   right: 12px;
-  top: 152px;
+  top: calc(152px + var(--language-space, 0px));
   width: 300px;
   max-width: calc(100% - 24px);
-  max-height: calc(100% - 152px - var(--toolbar-space));
+  max-height: calc(100% - 152px - var(--toolbar-space) - var(--language-space, 0px));
   overflow: auto;
   padding: 8px 12px 12px;
 }

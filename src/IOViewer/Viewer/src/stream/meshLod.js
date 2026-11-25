@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lang, t } from '../i18n.js';
+import { formatCount, setupLanguage, t } from '../i18n.js';
 import { NavigationControls } from '../nav/controls.js';
 import { ViewCube } from '../nav/viewCube.js';
 import { el } from '../ui/dom.js';
@@ -16,10 +16,9 @@ const retry = document.querySelector('#retry');
 const status = el('span');
 document.querySelector('#stream-controls').append(status);
 document.querySelector('#fit').remove();
-const ru = lang === 'ru';
 const profile = window.IOVIEWER_MESH_PROFILE;
-document.documentElement.lang = lang;
-retry.textContent = ru ? 'Повторить загрузку' : 'Retry downloads';
+setupLanguage();
+retry.textContent = t('retry');
 
 function show(text) {
   message.textContent = text;
@@ -211,7 +210,7 @@ async function start(manifest, context) {
     updateMaterials();
   });
   const tools = mountMeshTools({ manifest, roots, nodes, bounds, world, controls, canvas, scene,
-    fetchPage, ru, render: requestFrame, canFill: context.getContextAttributes()?.stencil === true && roots.some((node) => node.hasClosed),
+    fetchPage, render: requestFrame, canFill: context.getContextAttributes()?.stencil === true && roots.some((node) => node.hasClosed),
     setBackground: (color) => renderer.setClearColor(color) });
   let caps, capWorld, capMaterials;
   function renderStencils(renderer, camera, plane) {
@@ -503,8 +502,9 @@ async function start(manifest, context) {
     }
     resolveReady(performance.now());
     if (transferred.length || warm.length) requestFrame();
-    status.textContent = ru ? `${Math.ceil(bytes / MIB)} МиБ · Кластеров ${visible} · Уточняется ${fallback}`
-      : `${Math.ceil(bytes / MIB)} MiB · ${visible} clusters · ${fallback} refining`;
+    status.textContent = t('streamMesh', undefined, {
+      size: formatCount(Math.ceil(bytes / MIB)), visible: formatCount(visible), fallback: formatCount(fallback),
+    });
     retry.hidden = failed.size === 0;
     if (failed.size) retry.title = [...failed.values()].join('\n');
   }

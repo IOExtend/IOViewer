@@ -1,4 +1,8 @@
-const dictionaries = {
+import { languageOption, locales, matchLocale, preferredLocale, storedLanguage, storeLanguage } from './locale.js';
+import { additionalDictionaries } from './translations.js';
+
+export const dictionaries = {
+  ...additionalDictionaries,
   ru: {
     elements: 'Элементов',
     noGeometry: 'Нет геометрии',
@@ -124,6 +128,14 @@ const dictionaries = {
     'player.date': 'Дата графика',
     'player.speed': 'Скорость',
     truncated: 'Показано {meshes} из {total} мешей: модель обрезана настройкой MaxMeshVertices',
+    language: 'Язык',
+    auto: 'Авто',
+    model3d: '3D-модель',
+    retry: 'Повторить загрузку',
+    finding: 'Поиск элемента…',
+    streamLod: '{size} МиБ · точная геометрия {shown}/{total}',
+    streamMesh: '{size} МиБ · Кластеров {visible} · Уточняется {fallback}',
+    streamTiles: 'Участков {areas} · Детализация {shown}/{total} · {size}/{limit} МиБ',
   },
   en: {
     elements: 'Elements',
@@ -250,15 +262,47 @@ const dictionaries = {
     'player.date': 'Schedule date',
     'player.speed': 'Speed',
     truncated: 'Showing {meshes} of {total} meshes: the model was truncated by the MaxMeshVertices setting',
+    language: 'Language',
+    auto: 'Auto',
+    model3d: '3D model',
+    retry: 'Retry downloads',
+    finding: 'Finding element…',
+    streamLod: '{size} MiB · full detail {shown}/{total}',
+    streamMesh: '{size} MiB · Clusters {visible} · Refining {fallback}',
+    streamTiles: '{areas} areas · Detail {shown}/{total} · {size}/{limit} MiB',
   },
 };
 
-export const lang = (globalThis.navigator?.language ?? '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+const storageKey = 'ioviewer-language';
+const hostLanguage = globalThis.parent && globalThis.parent !== globalThis &&
+  matchLocale(new URLSearchParams(location.hash.slice(1)).get('ioextendLang'));
+const selected = new URLSearchParams(globalThis.location?.search).get('lang');
+const saved = selected === 'auto' ? selected : matchLocale(selected) ?? storedLanguage(storageKey);
+export const lang = hostLanguage || matchLocale(saved) ||
+  preferredLocale(globalThis.navigator?.languages?.length ? navigator.languages : [globalThis.navigator?.language]);
 export const formatCount = new Intl.NumberFormat(lang).format;
 
-// `language` is for tests; the UI always uses `lang`.
-export function t(key, language = lang) {
-  const text = dictionaries[language][key];
+export function t(key, language = lang, values) {
+  const text = dictionaries[language]?.[key];
   if (text === undefined) throw new Error(`Missing UI string '${key}'.`);
-  return text;
+  return values ? text.replace(/\{(\w+)\}/g, (_, name) => values[name]) : text;
+}
+
+export function setupLanguage() {
+  document.documentElement.lang = lang;
+  document.querySelector('canvas').setAttribute('aria-label', t('model3d'));
+  if (hostLanguage) return;
+  const select = document.createElement('select');
+  select.id = 'ioviewer-language';
+  select.className = 'ioviewer-floating';
+  select.setAttribute('aria-label', t('language'));
+  select.append(new Option(t('auto'), 'auto'), ...locales.map(languageOption));
+  select.value = matchLocale(saved) ?? 'auto';
+  select.addEventListener('change', () => {
+    storeLanguage(storageKey, select.value);
+    const url = new URL(location.href);
+    url.searchParams.set('lang', select.value);
+    location.replace(url);
+  });
+  document.querySelector('#ioviewer-ui').append(select);
 }

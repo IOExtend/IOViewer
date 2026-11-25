@@ -1,4 +1,4 @@
-import { t } from '../i18n.js';
+import { lang, t } from '../i18n.js';
 import { prepareSchedule, scheduleState } from '../model/schedule.js';
 import { icons } from './icons.js';
 import { el, iconButton } from './dom.js';
@@ -25,8 +25,8 @@ export function mountTimeliner({ root, shell, timeliner, elements, scene }) {
     shell.registerPanel('timeliner', { icon: icons.timeliner, title: t('panel.timeliner'), visible: false, render: () => {} });
     return null;
   }
-  const dayFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeZone: 'UTC' });
-  const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' });
+  const dayFormat = new Intl.DateTimeFormat(lang, { dateStyle: 'short', timeZone: 'UTC' });
+  const dateFormat = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeZone: 'UTC' });
   let date = schedule.start;
   let speed = 1;
   let frame = 0; // requestAnimationFrame id while playing
