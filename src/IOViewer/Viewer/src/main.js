@@ -74,6 +74,8 @@ function start(data, context) {
 
   // Test-only engine options (e2e and the performance harness): chunkVertices, noHideBranch, pickFloat, slotLimit,
   // mergedCap, minRepeats, cellExtent, startup (optional phase samples).
+  // A model over what the viewer can draw opens without geometry and says why; the tree and properties still work.
+  let tooLarge = false;
   startup?.('sceneStart');
   const scene = createScene();
   const points = new PointScene(data);
@@ -116,7 +118,6 @@ function start(data, context) {
   world.add(measure.group, grids.group); // overlays too
 
   // A model over what the viewer can draw opens without geometry and says why; the tree and properties still work.
-  let tooLarge = false;
   function createScene() {
     try {
       const model = new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
