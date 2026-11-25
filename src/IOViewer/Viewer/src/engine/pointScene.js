@@ -89,6 +89,18 @@ export class PointScene {
     }
     return box;
   }
+
+  elementBox(index, box = new THREE.Box3()) {
+    box.makeEmpty();
+    const sphere = new THREE.Sphere();
+    for (let i = 0; i < this._objects.length; i++) {
+      if (this._elements[i] !== index || !this._objects[i].visible) continue;
+      sphere.copy(this._objects[i].geometry.boundingSphere).applyMatrix4(this._objects[i].matrix);
+      box.expandByPoint(sphere.center.clone().addScalar(sphere.radius));
+      box.expandByPoint(sphere.center.clone().addScalar(-sphere.radius));
+    }
+    return box;
+  }
 }
 
 // The writer stores the three axes then the translation (12 floats); three wants a column-major mat4.

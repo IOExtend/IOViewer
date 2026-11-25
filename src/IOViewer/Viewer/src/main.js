@@ -79,7 +79,7 @@ function start(data, context) {
   const points = new PointScene(data);
   startup?.('sceneEnd');
   data.releaseBinary(); // the scene has copied what it needs
-  if (scene.totalCost === 0 && points.count === 0) showMessage(t('noGeometry'));
+  if (!tooLarge && scene.totalCost === 0 && points.count === 0) showMessage(t('noGeometry'));
   // Starting at the whole model's cost, a GPU that draws it in time orbits at full detail; a slower one shrinks it.
   // Larger models start at about what an integrated GPU draws at 30 fps (a 200k-element model, 19.2e6): from a 1M one's
   // 134e6 the first gesture would take some 20 frames of 200 ms to shrink. A faster GPU grows the budget.
@@ -93,6 +93,10 @@ function start(data, context) {
   };
   const sectionScene = {
     visibleBox,
+    elementBox: (i, box) => {
+      const b = scene.elementBox(i, box);
+      return points.count ? b.union(points.elementBox(i)) : b;
+    },
     setClipping: (planes, intersection) => {
       scene.setClipping(planes, intersection);
       points.setClipping(planes);
@@ -112,12 +116,14 @@ function start(data, context) {
   world.add(measure.group, grids.group); // overlays too
 
   // A model over what the viewer can draw opens without geometry and says why; the tree and properties still work.
+  let tooLarge = false;
   function createScene() {
     try {
       const model = new ModelScene(data, { ...testOptions, maxTextureSize: renderer.capabilities.maxTextureSize });
       return model;
     } catch (error) {
       if (!(error instanceof ModelTooLargeError)) throw error;
+      tooLarge = true;
       showMessage(t('tooLarge').replace('{count}', error.count).replace('{limit}', error.limit));
       const none = (type) => ({ o: 0, n: 0, t: type });
       const instances = { count: 0, geometry: none('u32'), material: none('u32'), element: none('i32'), matrix: none('f32') };
