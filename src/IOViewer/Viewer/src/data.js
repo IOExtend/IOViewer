@@ -1,6 +1,6 @@
 // Reads the data blocks of an exported page (format 2 or 3): META and PROPS as JSON, BIN as one base64 blob.
 
-const VIEW_TYPES = { f32: Float32Array, u16: Uint16Array, i16: Int16Array, u32: Uint32Array, i32: Int32Array };
+const VIEW_TYPES = { f32: Float32Array, u8: Uint8Array, u16: Uint16Array, i16: Int16Array, u32: Uint32Array, i32: Int32Array };
 const CHUNK_CHARS = 4 * 1024 * 1024; // multiple of 4, so every chunk decodes on its own
 
 export function gridPoints(grid) {
@@ -110,7 +110,7 @@ function validateMeta(meta) {
       || (g.normals != null && !['f32', 'i16'].includes(g.normals.t))
       || (g.uvs != null && g.uvs.t !== 'f32')
       || (g.kind != null && g.kind !== 'points')
-      || (g.colors != null && g.colors.t !== 'u8')) {
+      || (g.colors != null && (g.kind !== 'points' || g.colors.t !== 'u8' || g.colors.n !== g.positions.n))) {
       throw new ModelDataError('Invalid META geometry.');
     }
   }
@@ -123,6 +123,12 @@ function validateMeta(meta) {
     ]) {
       if (p[name]?.t !== type || p[name].n !== length) throw new ModelDataError(`Invalid META point ${name} view.`);
     }
+  }
+  if (meta.panoramas != null && (!records(meta.panoramas) || meta.panoramas.some((p) =>
+    !Number.isInteger(p.element) || p.element < 0 || p.element >= meta.elements.length ||
+    (p.name != null && typeof p.name !== 'string') || !vector(p.position) || !p.position.every(Number.isFinite) || !Number.isFinite(p.yaw) ||
+    p.image?.t !== 'u8' || !Number.isSafeInteger(p.image.n) || p.image.n < 4 || p.image.n > 16 * 1024 * 1024))) {
+    throw new ModelDataError('Invalid META panorama.');
   }
   validateReviewMeta(meta);
   for (const material of meta.materials) {

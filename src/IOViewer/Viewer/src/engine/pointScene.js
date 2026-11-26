@@ -11,14 +11,12 @@ export class PointScene {
   constructor(data) {
     this.root = new THREE.Group();
     this._objects = [];
-    this._elements = [];
     const points = data.meta.points;
     this.count = points?.count ?? 0;
     if (!this.count) return;
 
     const geometryOf = data.view(points.geometry);
     const materialOf = data.view(points.material);
-    const elementOf = data.view(points.element);
     const matrices = data.view(points.matrix);
 
     for (let i = 0; i < this.count; i++) {
@@ -34,7 +32,11 @@ export class PointScene {
         const bytes = data.view(g.colors);
         if (bytes.length !== positions.length) throw new ModelDataError(`Point geometry ${geometryOf[i]} colors do not match its positions.`);
         const colors = new Float32Array(bytes.length);
-        for (let k = 0; k < bytes.length; k++) colors[k] = bytes[k] / 255;
+        const color = new THREE.Color();
+        for (let k = 0; k < bytes.length; k += 3) {
+          color.setRGB(bytes[k] / 255, bytes[k + 1] / 255, bytes[k + 2] / 255, THREE.SRGBColorSpace);
+          color.toArray(colors, k);
+        }
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         vertexColors = true;
       }
@@ -43,7 +45,7 @@ export class PointScene {
         size: 2,
         sizeAttenuation: false,
         vertexColors,
-        color: new THREE.Color(...(material?.color ?? [0.8, 0.8, 0.8])),
+        color: vertexColors ? 0xffffff : new THREE.Color(...(material?.color ?? [0.8, 0.8, 0.8])),
       });
       const object = new THREE.Points(geometry, pointsMaterial);
       object.matrixAutoUpdate = false;
@@ -53,15 +55,14 @@ export class PointScene {
       geometry.computeBoundingSphere();
       this.root.add(object);
       this._objects.push(object);
-      this._elements.push(elementOf[i]);
     }
   }
 
-  // Mirrors the triangle model's element visibility so hiding an element hides its cloud too.
+  // ModelScene appends point instances after meshes in its visibility state.
   syncVisibility(scene) {
+    const first = scene.instanceCount - this.count;
     for (let i = 0; i < this._objects.length; i++) {
-      const element = this._elements[i];
-      this._objects[i].visible = element < 0 || scene.isVisible(element);
+      this._objects[i].visible = scene.isInstanceVisible(first + i);
     }
   }
 
@@ -76,30 +77,6 @@ export class PointScene {
       object.material.opacity = opacity;
       object.material.transparent = opacity < 1;
     }
-  }
-
-  visibleBox(box = new THREE.Box3()) {
-    box.makeEmpty();
-    const sphere = new THREE.Sphere();
-    for (const object of this._objects) {
-      if (!object.visible) continue;
-      sphere.copy(object.geometry.boundingSphere).applyMatrix4(object.matrix);
-      box.expandByPoint(sphere.center.clone().addScalar(sphere.radius));
-      box.expandByPoint(sphere.center.clone().addScalar(-sphere.radius));
-    }
-    return box;
-  }
-
-  elementBox(index, box = new THREE.Box3()) {
-    box.makeEmpty();
-    const sphere = new THREE.Sphere();
-    for (let i = 0; i < this._objects.length; i++) {
-      if (this._elements[i] !== index || !this._objects[i].visible) continue;
-      sphere.copy(this._objects[i].geometry.boundingSphere).applyMatrix4(this._objects[i].matrix);
-      box.expandByPoint(sphere.center.clone().addScalar(sphere.radius));
-      box.expandByPoint(sphere.center.clone().addScalar(-sphere.radius));
-    }
-    return box;
   }
 }
 

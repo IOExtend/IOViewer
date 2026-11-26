@@ -59,6 +59,8 @@ internal sealed class ViewerPayloadWriter
     private int _writtenMeshes;
     private InstanceViews _instances;
     private InstanceViews _pointViews;
+    private readonly Dictionary<int, byte[]> _pointColors;
+    private readonly List<(int Element, Vector3d Position, double Yaw, BlobView Image, string? Name)> _panoramas = [];
 
     private ViewerPayloadWriter(ViewerDocument doc, HtmlViewerOptions options)
     {
@@ -66,6 +68,7 @@ internal sealed class ViewerPayloadWriter
         _hiddenModels = [.. doc.HiddenModelKeys];
         _firstListedModel = doc.ShowHostInModelList ? 0 : 1;
         _bcfTopics = doc.BcfTopics;
+        _pointColors = doc.PointColors;
         _options = options;
     }
 
@@ -77,6 +80,16 @@ internal sealed class ViewerPayloadWriter
         var elementIndex = writer.Build();
         writer._sections = writer.BuildSections(doc.SectionPlanes, doc.SectionBox);
         writer.BuildViewpointStates(doc.ViewpointStates, elementIndex);
+        foreach (var panorama in doc.Panoramas)
+        {
+            if (panorama is null || !elementIndex.TryGetValue(panorama.ElementId, out int element)
+                || !IsFinite(panorama.Position - writer._rtcOffset) || !double.IsFinite(panorama.YawDegrees)
+                || panorama.Jpeg is not { Length: >= 4 and <= 16 * 1024 * 1024 } image
+                || image[0] != 0xff || image[1] != 0xd8 || image[^2] != 0xff || image[^1] != 0xd9)
+                throw new InvalidDataException("A panorama needs a scene element, finite placement and a JPEG up to 16 MiB.");
+            writer._panoramas.Add((element, panorama.Position - writer._rtcOffset, panorama.YawDegrees,
+                writer._blob.Add(image.AsSpan()), panorama.Name));
+        }
         writer.ValidateMetadata();
         return writer;
     }
@@ -258,6 +271,12 @@ internal sealed class ViewerPayloadWriter
                 || geometry.UVs?.All(uv => double.IsFinite(uv.X) && double.IsFinite(uv.Y)) == false)
                 throw new InvalidDataException($"Geometry {geometry.Id} has a non-finite vertex, normal or UV coordinate.");
         }
+        foreach (var (id, colors) in _pointColors)
+        {
+            if (!geometries.TryGetValue(id, out var geometry) || geometry.Topology != SceneTopology.Points
+                || colors is null || colors.LongLength != 3L * geometry.Vertices.Count)
+                throw new InvalidDataException($"Point geometry {id} needs exactly three color bytes per vertex.");
+        }
 
         // Instances per geometry, and the largest axis length of any of them: grid steps in local units grow by it.
         var uses = new Dictionary<int, int>();
@@ -366,7 +385,7 @@ internal sealed class ViewerPayloadWriter
         return elementIndex;
     }
 
-    // A point instance is baked into RTC and written as a points geometry (positions only, no indices, normals or UVs);
+    // A point instance is baked into RTC and written as a points geometry with optional RGB;
     // the viewer draws it as a point sprite cloud, separate from the merged triangle chunks.
     private void AddPointInstance(SceneGeometry geometry, SceneInstance instance, Dictionary<long, int> elementIndex)
     {
@@ -381,17 +400,18 @@ internal sealed class ViewerPayloadWriter
 
         int geometryIndex;
         Vector3d translation;
+        byte[]? colors = _pointColors.GetValueOrDefault(geometry.Id);
         if (GeometryQuantizer.TryQuantize(rtc, out var origin, out var q))
         {
             var local = box.IsEmpty ? box : new BoundingBox3d(box.Min - origin, box.Max - origin);
-            geometryIndex = AddGeometry(q, null, Vector3d.Zero, Array.Empty<int>(), null, null, local, points: true);
+            geometryIndex = AddGeometry(q, null, Vector3d.Zero, Array.Empty<int>(), null, null, local, points: true, colors: colors);
             translation = origin;
         }
         else
         {
             var min = box.IsEmpty ? Vector3d.Zero : box.Min;
             var bounds = new BoundingBox3d(Vector3d.Zero, box.Max - min);
-            geometryIndex = AddGeometry(null, Floats(rtc, min), null, Array.Empty<int>(), null, null, bounds, points: true);
+            geometryIndex = AddGeometry(null, Floats(rtc, min), null, Array.Empty<int>(), null, null, bounds, points: true, colors: colors);
             translation = min;
         }
 
@@ -552,7 +572,7 @@ internal sealed class ViewerPayloadWriter
 
     // Returns the index of an identical geometry written before (same bytes and origin), or writes this one. Positions
     // are either grid steps q from origin, or f32 positions (origin null).
-    private int AddGeometry(ushort[]? q, float[]? positions, Vector3d? origin, IReadOnlyList<int> indices, short[]? normals, float[]? uvs, BoundingBox3d bounds, bool points = false)
+    private int AddGeometry(ushort[]? q, float[]? positions, Vector3d? origin, IReadOnlyList<int> indices, short[]? normals, float[]? uvs, BoundingBox3d bounds, bool points = false, byte[]? colors = null)
     {
         int vertexCount = (q?.Length ?? positions!.Length) / 3;
         ushort[]? indices16 = null;
@@ -579,6 +599,8 @@ internal sealed class ViewerPayloadWriter
         hasher.AddBytes(Bytes(normals));
         hasher.Add(uvs is null);
         hasher.AddBytes(Bytes(uvs));
+        hasher.Add(colors is null);
+        hasher.AddBytes(Bytes(colors));
         int hash = hasher.ToHashCode();
 
         if (!_geometriesByHash.TryGetValue(hash, out var candidates))
@@ -594,7 +616,8 @@ internal sealed class ViewerPayloadWriter
                 && (q is not null ? Same(q, entry.Positions) : Same(positions, entry.Positions))
                 && (indices16 is not null ? Same(indices16, entry.Indices) : Same(indices32, entry.Indices))
                 && Same(normals, entry.Normals)
-                && Same(uvs, entry.Uvs))
+                && Same(uvs, entry.Uvs)
+                && Same(colors, entry.Colors))
             {
                 return candidate;
             }
@@ -607,7 +630,8 @@ internal sealed class ViewerPayloadWriter
             normals is null ? null : _blob.Add(normals),
             uvs is null ? null : _blob.Add(uvs),
             bounds,
-            points);
+            points,
+            colors is null ? null : _blob.Add(colors.AsSpan()));
         _geometries.Add(written);
         candidates.Add(_geometries.Count - 1);
         return _geometries.Count - 1;
@@ -746,6 +770,7 @@ internal sealed class ViewerPayloadWriter
             if (g.Points) w.WriteString("kind", "points");
             WriteView(w, "normals", g.Normals);
             WriteView(w, "uvs", g.Uvs);
+            WriteView(w, "colors", g.Colors);
             WriteBox(w, "bbox", g.Bounds, Vector3d.Zero);
             w.WriteEndObject();
             FlushIfLarge(w);
@@ -779,6 +804,21 @@ internal sealed class ViewerPayloadWriter
             w.WriteEndObject();
         }
 
+        if (_panoramas.Count > 0)
+        {
+            w.WriteStartArray("panoramas");
+            foreach (var (element, position, yaw, image, name) in _panoramas)
+            {
+                w.WriteStartObject();
+                w.WriteNumber("element", element);
+                if (!string.IsNullOrEmpty(name)) w.WriteString("name", name);
+                WriteVector(w, "position", position);
+                w.WriteNumber("yaw", yaw);
+                WriteView(w, "image", image);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+        }
         WriteReview(w);
         w.WriteEndObject();
     }
@@ -1166,7 +1206,7 @@ internal sealed class ViewerPayloadWriter
     private readonly record struct MaterialKey(byte R, byte G, byte B, double Opacity, int? Texture);
 
     // Origin is META q.o: set for u16 grid-step positions, null for f32. Points marks a point-sprite geometry (no indices).
-    private sealed record GeometryEntry(BlobView Positions, Vector3d? Origin, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds, bool Points = false);
+    private sealed record GeometryEntry(BlobView Positions, Vector3d? Origin, BlobView Indices, BlobView? Normals, BlobView? Uvs, BoundingBox3d Bounds, bool Points, BlobView? Colors);
 
     // An own-vertex mesh baked into RTC: Relative = float32 positions relative to Min, the exact minimum corner; Indices
     // with the winding reversed under a mirroring transform.

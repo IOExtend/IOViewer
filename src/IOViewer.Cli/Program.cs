@@ -10,6 +10,7 @@ using IOViewer.Exporters;
 using IOViewer.Importers;
 using IOViewer.Model;
 using NwcIO.Scene;
+using PclIO;
 using PclIO.Scene;
 using RvtIO.Scene;
 
@@ -379,9 +380,51 @@ internal static class Program
 
     private static ViewerDocument FromPcl(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)
     {
-        var result = PclSceneReader.Read(path);
-        diagnostics = result.Diagnostics;
-        return FromScene(path, result.Document, diagnostics);
+        using var cloud = PclFile.Open(path);
+        int step = ScanPhotographs.SubsampleStep(cloud);
+        bool showIntensity = cloud.Kind is PclFileKind.LeicaLgsx or PclFileKind.LeicaLgs;
+        var captured = new Dictionary<int, List<byte>>();
+        var colored = new HashSet<int>();
+        var sceneOptions = new PclSceneOptions
+        {
+            SubsampleStep = step,
+            MaxDegreeOfParallelism = showIntensity && step > 1 ? Math.Min(Environment.ProcessorCount, 4) : 1,
+            PointObserver = CaptureColor,
+        };
+
+        var result = PclSceneReader.Read(cloud, sceneOptions);
+        var messages = result.Diagnostics.ToList();
+        diagnostics = messages;
+        var viewer = FromScene(path, result.Document, diagnostics);
+        foreach (int geometry in colored) viewer.PointColors.Add(geometry, captured[geometry].ToArray());
+        messages.RemoveAll(diagnostic => diagnostic.Code == "colours-dropped");
+        ScanPhotographs.Add(cloud, viewer, messages);
+        return viewer;
+
+        void CaptureColor(int geometry, PclPoint point)
+        {
+            if (!captured.TryGetValue(geometry, out var bytes)) captured[geometry] = bytes = [];
+            var color = DisplayColor(point, showIntensity, out bool present);
+            if (present) colored.Add(geometry);
+            bytes.Add(color.R);
+            bytes.Add(color.G);
+            bytes.Add(color.B);
+        }
+    }
+
+    internal static PclColor DisplayColor(PclPoint point, bool showIntensity, out bool present)
+    {
+        present = true;
+        if (point.Color is { } rgb) return rgb;
+        if (showIntensity && point.Intensity is { } intensity && float.IsFinite(intensity))
+        {
+            // Gamma correction keeps differences in low scanner intensity visible.
+            byte grey = (byte)MathF.Round(255 * MathF.Sqrt(Math.Clamp(intensity, 0, 1)));
+            return new PclColor(grey, grey, grey);
+        }
+
+        present = false;
+        return new PclColor(204, 204, 204);
     }
 
     private static ViewerDocument FromIfc(string path, out IReadOnlyList<SceneDiagnostic> diagnostics)

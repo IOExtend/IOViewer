@@ -88,6 +88,24 @@ internal static class SceneFederation
             level.Elevation += placement.Translation.Z;
         }
         foreach (var geometry in from.Geometries) geometry.Id = geometryIds[geometry.Id];
+        foreach (var (id, colors) in source.PointColors)
+        {
+            if (!geometryIds.TryGetValue(id, out int geometryId))
+                throw new InvalidDataException("Point colors reference an unknown geometry.");
+            target.PointColors.Add(geometryId, colors);
+        }
+        double yaw = Math.Atan2(placement.XAxis.Y, placement.XAxis.X) * (180 / Math.PI);
+        foreach (var panorama in source.Panoramas)
+        {
+            if (panorama is null || !sourceElements.ContainsKey(panorama.ElementId))
+                throw new InvalidDataException("A panorama references an unknown element.");
+            target.Panoramas.Add(panorama with
+            {
+                ElementId = elementIds[panorama.ElementId],
+                Position = placement.Apply(panorama.Position),
+                YawDegrees = panorama.YawDegrees + yaw,
+            });
+        }
         foreach (var texture in from.Textures) texture.Id = textureIds[texture.Id];
         foreach (var material in from.Materials)
         {

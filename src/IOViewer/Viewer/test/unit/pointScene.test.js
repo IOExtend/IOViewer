@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
+import { ModelScene } from '../../src/engine/modelScene.js';
 import { PointScene } from '../../src/engine/pointScene.js';
-import { parseModelMeta, ModelDataError } from '../../src/data.js';
+import { binaryViewType, parseModelMeta, ModelDataError } from '../../src/data.js';
 
 // A minimal format-4 META with one point instance of two vertices, f32 positions, no per-vertex colours.
 function fixture() {
@@ -32,6 +33,9 @@ function fixture() {
   const data = { meta, view: byView };
   function byView(v) {
     if (v === geometry) return positions;
+    if (v === meta.instances.geometry || v === meta.instances.material) return new Uint32Array();
+    if (v === meta.instances.element) return new Int32Array();
+    if (v === meta.instances.matrix) return new Float32Array();
     if (v === meta.points.geometry) return views.geometry;
     if (v === meta.points.material) return views.material;
     if (v === meta.points.element) return views.element;
@@ -55,10 +59,12 @@ test('point scene builds one Points object per instance and places it by the mat
 test('point scene mirrors element visibility and clips with the section planes', () => {
   const { data } = fixture();
   const points = new PointScene(data);
-  const scene = { isVisible: (i) => i !== 0 };
+  const scene = new ModelScene(data);
+  scene.setVisible([0], false);
   points.syncVisibility(scene);
   assert.equal(points.root.children[0].visible, false);
-  points.syncVisibility({ isVisible: () => true });
+  scene.showAll();
+  points.syncVisibility(scene);
   assert.equal(points.root.children[0].visible, true);
   const plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
   points.setClipping([plane]);
@@ -67,11 +73,26 @@ test('point scene mirrors element visibility and clips with the section planes',
   assert.equal(points.root.children[0].material.clippingPlanes, null);
 });
 
-test('point scene bounds follow the instance translation', () => {
+test('the viewer fits and can hide an element that contains only points', () => {
   const { data } = fixture();
+  const scene = new ModelScene(data);
   const points = new PointScene(data);
-  const box = points.visibleBox();
-  assert.ok(box.min.x >= 4.9 && box.max.x <= 6.1, JSON.stringify(box));
+  points.syncVisibility(scene);
+  assert.equal(points.root.children[0].visible, true);
+  assert.equal(scene.slotCount, 0);
+  assert.deepEqual(scene.elementBox(0).min.toArray(), [5, 0, 0]);
+  assert.deepEqual(scene.visibleBox().max.toArray(), [6, 0, 0]);
+  scene.setVisible([0], false);
+  points.syncVisibility(scene);
+  assert.equal(points.root.children[0].visible, false);
+  assert.ok(scene.visibleBox().isEmpty());
+  scene.setLayerHidden('linked', [0], true);
+  scene.showAll();
+  points.syncVisibility(scene);
+  assert.equal(points.root.children[0].visible, false);
+  scene.clearLayer('linked');
+  points.syncVisibility(scene);
+  assert.equal(points.root.children[0].visible, true);
 });
 
 test('meta validation accepts format 4 points and rejects a non-points geometry referenced by points', () => {
@@ -80,4 +101,19 @@ test('meta validation accepts format 4 points and rejects a non-points geometry 
   const bad = JSON.parse(JSON.stringify(meta));
   bad.geometries[0].kind = 'triangles';
   assert.throws(() => parseModelMeta(JSON.stringify(bad)), ModelDataError);
+});
+
+test('RGB and station image views accept bytes and reject a bad length or element', () => {
+  const { meta } = fixture();
+  const rgb = { t: 'u8', o: 0, n: 6 };
+  meta.geometries[0].colors = rgb;
+  meta.panoramas = [{ element: 0, position: [0, 0, 0], yaw: 0, image: { t: 'u8', o: 8, n: 4 } }];
+  parseModelMeta(JSON.stringify(meta));
+  assert.equal(binaryViewType(rgb, 12), Uint8Array);
+  assert.throws(() => binaryViewType({ ...rgb, n: 13 }, 12), ModelDataError);
+  meta.panoramas[0].element = 1;
+  assert.throws(() => parseModelMeta(JSON.stringify(meta)), ModelDataError);
+  meta.panoramas[0].element = 0;
+  rgb.n = 5;
+  assert.throws(() => parseModelMeta(JSON.stringify(meta)), ModelDataError);
 });

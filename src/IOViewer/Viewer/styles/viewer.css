@@ -86,6 +86,315 @@ input:focus-visible {
   color: var(--viewport-text, #94a3b8);
 }
 
+.ioviewer-scan-map {
+  right: 12px;
+  bottom: var(--toolbar-space);
+  width: var(--scan-map-width);
+  padding: 8px;
+}
+
+#ioviewer-ui {
+  --scan-map-size: 218px;
+  --scan-map-width: min(var(--scan-map-size), 31vw, max(160px, calc(100dvh - var(--toolbar-space) - 165px)));
+}
+
+#ioviewer-ui[data-scan-map-size="small"] { --scan-map-size: 166px; }
+#ioviewer-ui[data-scan-map-size="large"] { --scan-map-size: 328px; }
+
+.ioviewer-scan-map summary {
+  cursor: pointer;
+  padding: 2px 4px;
+  font-weight: 600;
+}
+
+.scan-map-plot {
+  position: relative;
+  aspect-ratio: 1;
+  margin-top: 7px;
+  background: #161a20;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.scan-map-plot canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+.scan-map-plot canvas:active { cursor: grabbing; }
+
+.scan-map-camera, .scan-map-station {
+  position: absolute;
+  translate: -50% -50%;
+}
+
+.scan-map-camera {
+  width: 12px;
+  height: 14px;
+  background: #ffe0a6;
+  clip-path: polygon(50% 0, 100% 100%, 50% 75%, 0 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.scan-map-station {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.scan-map-station::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: inherit;
+  border: 1px solid #132c50;
+  background: var(--accent-text);
+}
+
+.scan-map-station:is(:hover, :focus-visible, .current)::before {
+  background: #fff;
+}
+
+.scan-map-station:is(:hover, :focus-visible) {
+  z-index: 2;
+}
+
+.scan-map-axes, .scan-map-scale {
+  position: absolute;
+  font-size: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.scan-map-axes {
+  top: 5px;
+  right: 6px;
+}
+
+.scan-map-scale {
+  bottom: 6px;
+  left: 6px;
+  border-bottom: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.ioviewer-scan-map select, .scan-map-controls button, .scan-photo button {
+  box-sizing: border-box;
+  color: var(--text);
+  background: var(--button);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  min-height: 30px;
+}
+
+.scan-map-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.scan-map-controls select {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.scan-map-controls button {
+  padding: 0 5px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.scan-map-controls button:disabled {
+  opacity: .48;
+  cursor: default;
+}
+
+.scan-map-feedback {
+  margin: 5px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.scan-map-feedback:empty { display: none; }
+
+.ioviewer-scan-map > select {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+}
+
+.scan-photo {
+  top: min(8dvh, 64px);
+  left: 58px;
+  right: calc(var(--scan-map-width) + 24px);
+  max-width: 920px;
+  max-height: calc(100dvh - var(--toolbar-space) - min(8dvh, 64px) - 8px);
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.scan-photo.is-expanded {
+  left: 12px;
+  top: 12px;
+  max-width: none;
+  max-height: calc(100dvh - var(--toolbar-space) - 20px);
+}
+
+.scan-photo.is-expanded .scan-photo-view {
+  height: calc(100dvh - var(--toolbar-space) - 72px);
+}
+
+.scan-photo header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.scan-photo-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.scan-photo button {
+  padding-inline: 10px;
+  cursor: pointer;
+}
+
+.scan-photo button:hover {
+  background: var(--button-hover);
+}
+
+.scan-photo canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #161a20;
+  touch-action: none;
+  cursor: grab;
+}
+
+.scan-photo canvas:active {
+  cursor: grabbing;
+}
+
+.scan-photo-view {
+  position: relative;
+  min-height: 0;
+  height: min(54vw, 65dvh, 500px);
+}
+
+.scan-photo-level {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  background: #20314d;
+  flex-shrink: 0;
+}
+
+.scan-photo-crosshair { display: none; }
+
+.scan-photo.is-picking canvas { cursor: crosshair; }
+
+.scan-photo.is-picking .scan-photo-crosshair {
+  display: block;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #10151d;
+  pointer-events: none;
+}
+
+.scan-photo .scan-photo-link {
+  position: absolute;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--accent-text);
+  border-radius: 50%;
+  background: #1e3a5f;
+  color: #fff;
+}
+
+.scan-photo-link::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  rotate: -45deg;
+  translate: 0 2px;
+}
+
+.scan-photo .scan-photo-link:hover {
+  background: var(--accent);
+}
+
+.scan-photo-view > [role="status"] {
+  position: absolute;
+  inset: 50% 12px auto;
+  margin: 0;
+  text-align: center;
+  pointer-events: none;
+}
+
+@media (max-width: 700px) {
+  .scan-photo, .scan-photo.is-expanded {
+    left: 12px;
+    right: 12px;
+    top: max(var(--banner-space), 12px);
+    max-height: calc(62dvh - var(--toolbar-space) - max(var(--banner-space), 12px) - 8px);
+  }
+
+  .scan-photo .scan-photo-view {
+    height: min(50vw, 34dvh);
+  }
+
+  .scan-photo.is-expanded .scan-photo-view {
+    height: max(96px, calc(62dvh - var(--toolbar-space) - 75px));
+  }
+
+  .ioviewer-scan-map {
+    width: min(var(--scan-map-size), calc(100vw - 24px));
+    max-height: 38dvh;
+    overflow: auto;
+  }
+
+  .scan-map-plot {
+    max-height: 24dvh;
+    width: min(100%, 24dvh);
+    margin-inline: auto;
+  }
+}
+
 /* Rail of panel icons and the floating panels it opens */
 .ioviewer-rail {
   left: 12px;

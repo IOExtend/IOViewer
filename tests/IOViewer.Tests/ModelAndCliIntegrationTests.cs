@@ -53,6 +53,28 @@ public class ModelAndCliIntegrationTests
         }
     }
 
+    [Fact]
+    public void Cli_Preserves_Color_From_A_Point_Cloud()
+    {
+        string stem = Path.Combine(Path.GetTempPath(), $"viewer_cloud_{Guid.NewGuid():N}");
+        string input = stem + ".xyz";
+        string output = stem + ".html";
+        try
+        {
+            File.WriteAllText(input, "0 0 0 255 0 0\n1 2 3 0 128 255\n");
+            Assert.Equal(0, Program.Main([input, "-o", output]));
+            var view = ViewerHtml.Parse(File.ReadAllText(output));
+            var colors = view.Geometries[0].GetProperty("colors");
+            Assert.Equal(new byte[] { 255, 0, 0, 0, 128, 255 },
+                view.Bin.AsSpan(colors.GetProperty("o").GetInt32(), colors.GetProperty("n").GetInt32()).ToArray());
+        }
+        finally
+        {
+            File.Delete(input);
+            File.Delete(output);
+        }
+    }
+
     private const string Triangle = """
         v 0 0 0
         v 1 0 0

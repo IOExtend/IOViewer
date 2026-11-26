@@ -122,6 +122,9 @@ export class ModelScene {
     const geometryOf = data.view(instances.geometry);
     const materialOf = data.view(instances.material);
     const matrices = data.view(instances.matrix);
+    const points = meta.points;
+    const pointCount = points?.count ?? 0;
+    const instanceCount = count + pointCount;
 
     this.root = new THREE.Group();
     this.elementCount = meta.elements.length;
@@ -134,21 +137,33 @@ export class ModelScene {
     this._instanceDetail = true;
     this._pickFrustum = null;
     this._textures = new Map();
-    this._elementOf = data.view(instances.element).slice(); // own copy: the BIN block is released after load
+    // Points share the element visibility and bounds, with no triangle draw slots.
+    this._elementOf = new Int32Array(instanceCount);
+    this._elementOf.set(data.view(instances.element));
     this._bucketOf = new Uint32Array(count);
-    this._visible = new Uint8Array(count).fill(1); // the user's layer
+    this._visible = new Uint8Array(instanceCount).fill(1); // the user's layer
     this._layers = new Map(); // name -> Uint8Array, 1 = hidden by that layer
-    this._layerHides = new Uint8Array(count); // how many named layers hide the instance
-    this._highlight = new Uint8Array(count);
+    this._layerHides = new Uint8Array(instanceCount); // how many named layers hide the instance
+    this._highlight = new Uint8Array(instanceCount);
     this._highlighted = [];
     this._tint = new Map(); // instance -> sRGB bytes [r, g, b]
-    this._boxes = new Float32Array(count * 6);
+    this._boxes = new Float32Array(instanceCount * 6);
     this._minPixels = 0;
     this._viewHeight = 1;
     this.visibleCost = 0;
     const noHideBranch = !!options.noHideBranch;
     this.slotUniforms = { slotInfo: { value: null }, slotState: { value: null } };
     this._buckets = this._createBuckets(meta, materialOf, noHideBranch);
+    if (pointCount) {
+      this._elementOf.set(data.view(points.element), count);
+      this._pointMaterials = data.view(points.material).slice();
+      const pointGeometry = data.view(points.geometry);
+      const pointMatrices = data.view(points.matrix);
+      const boxes = this._boxes.subarray(count * 6);
+      for (let i = 0; i < pointCount; i++) {
+        writeInstanceBox(pointMatrices, i, meta.geometries[pointGeometry[i]].bbox, boxes);
+      }
+    }
     this._indexElements();
 
     for (let i = 0; i < count; i++) {
@@ -285,6 +300,10 @@ export class ModelScene {
 
   get instanceCount() {
     return this._slotOf.length;
+  }
+
+  isInstanceVisible(index) {
+    return this._shown(index);
   }
 
   get slotCount() {
@@ -764,7 +783,7 @@ export class ModelScene {
     this.slotUniforms.slotState.value = this._state;
     this._stateBytes = ROW * height * 20;
 
-    this._slotOf = new Uint32Array(count).fill(NO_SLOT);
+    this._slotOf = new Uint32Array(this._visible.length).fill(NO_SLOT);
     this._slotInstance = new Uint32Array(slots);
     this._slotUnit = new Uint32Array(slots);
     this._slotRadius = new Float32Array(slots);
@@ -1150,6 +1169,10 @@ export class ModelScene {
 
   // sRGB bytes instance i is drawn with: highlight, else tint, else white in white mode, else the material's.
   _colorOf(i) {
+    if (i >= this._bucketOf.length) {
+      const material = this._pointMaterials[i - this._bucketOf.length];
+      return this._meta.materials[material].color.map((c) => Math.round(c * 255));
+    }
     return this._highlight[i] ? HIGHLIGHT : this._tint.get(i) ?? (this._mode === 'white' ? WHITE : this._buckets[this._bucketOf[i]].bytes);
   }
 

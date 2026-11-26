@@ -143,6 +143,19 @@ what breaks the scene contract, such as an instance that names a missing element
 
 The model's up axis is +Z. The interface is in Russian when the browser language is Russian and in English otherwise.
 
+Point clouds have a collapsible minimap showing their XY footprint and the camera heading. Colored point cloud inputs keep their source RGB.
+A viewer snapshot can also contain `PointColors`, a dictionary using scene geometry IDs and base64 RGB triplets in vertex order,
+and `Panoramas`, a list with `ElementId`, XYZ `Position` in scene metres, and a base64 `Jpeg`. Use a 2:1 equirectangular JPEG with its
+centre looking along +X, or set `YawDegrees` to turn the photo about +Z. Select a photo station on the minimap. Drag the image or use the
+arrow keys to look around, and use the wheel to zoom. Arrows inside the photograph move to other scan stations and retain the current
+heading. The minimap remains available while the photo panel is open. The generated HTML embeds the photographs.
+
+Use **Enlarge** to expand a panorama. Pick a minimap size, drag the plan to pan it and use the wheel or the zoom buttons to change its scale.
+The **+** beside the level list starts a level from two clicks in a panorama, lower elevation first. Each elevation comes from the
+sampled scan point at that location. Selecting a level filters the map points and stations to that height range. Clear station groups
+separated vertically by more than 2 m can create levels automatically. Use **All heights** to return to the full plan. Level ranges
+are saved in the browser for that HTML file when local storage is available.
+
 - Left click selects, Ctrl+click adds or removes, a click on empty space clears the selection.
 - Left drag orbits around the point under the cursor; middle or right drag pans; the wheel zooms towards the cursor.
 - Shift+left drag selects with a box: left to right selects objects fully inside, right to left selects objects it touches.
