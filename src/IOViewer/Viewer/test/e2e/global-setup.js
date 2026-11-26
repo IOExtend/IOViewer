@@ -91,6 +91,32 @@ export default function globalSetup() {
   exportHtml(snapPath, 'measure-snap');
 
   const results = path.join(viewerDir, 'test-results');
+  const cloud = {
+    Kind: 'ioviewer', Format: 2,
+    Scene: {
+      Kind: 'ioscene', Format: 1, Title: 'Point tools',
+      Models: [{ Id: 1, Key: 'fixture', Name: 'Fixture' }],
+      Elements: ['Scan', 'Second scan'].map((Name, i) => ({ Id: i + 1, Name, ModelId: 1 })),
+      Geometries: [
+        { Id: 1, Topology: 2, Vertices: [-2, 0, 0, 0, 0, 0, 2, 0, 0], Indices: [] },
+        { Id: 2, Topology: 2, Vertices: [0, 0, -1], Indices: [] },
+      ],
+      Instances: [1, 2].map((id) => ({ ElementId: id, GeometryId: id })),
+    },
+    PointColors: { 1: Buffer.from([0, 180, 0, 0, 180, 0, 0, 180, 0]).toString('base64') },
+  };
+  const cloudPath = path.join(results, 'point-tools.json');
+  writeFileSync(cloudPath, JSON.stringify(cloud));
+  exportHtml(cloudPath, 'point-tools');
+  cloud.Scene.Elements.push({ Id: 3, Name: 'Occluder', ModelId: 1 });
+  cloud.Scene.Geometries.push({
+    Id: 3, Topology: 0, Vertices: [-0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0, 0.5, 0.5], Indices: [0, 1, 2],
+  });
+  cloud.Scene.Instances.push({ ElementId: 3, GeometryId: 3 });
+  const mixedPath = path.join(results, 'mixed-point-tools.json');
+  writeFileSync(mixedPath, JSON.stringify(cloud));
+  exportHtml(mixedPath, 'mixed-point-tools');
+
   const sources = ['Architecture', 'Services'].map((name) => {
     const doc = largeModel(2);
     doc.Title = name;

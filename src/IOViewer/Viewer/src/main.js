@@ -96,8 +96,14 @@ function start(data, context) {
   // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
   const sections = new Sections(scene, visibleBox(), data.meta.sections);
   points.syncVisibility(scene);
-  points.setClipping(sections.clipping().planes);
-  const canFillSections = context.getContextAttributes()?.stencil === true;
+  points.syncAppearance(scene);
+  const syncPointClipping = () => {
+    const { planes, intersection } = sections.clipping();
+    points.setClipping(planes, intersection);
+  };
+  syncPointClipping();
+  const hasMeshes = scene.slotCount > 0;
+  const canFillSections = hasMeshes && context.getContextAttributes()?.stencil === true;
   let sectionCaps;
   const sectionGizmo = new SectionGizmo(sections, canvas);
   world.add(sectionGizmo.group); // outside scene.root: the picking id pass renders only the model
@@ -162,7 +168,7 @@ function start(data, context) {
   }
   scene.root.addEventListener('change', requestRender);
   sections.addEventListener('change', () => {
-    points.setClipping(sections.clipping().planes);
+    syncPointClipping();
     requestRender();
   });
   sectionGizmo.addEventListener('change', requestRender);
@@ -170,7 +176,7 @@ function start(data, context) {
   measure.addEventListener('previewchange', requestRender);
   grids.addEventListener('change', requestRender);
 
-  const picker = new Picker(renderer, scene, camera, { pickFloat: testOptions.pickFloat });
+  const picker = new Picker(renderer, scene, camera, { points, pickFloat: testOptions.pickFloat });
   const measureSnap = new MeasureSnap(picker, sections, data);
   let measureFrame = 0, measureHover = null;
   function clearMeasurePreview() {
@@ -212,6 +218,7 @@ function start(data, context) {
     requestRender();
   });
   scene.root.addEventListener('change', (e) => {
+    if (e.detail.kind === 'appearance') points.syncAppearance(scene);
     if (e.detail.kind !== 'visibility') return; // a highlight must not walk every instance for the bounds
     points.syncVisibility(scene);
     controls.invalidateBounds();
@@ -221,7 +228,7 @@ function start(data, context) {
   const selection = new Selection();
   selection.addEventListener('change', () => scene.setHighlighted([...selection.values()]));
   const ui = mountUI({ root: uiRoot, data, scene, controls, picker, selection, measure });
-  mountSections({ root: uiRoot, ...ui, sections, selection, canFill: canFillSections });
+  mountSections({ root: uiRoot, ...ui, sections, selection, canFill: canFillSections, hasMeshes });
   const { meta } = data;
   const restoreLinkedModels = mountLinks({ ...ui, files: meta.linkedFiles ?? [], elements: meta.elements, scene });
   mountViews({ ...ui, controls, scene, sections, selection, restoreLinkedModels,
@@ -238,7 +245,8 @@ function start(data, context) {
     uiRoot.style.setProperty('--viewport-text', color === initialBackground ? '' : text);
     requestRender();
   };
-  for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta, grids, initialBackground, setBackground })) ui.onEscape(popover.close);
+  for (const popover of mountDisplay({ root: uiRoot, toolbar: ui.toolbar, scene, meta, grids, initialBackground, setBackground, hasMeshes }))
+    ui.onEscape(popover.close);
   ui.toolbar.setHandler('distance', () => {
     clearMeasurePreview();
     measure.setActive(!measure.active);

@@ -124,6 +124,7 @@ export class MeasureSnap {
   target(clientX, clientY) {
     const tile = this.picker.measureTile(clientX, clientY, SNAP_RADIUS + 1);
     if (!tile) return null;
+    if (tile.pointSample) return { kind: 'vertex', point: tile.point.clone() };
     const { rect } = tile;
     const x = clientX - rect.left, y = clientY - rect.top;
     const { camera, scene } = this.picker;

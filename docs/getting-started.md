@@ -161,6 +161,10 @@ sampled scan point at that location. Selecting a level filters the map points an
 separated vertically by more than 2 m can create levels automatically. Use **All heights** to return to the full plan. Level ranges
 are saved in the browser for that HTML file when local storage is available.
 
+Click a point to select its scan. Orbit and zoom anchor to the point under the cursor. The distance tool snaps to nearby visible
+scan points. The **White** display mode and the opacity slider also apply to clouds. Section planes and both
+section box modes clip points and meshes together. Wireframe and surface textures apply to meshes.
+
 - Left click selects, Ctrl+click adds or removes, a click on empty space clears the selection.
 - Left drag orbits around the point under the cursor; middle or right drag pans; the wheel zooms towards the cursor.
 - Shift+left drag selects with a box: left to right selects objects fully inside, right to left selects objects it touches.
@@ -170,7 +174,7 @@ are saved in the browser for that HTML file when local storage is available.
   Esc press handles one action.
 
 In the **Sections** panel, enable **Fill cut faces** to fill the cross-sections of consistently wound, closed meshes.
-The fill is visual. Picking and measurement continue to use model triangles. Large models take extra work while
+The fill is visual. Picking and measurement continue to use the source geometry. Large models take extra work while
 fill is enabled.
 
 Turn a section box around Z with the blue ring or the **Rotation around Z** slider. Face handles resize along the

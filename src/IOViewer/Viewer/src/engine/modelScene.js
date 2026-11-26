@@ -324,6 +324,13 @@ export class ModelScene {
     return target.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
   }
 
+  instanceColorOverride(i, target) {
+    const rgb = this._colorOverride(i);
+    if (!rgb) return false;
+    target.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+    return true;
+  }
+
   // Element of a slot, -1 for an instance without one.
   slotElement(slot) {
     return this._elementOf[this._slotInstance[slot]];
@@ -1167,13 +1174,19 @@ export class ModelScene {
     }
   }
 
-  // sRGB bytes instance i is drawn with: highlight, else tint, else white in white mode, else the material's.
+  _colorOverride(i) {
+    return this._highlight[i] ? HIGHLIGHT : this._tint.get(i) ?? (this._mode === 'white' ? WHITE : null);
+  }
+
+  // sRGB bytes for the instance colour. Point batches may also have per-vertex colours.
   _colorOf(i) {
+    const override = this._colorOverride(i);
+    if (override) return override;
     if (i >= this._bucketOf.length) {
       const material = this._pointMaterials[i - this._bucketOf.length];
       return this._meta.materials[material].color.map((c) => Math.round(c * 255));
     }
-    return this._highlight[i] ? HIGHLIGHT : this._tint.get(i) ?? (this._mode === 'white' ? WHITE : this._buckets[this._bucketOf[i]].bytes);
+    return this._buckets[this._bucketOf[i]].bytes;
   }
 
   _applyColor(i) {
