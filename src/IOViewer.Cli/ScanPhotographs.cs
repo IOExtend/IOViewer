@@ -18,6 +18,7 @@ internal static class ScanPhotographs
     private const int Width = 2048;
     private const int MaxImageSide = 8192;
     private const string LeicaCameraPrefix = "SETUP-camera-";
+    private static ReadOnlySpan<byte> JpegXrSignature => [0x49, 0x49, 0xbc, 0x01];
 
     internal static int SubsampleStep(PclDocument cloud)
     {
@@ -77,7 +78,8 @@ internal static class ScanPhotographs
             byte[] jpeg;
             try
             {
-                byte[][] faces = ReadCube(ReadEntry(source, entry, 32 * 1024 * 1024));
+                byte[] cube = ReadEntry(source, entry, 32 * 1024 * 1024);
+                byte[][] faces = ReadCube(cube);
                 jpeg = ProjectLeicaCube(faces, pose.Rotation);
             }
             catch (InvalidDataException ex)
@@ -104,7 +106,7 @@ internal static class ScanPhotographs
         {
             var basis = (Vector3.Transform(directions[i], rotation), Vector3.Transform(right[i], rotation),
                 Vector3.Transform(down[i], rotation));
-            using var image = LoadJpeg(faces[i]);
+            using var image = LoadLeicaFace(faces[i]);
             float half = image.Width * .5f;
             frames[i] = new Frame(image, basis, half, half, half - .5f, half - .5f);
         }
@@ -120,7 +122,9 @@ internal static class ScanPhotographs
             File.WriteAllBytes(path, database);
             using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
-                DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false,
             }.ToString());
             connection.Open();
             using var command = connection.CreateCommand();
@@ -200,6 +204,7 @@ internal static class ScanPhotographs
     {
         if (!data.StartsWith("CUBE"u8)) throw new InvalidDataException("Missing Leica cube header.");
         data = data[4..];
+        if (data.StartsWith(JpegXrSignature)) return ReadJpegXrCube(data);
         ReadOnlySpan<byte> start = [0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0];
         var levels = new SortedDictionary<int, List<byte[]>>();
         while (true)
@@ -223,6 +228,41 @@ internal static class ScanPhotographs
         var selected = levels.Where(pair => pair.Value.Count == 6)
             .OrderBy(pair => Math.Abs(Math.Log2(pair.Key / 1024.0))).FirstOrDefault();
         return selected.Value?.ToArray() ?? throw new InvalidDataException("A Leica panorama needs six matching JPEG faces.");
+    }
+
+    private static byte[][] ReadJpegXrCube(ReadOnlySpan<byte> data)
+    {
+        var faces = new byte[6][];
+        for (int face = 0; face < faces.Length; face++)
+        {
+            if (data.Length < 8 || !data.StartsWith(JpegXrSignature))
+                throw new InvalidDataException("A Leica panorama needs six JPEG XR faces.");
+            uint directoryOffset = BinaryPrimitives.ReadUInt32LittleEndian(data[4..]);
+            if (directoryOffset < 8 || directoryOffset > data.Length - 2)
+                throw new InvalidDataException("Invalid JPEG XR image directory.");
+            var directory = data[(int)directoryOffset..];
+            int entries = BinaryPrimitives.ReadUInt16LittleEndian(directory);
+            if (entries > (directory.Length - 2) / 12)
+                throw new InvalidDataException("Incomplete JPEG XR image directory.");
+            uint pixels = 0, bytes = 0;
+            for (int i = 0; i < entries; i++)
+            {
+                var field = directory[(2 + i * 12)..];
+                ushort tag = BinaryPrimitives.ReadUInt16LittleEndian(field);
+                if (tag == 0xbcc0) pixels = BinaryPrimitives.ReadUInt32LittleEndian(field[8..]);
+                if (tag == 0xbcc1) bytes = BinaryPrimitives.ReadUInt32LittleEndian(field[8..]);
+            }
+            if (pixels < directoryOffset + 2 + entries * 12 || bytes == 0 || (ulong)pixels + bytes > (ulong)data.Length)
+                throw new InvalidDataException("Invalid JPEG XR image range.");
+            int end = (int)(pixels + bytes);
+            faces[face] = data[..end].ToArray();
+            data = data[end..];
+            if (face == faces.Length - 1) break;
+            int next = data.IndexOf(JpegXrSignature);
+            if (next < 0 || next > 4096) throw new InvalidDataException("Missing JPEG XR cube face.");
+            data = data[next..];
+        }
+        return faces;
     }
 
     private static IEnumerable<ViewerPanorama> ReadFaro(FaroFlsDocument cloud)
@@ -320,8 +360,14 @@ internal static class ScanPhotographs
         return Quaternion.Normalize(value);
     }
 
-    private static SKBitmap LoadJpeg(byte[] bytes)
+    private static SKBitmap LoadLeicaFace(byte[] bytes)
     {
+        if (bytes.AsSpan().StartsWith(JpegXrSignature))
+        {
+            if (!OperatingSystem.IsWindows())
+                throw new InvalidDataException("JPEG XR Leica panoramas require Windows.");
+            return JpegXr.Decode(bytes, MaxImageSide);
+        }
         if (bytes.Length < 3 || bytes[0] != 255 || bytes[1] != 216 || bytes[2] != 255)
             throw new InvalidDataException("A photo face does not hold JPEG data.");
         return LoadImage(bytes);

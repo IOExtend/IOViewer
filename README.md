@@ -33,7 +33,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
   - display modes (materials, textures, white, wireframe), viewport background color, grid lines and a global opacity slider;
   - saved viewpoints with a viewpoint tour, clash results, a 4D schedule player and linked-file visibility, each shown only when the document has that data.
 - Imports binary glTF 2.0 (`.glb`), Wavefront OBJ (`.obj`), and JSON: viewer JSON, IOScene scene files and IOViewer 0.1/0.2 snapshots.
-- Displays point clouds with source RGB when available and a top-down minimap. The CLI includes Leica LGSX camera panoramas, FARO FLS colour panoramas and registered sets of E57 camera images. Select a station on the minimap to open its photograph.
+- Displays point clouds with source RGB when available and a top-down minimap. The CLI includes Leica LGSx camera panoramas, legacy Leica LGS JPEG XR panoramas on Windows, FARO FLS colour panoramas and registered sets of E57 camera images. Select a station or use **Open photo panorama…** at the bottom of the minimap.
 
 ### Mouse and keyboard
 

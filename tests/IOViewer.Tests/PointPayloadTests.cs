@@ -105,6 +105,33 @@ public class PointPayloadTests
     }
 
     [Fact]
+    public void Leica_Jpeg_Xr_Cube_Skips_Face_Trailers_And_Rejects_A_Truncated_Face()
+    {
+        using var cube = new MemoryStream();
+        using var writer = new BinaryWriter(cube);
+        writer.Write("CUBE"u8);
+        for (byte face = 0; face < 6; face++)
+        {
+            writer.Write(new byte[] { 0x49, 0x49, 0xbc, 1 });
+            writer.Write(8u);
+            writer.Write((ushort)2);
+            writer.Write((ushort)0xbcc0);
+            writer.Write((ushort)4);
+            writer.Write(1u);
+            writer.Write(34u);
+            writer.Write((ushort)0xbcc1);
+            writer.Write((ushort)4);
+            writer.Write(1u);
+            writer.Write(3u);
+            writer.Write(new byte[] { 0x18, face, 0x38 });
+            if (face != 5) writer.Write(new byte[] { 1, 2, 3, 4 });
+        }
+        byte[][] faces = ScanPhotographs.ReadCube(cube.ToArray());
+        Assert.Equal(new byte[] { 0, 1, 2, 3, 4, 5 }, faces.Select(image => image[35]));
+        Assert.Throws<InvalidDataException>(() => ScanPhotographs.ReadCube(cube.ToArray().AsSpan()[..^1]));
+    }
+
+    [Fact]
     public void Leica_Panorama_Places_Opposite_Faces_And_Orients_The_Poles()
     {
         SKColor[] colors = [SKColors.Red, SKColors.Green, SKColors.Blue, SKColors.Gold, SKColors.Fuchsia, SKColors.Teal];
