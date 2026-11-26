@@ -34,4 +34,12 @@
           Pack="true" PackagePath="licenses/SkiaSharp-NOTICES.txt" Visible="false" />
   </ItemGroup>
 
+  <!-- SkiaSharp's native debug symbols add about 147 MB to the tool package across the two target frameworks. -->
+  <Target Name="ExcludeSkiaSharpNativeDebugSymbols" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)' == 'libSkiaSharp.pdb'" />
+    </ItemGroup>
+  </Target>
+
 </Project>

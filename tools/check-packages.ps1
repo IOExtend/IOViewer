@@ -10,6 +10,9 @@ Write-Host 'Checking package dependencies...'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $checkedViewer = $false
 foreach ($package in Get-ChildItem -LiteralPath $PackageDirectory -File -Filter '*.nupkg') {
+    if ($package.Length -gt 250MB) {
+        throw "$($package.Name) is $($package.Length) bytes and exceeds the NuGet.org upload limit of 250 MB"
+    }
     $zip = [IO.Compression.ZipFile]::OpenRead($package.FullName)
     try {
         $entry = $zip.Entries | Where-Object { $_.FullName -notlike '*/*' -and $_.Name -like '*.nuspec' } | Select-Object -First 1
