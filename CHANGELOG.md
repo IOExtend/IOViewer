@@ -6,12 +6,19 @@ API between minor releases.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-26
+
 ### Added
 
-- Point clouds render as point sprites: export format 4 carries `points` instances and `kind: "points"` geometries
-  (with optional per-vertex colours); the viewer draws them beside the triangle chunks with shared element visibility,
-  section clipping and bounds. `ioviewer` reads point clouds (E57, LAS/LAZ, PTG, ReCap, PLY, PCD, PTS, PTX, XYZ and more)
-  through `PclIO.Scene` 0.1.1. Points are not picked, measured or detail-cut in this version.
+- Standalone HTML exports render point clouds alongside triangle meshes, with source RGB and measured intensity
+  when available. The CLI imports point-cloud formats through `PclIO.Scene` 0.1.3, including legacy Leica LGS and LGSx.
+- The CLI exports registered Leica, FARO FLS and E57 panoramas. Legacy Leica JPEG XR panoramas require Windows.
+  View the photos from their scan poses or switch to measured laser intensity when the source provides it.
+- Open scan panoramas from 3D station markers or the minimap, and move directly between stations. The minimap supports
+  zooming, panning and manual or automatic height levels.
+- Select, hide or isolate scans in the viewer. Distance measurement snaps to visible points, and orbit and zoom can
+  anchor on them. Point clouds share the section planes, section box, white mode and opacity controls with meshes.
+- Export clustered mesh sources as `.ivmesh` for a local, streamed viewer of large BIM scenes with shared repeated meshes.
 - Direct `.rvt` imports include building storeys and straight, circular and multi-segment grid axes through `RvtIO.Scene` 0.5.1.
 - `ioviewer` reads Navisworks `.nwc` caches through `NwcIO.Scene` 0.13.0.
 - Standalone HTML opens with the section box or cutting planes saved in `ViewerDocument`.
