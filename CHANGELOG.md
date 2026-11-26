@@ -6,6 +6,11 @@ API between minor releases.
 
 ## [Unreleased]
 
+### Changed
+
+- The .NET tool downloads a smaller package for Windows x64, Linux x64 and macOS ARM64. Other architectures
+  receive the portable package. The platform-aware installer requires the .NET 10 SDK or later.
+
 ## [0.4.1] - 2026-11-26
 
 ### Added

@@ -149,6 +149,8 @@ with a stable lower bound, and rejects dependency bounds that nuget.org refuses 
 prerelease label of one part that does not start with a letter).
 Before the tag, run the Revit test with a real Revit 2022 file, which CI does not have: set `IOVIEWER_RVT_FILE` to its path and run `dotnet test IOViewer.slnx -c Release --filter Cli_ConvertRvtToHtml`.
 The NuGet policy must name this repository, `release.yml`, the configured NuGet profile and the `IOViewer*` package pattern.
+The release and CI use `-p:PackCliForPlatforms=true` to create the CLI's platform packages and portable fallback.
+The release publishes them before the top-level `IOViewer.Cli` package, so the installer can resolve its references.
 
 ## Licensing contributions
 

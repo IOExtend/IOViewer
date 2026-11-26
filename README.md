@@ -71,6 +71,11 @@ Install the command line tool:
 dotnet tool install --global IOViewer.Cli
 ```
 
+Use the .NET 10 SDK or later to install platform-specific CLI releases. The installer selects a package for
+Windows x64, Linux x64 or macOS ARM64 and uses the portable package on other platforms. The CLI runs on
+.NET 8 or rolls forward when a newer runtime is available. Portable ZIPs are also available in
+[GitHub Releases](https://github.com/IOExtend/IOViewer/releases).
+
 Add the library to a .NET project:
 
 ```sh
