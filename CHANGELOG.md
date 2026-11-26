@@ -6,7 +6,7 @@ API between minor releases.
 
 ## [Unreleased]
 
-## [0.4.0] - 2026-11-26
+## [0.4.1] - 2026-11-26
 
 ### Added
 
@@ -37,6 +37,7 @@ API between minor releases.
 
 ### Fixed
 
+- Keep the CLI tool package within the NuGet.org upload limit by excluding SkiaSharp native debug symbols.
 - Preserve all 64 bits of element IDs in HTML properties, Copy Id, clash results and 4D tasks.
 - Report the required byte count and the limit when an HTML export exceeds its binary buffer capacity.
 - Save HTML to a temporary sibling file and replace the destination after a complete write. Report invalid coordinates,
