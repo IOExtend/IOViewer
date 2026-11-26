@@ -75,7 +75,7 @@ if ($LASTEXITCODE -ne 0) { throw "git archive failed with exit code $LASTEXITCOD
 Write-Host "Packing NuGet packages..."
 # Packages left from an earlier run would be checked and published together with this version.
 Get-ChildItem -LiteralPath $Output -File | Where-Object { $_.Extension -in '.nupkg', '.snupkg' } | Remove-Item
-Invoke-DotNet pack (Join-Path $root 'IOViewer.slnx') -c Release --no-build -o $Output
+Invoke-DotNet pack (Join-Path $root 'IOViewer.slnx') -c Release '-p:PackCliForPlatforms=true' -o $Output
 
 & (Join-Path $PSScriptRoot 'check-packages.ps1') -PackageDirectory $Output
 

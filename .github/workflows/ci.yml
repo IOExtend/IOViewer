@@ -22,23 +22,38 @@ jobs:
           global-json-file: global.json
           dotnet-version: |
             8.0.x
+            10.0.x
       - run: dotnet restore IOViewer.slnx
       - run: dotnet build IOViewer.slnx -c Release --no-restore
       - run: dotnet test IOViewer.slnx -c Release --no-build
-      - run: dotnet pack IOViewer.slnx -c Release --no-build -o artifacts
+      - run: dotnet pack IOViewer.slnx -c Release -p:PackCliForPlatforms=true -o artifacts
       - name: Check package dependencies
         shell: pwsh
         run: |
           ./tools/check-packages.ps1 -PackageDirectory artifacts
           ./tools/test-package-checks.ps1
+      - name: Install the Windows CLI and export a scan
+        shell: pwsh
+        run: ./tools/test-cli-package.ps1 -PackageDirectory artifacts -Rid win-x64
       - uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.os }}
           path: artifacts/*.nupkg
           if-no-files-found: error
 
-  build-linux:
-    runs-on: ubuntu-latest
+  cli-package:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-15
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: any
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -46,7 +61,14 @@ jobs:
           global-json-file: global.json
           dotnet-version: |
             8.0.x
-      - run: dotnet build src/IOViewer.Cli/IOViewer.Cli.csproj -c Release
+            10.0.x
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages-windows-latest
+          path: artifacts
+      - name: Install the CLI and export a scan
+        shell: pwsh
+        run: ./tools/test-cli-package.ps1 -PackageDirectory artifacts -Rid ${{ matrix.rid }}
 
   viewer:
     runs-on: ubuntu-latest

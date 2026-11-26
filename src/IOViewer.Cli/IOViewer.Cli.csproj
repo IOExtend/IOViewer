@@ -14,6 +14,16 @@
     <WarningsNotAsErrors>NU1901;NU1902;NU1903</WarningsNotAsErrors>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(PackCliForPlatforms)' == 'true'">
+    <TargetFrameworks>net8.0</TargetFrameworks>
+    <RollForward>Major</RollForward>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-arm64;any</RuntimeIdentifiers>
+    <SelfContained>false</SelfContained>
+    <UseAppHost>false</UseAppHost>
+    <!-- The pointer package has no assemblies to put in a symbol package. -->
+    <IncludeSymbols Condition="'$(RuntimeIdentifier)' == ''">false</IncludeSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\IOViewer\IOViewer.csproj" />
     <PackageReference Include="IOCoord" />
@@ -34,7 +44,7 @@
           Pack="true" PackagePath="licenses/SkiaSharp-NOTICES.txt" Visible="false" />
   </ItemGroup>
 
-  <!-- SkiaSharp's native debug symbols add about 147 MB to the tool package across the two target frameworks. -->
+  <!-- The native SkiaSharp PDB is larger than the rest of the Windows tool payload. -->
   <Target Name="ExcludeSkiaSharpNativeDebugSymbols" AfterTargets="ComputeFilesToPublish">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"

@@ -8,6 +8,9 @@ Install the global CLI tool:
 dotnet tool install --global IOViewer.Cli
 ```
 
+Install platform-specific CLI releases with the .NET 10 SDK or later. The command selects the package for
+your system, with a portable fallback. The CLI runs on .NET 8 or rolls forward to a newer installed runtime.
+
 Add the library to your .NET project:
 
 ```sh
