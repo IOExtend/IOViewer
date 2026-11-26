@@ -17,7 +17,7 @@ export default defineConfig({
       name: 'firefox',
       testMatch: ['**/smoke.spec.js', '**/selection.spec.js', '**/sections.spec.js', '**/accessibility.spec.js',
         '**/tree-selection.spec.js', '**/tree-filters.spec.js', '**/federation.spec.js', '**/bcf.spec.js',
-        '**/measure-snap.spec.js'],
+        '**/measure-snap.spec.js', '**/point-tools.spec.js'],
       use: {
         browserName: 'firefox',
         // Under Linux, Xvfb supplies the display Firefox uses to create a WebGL context in CI.

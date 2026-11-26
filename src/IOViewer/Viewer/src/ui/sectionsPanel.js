@@ -68,7 +68,7 @@ function planeRow(sections, i) {
  * The «Сечения» panel and the section tools: toolbar `plane` / `box` / `resetSections`, context menu
  * «Бокс сечения по объекту» / «Сбросить сечения». Tools and panel stay off for a model with no geometry.
  */
-export function mountSections({ root, shell, toolbar, contextMenu, sections, selection, canFill }) {
+export function mountSections({ root, shell, toolbar, contextMenu, sections, selection, canFill, hasMeshes = true }) {
   let axis = 'z'; // axis for new planes, chosen in the panel
   const addPlane = () => {
     if (sections.addPlane(axis) !== null) return;
@@ -108,7 +108,7 @@ export function mountSections({ root, shell, toolbar, contextMenu, sections, sel
   boxBlock.append(boxMode.element, yaw, fit);
   const gizmo = checkbox(t('sections.showGizmo'), (on) => sections.setGizmoVisible(on));
   const fill = checkbox(t('sections.fill'), (on) => sections.setFill(on));
-  if (!canFill) fill.element.title = t('sections.fillUnavailable');
+  if (!canFill) fill.element.title = t(hasMeshes ? 'sections.fillUnavailable' : 'sections.fillNeedsMeshes');
 
   let rows = [];
   const update = () => {

@@ -110,7 +110,8 @@ function validateMeta(meta) {
       || (g.normals != null && !['f32', 'i16'].includes(g.normals.t))
       || (g.uvs != null && g.uvs.t !== 'f32')
       || (g.kind != null && g.kind !== 'points')
-      || (g.colors != null && (g.kind !== 'points' || g.colors.t !== 'u8' || g.colors.n !== g.positions.n))) {
+      || (g.colors != null && (g.kind !== 'points' || g.colors.t !== 'u8' || g.colors.n !== g.positions.n))
+      || (g.intensities != null && (g.kind !== 'points' || g.intensities.t !== 'u8' || 3 * g.intensities.n !== g.positions.n))) {
       throw new ModelDataError('Invalid META geometry.');
     }
   }
@@ -127,8 +128,11 @@ function validateMeta(meta) {
   if (meta.panoramas != null && (!records(meta.panoramas) || meta.panoramas.some((p) =>
     !Number.isInteger(p.element) || p.element < 0 || p.element >= meta.elements.length ||
     (p.name != null && typeof p.name !== 'string') || !vector(p.position) || !p.position.every(Number.isFinite) || !Number.isFinite(p.yaw) ||
-    p.image?.t !== 'u8' || !Number.isSafeInteger(p.image.n) || p.image.n < 4 || p.image.n > 16 * 1024 * 1024))) {
+    !panoramaImage(p.image) || (p.intensity != null && !panoramaImage(p.intensity))))) {
     throw new ModelDataError('Invalid META panorama.');
+  }
+  function panoramaImage(view) {
+    return view?.t === 'u8' && Number.isSafeInteger(view.n) && view.n >= 4 && view.n <= 16 * 1024 * 1024;
   }
   validateReviewMeta(meta);
   for (const material of meta.materials) {

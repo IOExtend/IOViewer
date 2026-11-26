@@ -52,6 +52,9 @@ public sealed class ViewerDocument
     /// <summary>RGB bytes in vertex order for point geometries, keyed by geometry id.</summary>
     public Dictionary<int, byte[]> PointColors { get; set; } = [];
 
+    /// <summary>One display intensity byte per point, keyed by geometry id. Zero indicates a missing measurement.</summary>
+    public Dictionary<int, byte[]> PointIntensities { get; set; } = [];
+
     /// <summary>Equirectangular photographs attached to scan elements.</summary>
     public List<ViewerPanorama> Panoramas { get; set; } = [];
 
@@ -69,4 +72,7 @@ public sealed record ViewerPanorama(long ElementId, Vector3d Position, byte[] Jp
 {
     /// <summary>Name of the camera station when several stations share a single scene element.</summary>
     public string? Name { get; init; }
+
+    /// <summary>Optional 2:1 scan-intensity JPEG in the same orientation as the photograph.</summary>
+    public byte[]? IntensityJpeg { get; init; }
 }

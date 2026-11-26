@@ -4,13 +4,11 @@ import { geometryPositions } from './quantize.js';
 
 // Point-sprite clouds (META `points`, export format 4), drawn beside the merged triangle chunks of ModelScene.
 // Each point instance is one THREE.Points over its geometry's positions, placed by the instance matrix (RTC). Colour is
-// per-vertex when the geometry carries a `colors` view, else the instance material colour. Points participate in
-// visibility (synced from ModelScene), section clipping and the shared bounds; they are not picked, measured or
-// detail-cut in this version.
+// per-vertex when the geometry carries a `colors` view, else the instance material colour.
 export class PointScene {
   constructor(data) {
     this.root = new THREE.Group();
-    this._objects = [];
+    this._materials = [];
     const points = data.meta.points;
     this.count = points?.count ?? 0;
     if (!this.count) return;
@@ -25,6 +23,12 @@ export class PointScene {
       const positions = geometryPositions(data, g);
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      if (g.intensities) {
+        const values = data.view(g.intensities);
+        if (values.length * 3 !== positions.length)
+          throw new ModelDataError(`Point geometry ${geometryOf[i]} intensities do not match its positions.`);
+        geometry.setAttribute('intensity', new THREE.BufferAttribute(values.slice(), 1, true));
+      }
 
       const material = data.meta.materials[materialOf[i]];
       let vertexColors = false;
@@ -45,38 +49,74 @@ export class PointScene {
         size: 2,
         sizeAttenuation: false,
         vertexColors,
-        color: vertexColors ? 0xffffff : new THREE.Color(...(material?.color ?? [0.8, 0.8, 0.8])),
+        color: vertexColors ? 0xffffff
+          : new THREE.Color().setRGB(...(material?.color ?? [0.8, 0.8, 0.8]), THREE.SRGBColorSpace),
       });
       const object = new THREE.Points(geometry, pointsMaterial);
+      object.onBeforeRender = (_renderer, _world, _camera, _geometry, drawMaterial) => {
+        if (drawMaterial === pointsMaterial) return;
+        drawMaterial.uniforms.pointIndex.value = i;
+        drawMaterial.uniforms.pointSize.value = pointsMaterial.opacity > 0 ? pointsMaterial.size : 0;
+        drawMaterial.uniformsNeedUpdate = true;
+      };
       object.matrixAutoUpdate = false;
       object.matrix.fromArray(columnMajor(matrices, i));
       object.matrixWorldNeedsUpdate = true;
       object.frustumCulled = true;
       geometry.computeBoundingSphere();
       this.root.add(object);
-      this._objects.push(object);
+      this._materials.push({ material: pointsMaterial, color: pointsMaterial.color.clone(), opacity: material?.opacity ?? 1, vertexColors });
     }
   }
 
   // ModelScene appends point instances after meshes in its visibility state.
   syncVisibility(scene) {
     const first = scene.instanceCount - this.count;
-    for (let i = 0; i < this._objects.length; i++) {
-      this._objects[i].visible = scene.isInstanceVisible(first + i);
+    for (const [i, object] of this.root.children.entries()) {
+      object.visible = scene.isInstanceVisible(first + i);
     }
   }
 
-  setClipping(planes) {
-    for (const object of this._objects) {
-      object.material.clippingPlanes = planes.length > 0 ? planes : null;
+  syncAppearance(scene) {
+    const first = scene.instanceCount - this.count;
+    for (const [i, source] of this._materials.entries()) {
+      const { material } = source;
+      const override = scene.instanceColorOverride(first + i, material.color);
+      if (!override) material.color.copy(source.color);
+      const vertexColors = source.vertexColors && !override;
+      const opacity = scene.opacity * source.opacity;
+      const transparent = opacity < 1;
+      if (material.vertexColors !== vertexColors || material.transparent !== transparent) material.needsUpdate = true;
+      material.vertexColors = vertexColors;
+      material.opacity = opacity;
+      material.transparent = transparent;
+      material.depthWrite = !transparent;
     }
   }
 
-  setOpacity(opacity) {
-    for (const object of this._objects) {
-      object.material.opacity = opacity;
-      object.material.transparent = opacity < 1;
+  setClipping(planes, intersection = false) {
+    this.clippingPlanes = planes.length > 0 ? planes : null;
+    this.clipIntersection = intersection;
+    for (const { material } of this._materials) {
+      material.clippingPlanes = this.clippingPlanes;
+      material.clipIntersection = intersection;
     }
+  }
+
+  withPickMaterial(material, draw) {
+    material.clippingPlanes = this.clippingPlanes;
+    material.clipIntersection = this.clipIntersection;
+    for (const object of this.root.children) object.material = material;
+    try {
+      draw();
+    } finally {
+      for (const [i, object] of this.root.children.entries()) object.material = this._materials[i].material;
+    }
+  }
+
+  position(instance, vertex, target) {
+    const object = this.root.children[instance];
+    return target.fromBufferAttribute(object.geometry.attributes.position, vertex).applyMatrix4(object.matrixWorld);
   }
 }
 

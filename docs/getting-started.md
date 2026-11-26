@@ -151,12 +151,19 @@ arrow keys to look around, and use the wheel to zoom. Arrows inside the photogra
 heading. The minimap remains available while the photo panel is open. The generated HTML embeds the photographs.
 
 Use **Enlarge** to expand a panorama. Pick a minimap size, drag the plan to pan it and use the wheel or the zoom buttons to change its scale.
+Use **Intensity** to view the scan points from the panorama's station, shaded by their measured laser signal.
+Viewer JSON can carry `PointIntensities` as base64 display-intensity bytes keyed by point geometry id, one byte per vertex.
+Zero indicates a missing measurement. A panorama's optional `IntensityJpeg` is used where the measured points are unavailable.
 The blue spheres mark camera positions in the 3D view. Click a sphere to open its panorama. Use **Panorama spheres in 3D**
 on the minimap to hide or show the spheres. The spheres follow the selected height band and the model's visibility.
 The **+** beside the level list starts a level from two clicks in a panorama, lower elevation first. Each elevation comes from the
 sampled scan point at that location. Selecting a level filters the map points and stations to that height range. Clear station groups
 separated vertically by more than 2 m can create levels automatically. Use **All heights** to return to the full plan. Level ranges
 are saved in the browser for that HTML file when local storage is available.
+
+Click a point to select its scan. Orbit and zoom anchor to the point under the cursor. The distance tool snaps to nearby visible
+scan points. The **White** display mode and the opacity slider also apply to clouds. Section planes and both
+section box modes clip points and meshes together. Wireframe and surface textures apply to meshes.
 
 - Left click selects, Ctrl+click adds or removes, a click on empty space clears the selection.
 - Left drag orbits around the point under the cursor; middle or right drag pans; the wheel zooms towards the cursor.
@@ -167,7 +174,7 @@ are saved in the browser for that HTML file when local storage is available.
   Esc press handles one action.
 
 In the **Sections** panel, enable **Fill cut faces** to fill the cross-sections of consistently wound, closed meshes.
-The fill is visual. Picking and measurement continue to use model triangles. Large models take extra work while
+The fill is visual. Picking and measurement continue to use the source geometry. Large models take extra work while
 fill is enabled.
 
 Turn a section box around Z with the blue ring or the **Rotation around Z** slider. Face handles resize along the

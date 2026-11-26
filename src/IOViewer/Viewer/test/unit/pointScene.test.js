@@ -117,3 +117,18 @@ test('RGB and station image views accept bytes and reject a bad length or elemen
   rgb.n = 5;
   assert.throws(() => parseModelMeta(JSON.stringify(meta)), ModelDataError);
 });
+
+test('point intensity bytes follow the positions independently of the RGB material', () => {
+  const { data, meta } = fixture();
+  const values = new Uint8Array([0, 143]);
+  const descriptor = { t: 'u8', o: 0, n: values.length };
+  meta.geometries[0].intensities = descriptor;
+  const view = data.view;
+  data.view = (v) => v === descriptor ? values : view(v);
+  parseModelMeta(JSON.stringify(meta));
+  const attribute = new PointScene(data).root.children[0].geometry.getAttribute('intensity');
+  assert.equal(attribute.getX(0), 0);
+  assert.equal(attribute.getX(1), 143 / 255);
+  descriptor.n = 3;
+  assert.throws(() => parseModelMeta(JSON.stringify(meta)), ModelDataError);
+});

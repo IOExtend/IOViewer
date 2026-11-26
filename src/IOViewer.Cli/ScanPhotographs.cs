@@ -18,6 +18,8 @@ internal static class ScanPhotographs
     private const int Width = 2048;
     private const int MaxImageSide = 8192;
     private const string LeicaCameraPrefix = "SETUP-camera-";
+    private const string LeicaIntensityPrefix = "SETUP-scanintensity-";
+    private static ReadOnlySpan<byte> JpegXrSignature => [0x49, 0x49, 0xbc, 0x01];
 
     internal static int SubsampleStep(PclDocument cloud)
     {
@@ -35,7 +37,7 @@ internal static class ScanPhotographs
         {
             IEnumerable<ViewerPanorama> photos = cloud switch
             {
-                LgsxDocument leica => ReadLeica(leica, diagnostics),
+                LgsxDocument leica => ReadLeica(leica, viewer, diagnostics),
                 FaroFlsDocument faro => ReadFaro(faro),
                 E57Document e57 => ReadE57(e57),
                 _ => [],
@@ -49,7 +51,7 @@ internal static class ScanPhotographs
         }
     }
 
-    private static IEnumerable<ViewerPanorama> ReadLeica(LgsxDocument cloud, List<SceneDiagnostic> diagnostics)
+    private static IEnumerable<ViewerPanorama> ReadLeica(LgsxDocument cloud, ViewerDocument viewer, List<SceneDiagnostic> diagnostics)
     {
         var entries = cloud.Entries.Where(e => e.Name.StartsWith(LeicaCameraPrefix, StringComparison.Ordinal)).ToArray();
         if (entries.Length == 0) yield break;
@@ -61,6 +63,9 @@ internal static class ScanPhotographs
 
         var elements = cloud.Scans.Select((scan, i) => (scan.Id, Element: i + 2L))
             .ToDictionary(item => item.Id, item => item.Element, StringComparer.Ordinal);
+        var intensityEntries = cloud.Entries.ToLookup(e => e.Name, StringComparer.Ordinal);
+        var measuredElements = viewer.Scene.Instances.Where(instance => viewer.PointIntensities.ContainsKey(instance.GeometryId))
+            .Select(instance => instance.ElementId).ToHashSet();
 
         foreach (var entry in entries)
         {
@@ -77,7 +82,8 @@ internal static class ScanPhotographs
             byte[] jpeg;
             try
             {
-                byte[][] faces = ReadCube(ReadEntry(source, entry, 32 * 1024 * 1024));
+                byte[] cube = ReadEntry(source, entry, 32 * 1024 * 1024);
+                byte[][] faces = ReadCube(cube);
                 jpeg = ProjectLeicaCube(faces, pose.Rotation);
             }
             catch (InvalidDataException ex)
@@ -87,29 +93,44 @@ internal static class ScanPhotographs
                 continue;
             }
 
-            yield return new ViewerPanorama(element, pose.Position, jpeg) { Name = pose.Name };
+            byte[]? intensity = null;
+            if (!measuredElements.Contains(element) &&
+                intensityEntries[LeicaIntensityPrefix + id].FirstOrDefault() is { } intensityEntry)
+            {
+                try
+                {
+                    intensity = ProjectLeicaCube(ReadCube(ReadEntry(source, intensityEntry, 32 * 1024 * 1024)),
+                        pose.Rotation, grayscale: true);
+                }
+                catch (InvalidDataException ex)
+                {
+                    diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "scan-photographs",
+                        $"Leica station {id} intensity: {ex.Message}"));
+                }
+            }
+            yield return new ViewerPanorama(element, pose.Position, jpeg) { Name = pose.Name, IntensityJpeg = intensity };
         }
     }
 
-    internal static byte[] ProjectLeicaCube(byte[][] faces, Quaternion rotation)
+    internal static byte[] ProjectLeicaCube(byte[][] faces, Quaternion rotation, bool grayscale = false)
     {
         Vector3 x = Vector3.UnitX, y = Vector3.UnitY, z = Vector3.UnitZ;
-        // Leica stores opposite sides consecutively. The last two faces use the same horizontal axis.
-        Vector3[] directions = [x, -x, y, -y, z, -z];
-        Vector3[] right = [-y, y, x, -x, -y, -y];
-        Vector3[] down = [-z, -z, -z, -z, x, -x];
+        // The first cube face looks along setup-local +Y, as confirmed by the scan depth maps.
+        Vector3[] directions = [y, -y, -x, x, z, -z];
+        Vector3[] right = [x, -x, y, -y, x, x];
+        Vector3[] down = [-z, -z, -z, -z, y, -y];
 
         var frames = new Frame[6];
         for (int i = 0; i < frames.Length; i++)
         {
             var basis = (Vector3.Transform(directions[i], rotation), Vector3.Transform(right[i], rotation),
                 Vector3.Transform(down[i], rotation));
-            using var image = LoadJpeg(faces[i]);
+            using var image = LoadLeicaFace(faces[i]);
             float half = image.Width * .5f;
             frames[i] = new Frame(image, basis, half, half, half - .5f, half - .5f);
         }
 
-        return Project(frames);
+        return Project(frames, grayscale);
     }
 
     private static Dictionary<long, (string Name, Vector3d Position, Quaternion Rotation)> ReadLeicaPoses(byte[] database)
@@ -120,7 +141,9 @@ internal static class ScanPhotographs
             File.WriteAllBytes(path, database);
             using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
-                DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false,
             }.ToString());
             connection.Open();
             using var command = connection.CreateCommand();
@@ -200,6 +223,7 @@ internal static class ScanPhotographs
     {
         if (!data.StartsWith("CUBE"u8)) throw new InvalidDataException("Missing Leica cube header.");
         data = data[4..];
+        if (data.StartsWith(JpegXrSignature)) return ReadJpegXrCube(data);
         ReadOnlySpan<byte> start = [0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0];
         var levels = new SortedDictionary<int, List<byte[]>>();
         while (true)
@@ -223,6 +247,41 @@ internal static class ScanPhotographs
         var selected = levels.Where(pair => pair.Value.Count == 6)
             .OrderBy(pair => Math.Abs(Math.Log2(pair.Key / 1024.0))).FirstOrDefault();
         return selected.Value?.ToArray() ?? throw new InvalidDataException("A Leica panorama needs six matching JPEG faces.");
+    }
+
+    private static byte[][] ReadJpegXrCube(ReadOnlySpan<byte> data)
+    {
+        var faces = new byte[6][];
+        for (int face = 0; face < faces.Length; face++)
+        {
+            if (data.Length < 8 || !data.StartsWith(JpegXrSignature))
+                throw new InvalidDataException("A Leica panorama needs six JPEG XR faces.");
+            uint directoryOffset = BinaryPrimitives.ReadUInt32LittleEndian(data[4..]);
+            if (directoryOffset < 8 || directoryOffset > data.Length - 2)
+                throw new InvalidDataException("Invalid JPEG XR image directory.");
+            var directory = data[(int)directoryOffset..];
+            int entries = BinaryPrimitives.ReadUInt16LittleEndian(directory);
+            if (entries > (directory.Length - 2) / 12)
+                throw new InvalidDataException("Incomplete JPEG XR image directory.");
+            uint pixels = 0, bytes = 0;
+            for (int i = 0; i < entries; i++)
+            {
+                var field = directory[(2 + i * 12)..];
+                ushort tag = BinaryPrimitives.ReadUInt16LittleEndian(field);
+                if (tag == 0xbcc0) pixels = BinaryPrimitives.ReadUInt32LittleEndian(field[8..]);
+                if (tag == 0xbcc1) bytes = BinaryPrimitives.ReadUInt32LittleEndian(field[8..]);
+            }
+            if (pixels < directoryOffset + 2 + entries * 12 || bytes == 0 || (ulong)pixels + bytes > (ulong)data.Length)
+                throw new InvalidDataException("Invalid JPEG XR image range.");
+            int end = (int)(pixels + bytes);
+            faces[face] = data[..end].ToArray();
+            data = data[end..];
+            if (face == faces.Length - 1) break;
+            int next = data.IndexOf(JpegXrSignature);
+            if (next < 0 || next > 4096) throw new InvalidDataException("Missing JPEG XR cube face.");
+            data = data[next..];
+        }
+        return faces;
     }
 
     private static IEnumerable<ViewerPanorama> ReadFaro(FaroFlsDocument cloud)
@@ -320,8 +379,14 @@ internal static class ScanPhotographs
         return Quaternion.Normalize(value);
     }
 
-    private static SKBitmap LoadJpeg(byte[] bytes)
+    private static SKBitmap LoadLeicaFace(byte[] bytes)
     {
+        if (bytes.AsSpan().StartsWith(JpegXrSignature))
+        {
+            if (!OperatingSystem.IsWindows())
+                throw new InvalidDataException("JPEG XR Leica panoramas require Windows.");
+            return JpegXr.Decode(bytes, MaxImageSide);
+        }
         if (bytes.Length < 3 || bytes[0] != 255 || bytes[1] != 216 || bytes[2] != 255)
             throw new InvalidDataException("A photo face does not hold JPEG data.");
         return LoadImage(bytes);
@@ -355,7 +420,7 @@ internal static class ScanPhotographs
         public readonly SKColor[] Pixels = image.Pixels;
     }
 
-    private static byte[] Project(IReadOnlyList<Frame> frames)
+    private static byte[] Project(IReadOnlyList<Frame> frames, bool grayscale = false)
     {
         const int Height = Width / 2;
         var pixels = new SKColor[Width * Height];
@@ -390,7 +455,7 @@ internal static class ScanPhotographs
             }
         });
 
-        return Encode(pixels);
+        return Encode(pixels, grayscale);
     }
 
     private static bool TryProject(Vector3 ray, Frame frame, float closest, out float depth, out float u, out float v)
@@ -404,10 +469,12 @@ internal static class ScanPhotographs
         return u >= -.5f && v >= -.5f && u <= frame.Width - .5f && v <= frame.Height - .5f;
     }
 
-    private static byte[] Encode(SKColor[] pixels)
+    private static byte[] Encode(SKColor[] pixels, bool grayscale = false)
     {
         using var bitmap = new SKBitmap(Width, Width / 2) { Pixels = pixels };
-        using var image = SKImage.FromBitmap(bitmap);
+        using var gray = grayscale ? bitmap.Copy(SKColorType.Gray8)
+            ?? throw new InvalidDataException("Could not create a grayscale panorama.") : null;
+        using var image = SKImage.FromBitmap(gray ?? bitmap);
         using var jpeg = image.Encode(SKEncodedImageFormat.Jpeg, 88);
         return jpeg.ToArray();
     }

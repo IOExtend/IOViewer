@@ -214,7 +214,7 @@ input:focus-visible {
   cursor: pointer;
 }
 
-.scan-map-controls button[aria-pressed='true'] {
+.scan-map-controls button[aria-pressed='true'], .scan-photo-intensity[aria-pressed='true'] {
   color: #72bfff;
 }
 

@@ -94,6 +94,12 @@ internal static class SceneFederation
                 throw new InvalidDataException("Point colors reference an unknown geometry.");
             target.PointColors.Add(geometryId, colors);
         }
+        foreach (var (id, values) in source.PointIntensities)
+        {
+            if (!geometryIds.TryGetValue(id, out int geometryId))
+                throw new InvalidDataException("Point intensities reference an unknown geometry.");
+            target.PointIntensities.Add(geometryId, values);
+        }
         double yaw = Math.Atan2(placement.XAxis.Y, placement.XAxis.X) * (180 / Math.PI);
         foreach (var panorama in source.Panoramas)
         {

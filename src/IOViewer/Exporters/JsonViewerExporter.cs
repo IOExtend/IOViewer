@@ -75,6 +75,7 @@ internal sealed class ViewerJsonFile
     public List<ViewerBcfTopic>? BcfTopics { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<int, byte[]>? PointColors { get; set; }
+    public Dictionary<int, byte[]>? PointIntensities { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ViewerPanorama>? Panoramas { get; set; }
 
@@ -88,6 +89,7 @@ internal sealed class ViewerJsonFile
         ViewpointStates = doc.ViewpointStates is { Count: > 0 } ? doc.ViewpointStates : null,
         BcfTopics = doc.BcfTopics is { Count: > 0 } ? doc.BcfTopics : null,
         PointColors = doc.PointColors is { Count: > 0 } ? doc.PointColors : null,
+        PointIntensities = doc.PointIntensities is { Count: > 0 } ? doc.PointIntensities : null,
         Panoramas = doc.Panoramas is { Count: > 0 } ? doc.Panoramas : null,
     };
 
@@ -100,6 +102,7 @@ internal sealed class ViewerJsonFile
         ViewpointStates = ViewpointStates ?? [],
         BcfTopics = BcfTopics ?? [],
         PointColors = PointColors ?? [],
+        PointIntensities = PointIntensities ?? [],
         Panoramas = Panoramas ?? [],
     };
 }

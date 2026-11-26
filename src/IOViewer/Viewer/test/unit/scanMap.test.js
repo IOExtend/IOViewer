@@ -85,6 +85,13 @@ test('flat scans, a continuous ramp and a lone high station do not produce autom
     assert.deepEqual(detectScanLevels(z, -1, 6), []);
 });
 
+test('an isolated stair stop does not join two supported levels with uneven station heights', () => {
+  const levels = detectScanLevels([-1.9, -1.2, -.5, .2, 1, 2.4, 3.5, 3.8, 4.3], -3, 8);
+  assert.deepEqual(levels, [{ min: -3, max: 2.25 }, { min: 2.25, max: 8 }]);
+  assert.equal(levelContains(levels[0], 1), true);
+  assert.equal(levelContains(levels[1], 3.5), true);
+});
+
 test('map wheel zoom keeps the world position under the cursor fixed', () => {
   const view = { x: 10, y: 30, side: 40, zoom: 1 };
   const x = .2, y = -.3;

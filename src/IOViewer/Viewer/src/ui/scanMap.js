@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { lang, t } from '../i18n.js';
 import { detectScanLevels, levelContains, mapZoom } from './scanLevels.js';
+import { createPanoramaPoints } from './panoramaPoints.js';
 
 const elevationFormat = new Intl.NumberFormat(lang, { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 const elevation = (z) => `${elevationFormat.format(z)} ${t('scanMap.metres')}`;
@@ -339,7 +340,14 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
   close.type = 'button';
   close.textContent = t('close');
   close.addEventListener('click', hide);
-  actions.append(resize, close);
+  let prefersIntensity = false;
+  const intensity = mapButton(t('scanMap.intensity'), t('scanMap.intensity'), () => {
+    prefersIntensity = !prefersIntensity;
+    loadPhoto(false);
+  });
+  intensity.className = 'scan-photo-intensity';
+  intensity.hidden = true;
+  actions.append(intensity, resize, close);
   header.append(title, actions);
   const canvas = document.createElement('canvas');
   canvas.tabIndex = 0;
@@ -386,7 +394,8 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
   let picking = false, lower;
   const offsetZ = data.meta.rtcOffset?.[2] ?? 0;
 
-  let renderer, texture, revision = 0;
+  let renderer, texture, pointView, revision = 0;
+  let hasPointIntensity = false, showPointIntensity = false;
   let yaw = 0, pitch = 0, drag = null;
   let active, returnFocus;
   const world = new THREE.Scene();
@@ -398,12 +407,13 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
   const sphere = new THREE.Mesh(geometry, material);
   world.add(sphere);
   const draw = () => {
-    if (panel.hidden || !texture) return;
+    if (panel.hidden || (!texture && !showPointIntensity)) return;
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
     camera.aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
     camera.updateProjectionMatrix();
     camera.lookAt(photoDirection(forward, yaw, pitch));
-    renderer.render(world, camera);
+    if (showPointIntensity) pointView.draw(renderer, camera, forward);
+    else renderer.render(world, camera);
     camera.getWorldDirection(forward);
     for (const station of neighbours) {
       if (picking) { station.button.hidden = true; continue; }
@@ -480,6 +490,7 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
     returnFocus?.focus();
   }
   function clearPhoto() {
+    showPointIntensity = false;
     texture?.dispose();
     texture = undefined;
     material.map = null;
@@ -500,10 +511,10 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
     instructions.textContent = t('scanMap.pickLower');
     editBar.hidden = false;
     draw();
-    if (texture) canvas.focus();
+    if (texture || showPointIntensity) canvas.focus();
   }
   function pickAt(x, y) {
-    if (!texture) return;
+    if (!texture && !showPointIntensity) return;
     const hit = pickPhotoElevation(camera, active.position, activeScan, x, y, canvas.clientWidth, canvas.clientHeight);
     if (hit === undefined) {
       instructions.textContent = t(lower === undefined ? 'scanMap.noLowerHit' : 'scanMap.noUpperHit');
@@ -521,13 +532,45 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
     }
   }
   function open(index, keepDirection) {
-    const load = ++revision;
     const opening = panel.hidden;
     if (opening) returnFocus = document.activeElement;
     clearPhoto();
     active = stations[index];
     panel.hidden = false;
     title.textContent = active.name;
+    sphere.rotation.z = THREE.MathUtils.degToRad(active.photo.yaw);
+    activeScan = points.root.children.filter((_, i) => scanElements[i] === active.photo.element);
+    hasPointIntensity = activeScan.some(object => object.geometry.getAttribute('intensity'));
+    intensity.hidden = !hasPointIntensity && !active.photo.intensity;
+    neighbours = stations.filter((station) => {
+      if (station === active) return false;
+      const distance = heading.copy(station.position).sub(active.position).length();
+      if (distance <= .25) return false;
+      ray.set(active.position, heading.multiplyScalar(1 / distance));
+      ray.far = distance - .25;
+      return !ray.intersectObjects(activeScan, false).length;
+    });
+    if (opening || !keepDirection) {
+      const nearest = neighbours.reduce((best, station) => !best
+        || station.position.distanceToSquared(active.position) < best.position.distanceToSquared(active.position)
+        ? station : best, null);
+      if (nearest) {
+        heading.copy(nearest.position).sub(active.position);
+        yaw = Math.atan2(heading.y, heading.x);
+        pitch = THREE.MathUtils.clamp(Math.atan2(heading.z, Math.hypot(heading.x, heading.y)), -1.55, 1.55);
+      } else {
+        yaw = sphere.rotation.z;
+        pitch = 0;
+      }
+      camera.fov = 72;
+    }
+    loadPhoto(true);
+  }
+  function loadPhoto(focusCanvas) {
+    const load = ++revision;
+    const useIntensity = prefersIntensity && (hasPointIntensity || Boolean(active.photo.intensity));
+    showPointIntensity = false;
+    intensity.setAttribute('aria-pressed', String(useIntensity));
     canvas.style.visibility = 'hidden';
     status.textContent = t('scanMap.loading');
     const error = () => { if (load === revision) status.textContent = t('scanMap.photoError'); };
@@ -535,7 +578,18 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
     try {
       renderer ??= new THREE.WebGLRenderer({ canvas, antialias: true });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-      url = URL.createObjectURL(new Blob([data.readView(active.photo.image)], { type: 'image/jpeg' }));
+      if (useIntensity && hasPointIntensity) {
+        pointView ??= createPanoramaPoints();
+        pointView.setScan(activeScan, active.position);
+        showPointIntensity = true;
+        status.textContent = '';
+        canvas.style.visibility = 'visible';
+        draw();
+        if (focusCanvas) canvas.focus();
+        return;
+      }
+      const image = useIntensity ? active.photo.intensity : active.photo.image;
+      url = URL.createObjectURL(new Blob([data.readView(image)], { type: 'image/jpeg' }));
     } catch {
       error();
       return;
@@ -552,34 +606,10 @@ function photoPanel(root, data, points, show, onPose, onLevel) {
       texture.colorSpace = THREE.SRGBColorSpace;
       material.map = texture;
       material.needsUpdate = true;
-      sphere.rotation.z = THREE.MathUtils.degToRad(active.photo.yaw);
-      activeScan = points.root.children.filter((_, i) => scanElements[i] === active.photo.element);
-      neighbours = stations.filter((station) => {
-        if (station === active) return false;
-        const distance = heading.copy(station.position).sub(active.position).length();
-        if (distance <= .25) return false;
-        ray.set(active.position, heading.multiplyScalar(1 / distance));
-        ray.far = distance - .25;
-        return !ray.intersectObjects(activeScan, false).length;
-      });
-      if (opening || !keepDirection) {
-        const nearest = neighbours.reduce((best, station) => !best
-          || station.position.distanceToSquared(active.position) < best.position.distanceToSquared(active.position)
-          ? station : best, null);
-        if (nearest) {
-          heading.copy(nearest.position).sub(active.position);
-          yaw = Math.atan2(heading.y, heading.x);
-          pitch = THREE.MathUtils.clamp(Math.atan2(heading.z, Math.hypot(heading.x, heading.y)), -1.55, 1.55);
-        } else {
-          yaw = sphere.rotation.z;
-          pitch = 0;
-        }
-        camera.fov = 72;
-      }
       status.textContent = '';
       canvas.style.visibility = 'visible';
       draw();
-      canvas.focus();
+      if (focusCanvas) canvas.focus();
     }, undefined, () => {
       URL.revokeObjectURL(url);
       error();

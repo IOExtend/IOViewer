@@ -13,7 +13,7 @@ export function initialDisplayMode(options) {
  * the grid axes and their labels (off when there are none), `opacity` opens a
  * 10–100 % slider for the whole model. Returns the popovers, for Esc.
  */
-export function mountDisplay({ root, toolbar, scene, meta, grids, initialBackground, setBackground }) {
+export function mountDisplay({ root, toolbar, scene, meta, grids, initialBackground, setBackground, hasMeshes = true }) {
   const anchor = (id) => toolbar.element.querySelector(`[data-tool="${id}"]`);
 
   const displayButton = anchor('displayMode');
@@ -29,7 +29,7 @@ export function mountDisplay({ root, toolbar, scene, meta, grids, initialBackgro
     item.type = 'button';
     item.dataset.mode = mode;
     item.setAttribute('role', 'menuitemradio');
-    item.disabled = mode === 'textures' && !hasTextures;
+    item.disabled = (mode === 'textures' && !hasTextures) || (mode === 'wireframe' && !hasMeshes);
     item.addEventListener('click', () => {
       setMode(mode);
       modes.close();
@@ -42,7 +42,8 @@ export function mountDisplay({ root, toolbar, scene, meta, grids, initialBackgro
     scene.setDisplayMode(mode);
     for (const item of items) item.setAttribute('aria-checked', String(item.dataset.mode === mode));
   };
-  setMode(initialDisplayMode(meta.options));
+  const initial = initialDisplayMode(meta.options);
+  setMode(initial === 'wireframe' && !hasMeshes ? 'materials' : initial);
   toolbar.setHandler('displayMode', () => {
     modes.toggle();
     if (modes.isOpen) menu.querySelector('[aria-checked="true"]')?.focus();
