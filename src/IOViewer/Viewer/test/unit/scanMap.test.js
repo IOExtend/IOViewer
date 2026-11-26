@@ -3,6 +3,40 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { photoDirection, photoDrag, pickPhotoElevation } from '../../src/ui/scanMap.js';
 import { detectScanLevels, levelContains, mapZoom } from '../../src/ui/scanLevels.js';
+import { createPanoramaSpheres } from '../../src/ui/panoramaSpheres.js';
+
+test('panorama spheres pick the nearest station, respect visibility and stay small when zooming', () => {
+  const stations = createPanoramaSpheres([
+    { position: [0, 0, -4], element: 0 },
+    { position: [0, 0, -10], element: 1 },
+    { position: [0, 0, 4], element: 2 },
+  ]);
+  const rect = { left: 50, top: 20, width: 800, height: 600 };
+  const camera = new THREE.PerspectiveCamera(45, 4 / 3, .1, 20);
+  camera.updateMatrixWorld();
+  stations.update(camera, rect, () => true);
+  assert.equal(stations.mesh.count, 2);
+  assert.equal(stations.pick(450, 320), 0);
+  assert.equal(stations.pick(458, 320), undefined);
+
+  camera.zoom = 2;
+  camera.updateProjectionMatrix();
+  stations.update(camera, rect, (element) => element !== 0);
+  assert.equal(stations.mesh.count, 1);
+  assert.equal(stations.pick(456, 320), 1);
+  assert.equal(stations.pick(458, 320), undefined);
+
+  stations.update(camera, rect, () => false);
+  assert.equal(stations.mesh.count, 0);
+  assert.equal(stations.pick(450, 320), undefined);
+
+  const ortho = new THREE.OrthographicCamera(-4, 4, 3, -3, .1, 20);
+  ortho.updateMatrixWorld();
+  stations.update(ortho, rect, () => true);
+  assert.equal(stations.mesh.count, 2);
+  assert.equal(stations.pick(450, 320), 0);
+  assert.equal(createPanoramaSpheres([]), null);
+});
 
 test('a panorama feature follows the pointer on both screen axes', () => {
   const camera = new THREE.PerspectiveCamera(72, 1.5, .1, 20);

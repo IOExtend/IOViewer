@@ -214,6 +214,10 @@ input:focus-visible {
   cursor: pointer;
 }
 
+.scan-map-controls button[aria-pressed='true'] {
+  color: #72bfff;
+}
+
 .scan-map-controls button:disabled {
   opacity: .48;
   cursor: default;

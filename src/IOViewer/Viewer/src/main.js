@@ -23,6 +23,7 @@ import { mountClashes } from './ui/clashesPanel.js';
 import { mountTimeliner } from './ui/timeliner.js';
 import { mountLinks } from './ui/linksPanel.js';
 import { mountScanMap } from './ui/scanMap.js';
+import { createPanoramaSpheres } from './ui/panoramaSpheres.js';
 
 document.documentElement.lang = lang;
 const canvas = document.getElementById('ioviewer-canvas');
@@ -89,6 +90,8 @@ function start(data, context) {
   const motionDetail = new MotionDetail(scene, requestRender, Math.min(scene.totalCost, 20e6));
   world.add(scene.root);
   world.add(points.root);
+  const panoramaSpheres = points.count ? createPanoramaSpheres(data.meta.panoramas) : null;
+  if (panoramaSpheres) world.add(panoramaSpheres.mesh);
   const visibleBox = () => scene.visibleBox();
   // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
   const sections = new Sections(scene, visibleBox(), data.meta.sections);
@@ -138,6 +141,7 @@ function start(data, context) {
       if (contextLost) return;
       const rect = canvas.getBoundingClientRect();
       controls.camera.updateMatrixWorld(); // the screen labels project with it before render() would update it
+      if (scanMap) panoramaSpheres?.update(controls.camera, rect, scanMap.showSphere);
       sectionGizmo.update(controls.camera);
       measure.update(controls.camera, rect);
       grids.update(controls.camera, rect);
@@ -264,6 +268,11 @@ function start(data, context) {
       if (target) measure.add(target.point);
       return;
     }
+    const station = !ctrl && !shift ? panoramaSpheres?.pick(x, y) : undefined;
+    if (station !== undefined) {
+      scanMap.open(station);
+      return;
+    }
     const hit = picker.pick(x, y);
     const element = hit?.element ?? -1;
     if (ctrl) {
@@ -294,7 +303,7 @@ function start(data, context) {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   controls.resize(); // also schedules the first frame for an empty model
   controls.fitBox(visibleBox(), false);
-  mountScanMap(uiRoot, data, points, scene, controls);
+  const scanMap = mountScanMap(uiRoot, data, points, scene, controls, requestRender);
   const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
   // The canvas and the view cube take no focus, so a press on them takes it from a panel field or a toolbar button:
