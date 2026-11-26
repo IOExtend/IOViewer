@@ -9,6 +9,7 @@ internal static class JpegXr
 {
     private static readonly Guid DecoderClass = new("a26cec36-234c-4950-ae16-e34aace71d0d");
     private static readonly Guid Bgr24 = new("6fddc324-4e03-4bfe-b185-3d77768dc90c");
+    private static readonly Guid Gray8 = new("6fddc324-4e03-4bfe-b185-3d77768dc908");
     private const int ChangedApartment = unchecked((int)0x80010106);
 
     internal static SKBitmap Decode(byte[] image, int maxSide)
@@ -30,15 +31,23 @@ internal static class JpegXr
             frame.GetPixelFormat(out Guid format);
             if (width < 2 || width != height || width > maxSide || (ulong)width * height > 32 * 1024 * 1024)
                 throw new InvalidDataException("Invalid JPEG XR panorama face dimensions.");
-            if (format != Bgr24) throw new InvalidDataException("The JPEG XR panorama face must carry 24-bit BGR.");
+            if (format != Bgr24 && format != Gray8)
+                throw new InvalidDataException("The JPEG XR panorama face must carry 24-bit BGR or 8-bit grayscale.");
 
             int size = (int)width;
-            int stride = 3 * size;
+            int stride = format == Gray8 ? size : 3 * size;
             var bytes = new byte[stride * size];
             frame.CopyPixels(0, stride, bytes.Length, bytes);
             var pixels = new SKColor[size * size];
-            for (int i = 0; i < pixels.Length; i++)
-                pixels[i] = new SKColor(bytes[3 * i + 2], bytes[3 * i + 1], bytes[3 * i]);
+            if (format == Gray8)
+            {
+                for (int i = 0; i < pixels.Length; i++) pixels[i] = new SKColor(bytes[i], bytes[i], bytes[i]);
+            }
+            else
+            {
+                for (int i = 0; i < pixels.Length; i++)
+                    pixels[i] = new SKColor(bytes[3 * i + 2], bytes[3 * i + 1], bytes[3 * i]);
+            }
             return new SKBitmap(size, size) { Pixels = pixels };
         }
         catch (COMException ex)

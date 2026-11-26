@@ -46,22 +46,37 @@ public class PointPayloadTests
     {
         byte[] colors = [255, 0, 0, 0, 128, 0, 0, 0, 255];
         byte[] image = [0xff, 0xd8, 0xff, 0xd9];
+        byte[] intensityImage = [0xff, 0xd8, 0x6c, 0xff, 0xd9];
         var source = new ViewerDocument(Cloud())
         {
             PointColors = new() { [1] = colors },
-            Panoramas = [new ViewerPanorama(1, new Vector3d(0.5, 0.5, 1), image) { Name = "Camera 3" }],
+            PointIntensities = new() { [1] = [85, 0, 210] },
+            Panoramas = [new ViewerPanorama(1, new Vector3d(0.5, 0.5, 1), image)
+                { Name = "Camera 3", IntensityJpeg = intensityImage }],
         };
         using var json = new MemoryStream(Encoding.UTF8.GetBytes(JsonViewerExporter.ExportToString(source)));
         var view = ViewerHtml.Export(JsonViewerImporter.Load(json));
 
         var rgb = view.Geometries[0].GetProperty("colors");
         Assert.Equal(colors, view.Bin.AsSpan(rgb.GetProperty("o").GetInt32(), rgb.GetProperty("n").GetInt32()).ToArray());
+        var signals = view.Geometries[0].GetProperty("intensities");
+        Assert.Equal(new byte[] { 85, 0, 210 },
+            view.Bin.AsSpan(signals.GetProperty("o").GetInt32(), signals.GetProperty("n").GetInt32()).ToArray());
         var panorama = view.Meta.GetProperty("panoramas")[0];
         Assert.Equal(0, panorama.GetProperty("element").GetInt32());
         Assert.Equal("Camera 3", panorama.GetProperty("name").GetString());
         Assert.Equal([0.0, 0.0, 1.0], panorama.GetProperty("position").EnumerateArray().Select(x => x.GetDouble()));
         var jpeg = panorama.GetProperty("image");
         Assert.Equal(image, view.Bin.AsSpan(jpeg.GetProperty("o").GetInt32(), jpeg.GetProperty("n").GetInt32()).ToArray());
+        var intensity = panorama.GetProperty("intensity");
+        Assert.Equal(intensityImage, view.Bin.AsSpan(intensity.GetProperty("o").GetInt32(), intensity.GetProperty("n").GetInt32()).ToArray());
+    }
+
+    [Fact]
+    public void Point_Intensity_Length_Must_Match_Vertex_Count()
+    {
+        var doc = new ViewerDocument(Cloud()) { PointIntensities = new() { [1] = [24, 125] } };
+        Assert.Throws<InvalidDataException>(() => ViewerHtml.Export(doc));
     }
 
     [Fact]
@@ -154,16 +169,23 @@ public class PointPayloadTests
 
         using var panorama = SKBitmap.Decode(ScanPhotographs.ProjectLeicaCube(faces, System.Numerics.Quaternion.Identity));
         int equator = panorama.Height / 2;
-        AssertColor(colors[0], panorama.Width / 2, equator);
-        AssertColor(colors[1], 0, equator);
-        AssertColor(colors[2], panorama.Width * 3 / 4, equator);
-        AssertColor(colors[3], panorama.Width / 4, equator);
-        AssertColor(colors[4], panorama.Width / 4, panorama.Height / 8);
-        AssertColor(colors[5], panorama.Width / 4, panorama.Height * 7 / 8);
-        AssertColor(SKColors.White, panorama.Width * 3 / 4, panorama.Height / 8);
-        AssertColor(SKColors.White, panorama.Width * 3 / 4, panorama.Height * 7 / 8);
+        AssertColor(panorama, colors[0], panorama.Width * 3 / 4, equator);
+        AssertColor(panorama, colors[1], panorama.Width / 4, equator);
+        AssertColor(panorama, colors[2], 0, equator);
+        AssertColor(panorama, colors[3], panorama.Width / 2, equator);
+        AssertColor(panorama, colors[4], panorama.Width / 2, panorama.Height / 8);
+        AssertColor(panorama, colors[5], panorama.Width / 2, panorama.Height * 7 / 8);
+        AssertColor(panorama, SKColors.White, 0, panorama.Height / 8);
+        AssertColor(panorama, SKColors.White, 0, panorama.Height * 7 / 8);
 
-        void AssertColor(SKColor expected, int x, int y)
+        // Rotate around a different axis to check that the station pose is applied after the cube basis.
+        var tilt = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitX, MathF.PI / 2);
+        using var tilted = SKBitmap.Decode(ScanPhotographs.ProjectLeicaCube(faces, tilt));
+        AssertColor(tilted, colors[0], tilted.Width / 2, tilted.Height / 8);
+        AssertColor(tilted, colors[1], tilted.Width / 2, tilted.Height * 7 / 8);
+        AssertColor(tilted, colors[3], tilted.Width / 2, equator);
+
+        static void AssertColor(SKBitmap panorama, SKColor expected, int x, int y)
         {
             SKColor actual = panorama.GetPixel(x, y);
             Assert.InRange(Math.Abs(actual.Red - expected.Red), 0, 8);

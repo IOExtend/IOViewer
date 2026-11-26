@@ -151,6 +151,9 @@ arrow keys to look around, and use the wheel to zoom. Arrows inside the photogra
 heading. The minimap remains available while the photo panel is open. The generated HTML embeds the photographs.
 
 Use **Enlarge** to expand a panorama. Pick a minimap size, drag the plan to pan it and use the wheel or the zoom buttons to change its scale.
+Use **Intensity** to view the scan points from the panorama's station, shaded by their measured laser signal.
+Viewer JSON can carry `PointIntensities` as base64 display-intensity bytes keyed by point geometry id, one byte per vertex.
+Zero indicates a missing measurement. A panorama's optional `IntensityJpeg` is used where the measured points are unavailable.
 The blue spheres mark camera positions in the 3D view. Click a sphere to open its panorama. Use **Panorama spheres in 3D**
 on the minimap to hide or show the spheres. The spheres follow the selected height band and the model's visibility.
 The **+** beside the level list starts a level from two clicks in a panorama, lower elevation first. Each elevation comes from the

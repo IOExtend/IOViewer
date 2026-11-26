@@ -385,6 +385,8 @@ internal static class Program
         bool showIntensity = cloud.Kind is PclFileKind.LeicaLgsx or PclFileKind.LeicaLgs;
         var captured = new Dictionary<int, List<byte>>();
         var colored = new HashSet<int>();
+        var capturedIntensities = new Dictionary<int, List<byte>>();
+        var withIntensity = new HashSet<int>();
         var sceneOptions = new PclSceneOptions
         {
             SubsampleStep = step,
@@ -397,6 +399,8 @@ internal static class Program
         diagnostics = messages;
         var viewer = FromScene(path, result.Document, diagnostics);
         foreach (int geometry in colored) viewer.PointColors.Add(geometry, captured[geometry].ToArray());
+        foreach (int geometry in withIntensity)
+            viewer.PointIntensities.Add(geometry, capturedIntensities[geometry].ToArray());
         messages.RemoveAll(diagnostic => diagnostic.Code == "colours-dropped");
         ScanPhotographs.Add(cloud, viewer, messages);
         return viewer;
@@ -409,6 +413,12 @@ internal static class Program
             bytes.Add(color.R);
             bytes.Add(color.G);
             bytes.Add(color.B);
+            if (!showIntensity) return;
+            if (!capturedIntensities.TryGetValue(geometry, out var levels)) capturedIntensities[geometry] = levels = [];
+            byte intensity = point.Intensity is float signal && float.IsFinite(signal)
+                ? (byte)(1 + MathF.Round(254 * MathF.Sqrt(Math.Clamp(signal, 0, 1)))) : (byte)0;
+            if (intensity != 0) withIntensity.Add(geometry);
+            levels.Add(intensity);
         }
     }
 

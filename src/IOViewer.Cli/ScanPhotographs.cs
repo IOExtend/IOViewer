@@ -18,6 +18,7 @@ internal static class ScanPhotographs
     private const int Width = 2048;
     private const int MaxImageSide = 8192;
     private const string LeicaCameraPrefix = "SETUP-camera-";
+    private const string LeicaIntensityPrefix = "SETUP-scanintensity-";
     private static ReadOnlySpan<byte> JpegXrSignature => [0x49, 0x49, 0xbc, 0x01];
 
     internal static int SubsampleStep(PclDocument cloud)
@@ -36,7 +37,7 @@ internal static class ScanPhotographs
         {
             IEnumerable<ViewerPanorama> photos = cloud switch
             {
-                LgsxDocument leica => ReadLeica(leica, diagnostics),
+                LgsxDocument leica => ReadLeica(leica, viewer, diagnostics),
                 FaroFlsDocument faro => ReadFaro(faro),
                 E57Document e57 => ReadE57(e57),
                 _ => [],
@@ -50,7 +51,7 @@ internal static class ScanPhotographs
         }
     }
 
-    private static IEnumerable<ViewerPanorama> ReadLeica(LgsxDocument cloud, List<SceneDiagnostic> diagnostics)
+    private static IEnumerable<ViewerPanorama> ReadLeica(LgsxDocument cloud, ViewerDocument viewer, List<SceneDiagnostic> diagnostics)
     {
         var entries = cloud.Entries.Where(e => e.Name.StartsWith(LeicaCameraPrefix, StringComparison.Ordinal)).ToArray();
         if (entries.Length == 0) yield break;
@@ -62,6 +63,9 @@ internal static class ScanPhotographs
 
         var elements = cloud.Scans.Select((scan, i) => (scan.Id, Element: i + 2L))
             .ToDictionary(item => item.Id, item => item.Element, StringComparer.Ordinal);
+        var intensityEntries = cloud.Entries.ToLookup(e => e.Name, StringComparer.Ordinal);
+        var measuredElements = viewer.Scene.Instances.Where(instance => viewer.PointIntensities.ContainsKey(instance.GeometryId))
+            .Select(instance => instance.ElementId).ToHashSet();
 
         foreach (var entry in entries)
         {
@@ -89,17 +93,32 @@ internal static class ScanPhotographs
                 continue;
             }
 
-            yield return new ViewerPanorama(element, pose.Position, jpeg) { Name = pose.Name };
+            byte[]? intensity = null;
+            if (!measuredElements.Contains(element) &&
+                intensityEntries[LeicaIntensityPrefix + id].FirstOrDefault() is { } intensityEntry)
+            {
+                try
+                {
+                    intensity = ProjectLeicaCube(ReadCube(ReadEntry(source, intensityEntry, 32 * 1024 * 1024)),
+                        pose.Rotation, grayscale: true);
+                }
+                catch (InvalidDataException ex)
+                {
+                    diagnostics.Add(new SceneDiagnostic(SceneSeverity.Warning, "scan-photographs",
+                        $"Leica station {id} intensity: {ex.Message}"));
+                }
+            }
+            yield return new ViewerPanorama(element, pose.Position, jpeg) { Name = pose.Name, IntensityJpeg = intensity };
         }
     }
 
-    internal static byte[] ProjectLeicaCube(byte[][] faces, Quaternion rotation)
+    internal static byte[] ProjectLeicaCube(byte[][] faces, Quaternion rotation, bool grayscale = false)
     {
         Vector3 x = Vector3.UnitX, y = Vector3.UnitY, z = Vector3.UnitZ;
-        // Leica stores opposite sides consecutively. The last two faces use the same horizontal axis.
-        Vector3[] directions = [x, -x, y, -y, z, -z];
-        Vector3[] right = [-y, y, x, -x, -y, -y];
-        Vector3[] down = [-z, -z, -z, -z, x, -x];
+        // The first cube face looks along setup-local +Y, as confirmed by the scan depth maps.
+        Vector3[] directions = [y, -y, -x, x, z, -z];
+        Vector3[] right = [x, -x, y, -y, x, x];
+        Vector3[] down = [-z, -z, -z, -z, y, -y];
 
         var frames = new Frame[6];
         for (int i = 0; i < frames.Length; i++)
@@ -111,7 +130,7 @@ internal static class ScanPhotographs
             frames[i] = new Frame(image, basis, half, half, half - .5f, half - .5f);
         }
 
-        return Project(frames);
+        return Project(frames, grayscale);
     }
 
     private static Dictionary<long, (string Name, Vector3d Position, Quaternion Rotation)> ReadLeicaPoses(byte[] database)
@@ -401,7 +420,7 @@ internal static class ScanPhotographs
         public readonly SKColor[] Pixels = image.Pixels;
     }
 
-    private static byte[] Project(IReadOnlyList<Frame> frames)
+    private static byte[] Project(IReadOnlyList<Frame> frames, bool grayscale = false)
     {
         const int Height = Width / 2;
         var pixels = new SKColor[Width * Height];
@@ -436,7 +455,7 @@ internal static class ScanPhotographs
             }
         });
 
-        return Encode(pixels);
+        return Encode(pixels, grayscale);
     }
 
     private static bool TryProject(Vector3 ray, Frame frame, float closest, out float depth, out float u, out float v)
@@ -450,10 +469,12 @@ internal static class ScanPhotographs
         return u >= -.5f && v >= -.5f && u <= frame.Width - .5f && v <= frame.Height - .5f;
     }
 
-    private static byte[] Encode(SKColor[] pixels)
+    private static byte[] Encode(SKColor[] pixels, bool grayscale = false)
     {
         using var bitmap = new SKBitmap(Width, Width / 2) { Pixels = pixels };
-        using var image = SKImage.FromBitmap(bitmap);
+        using var gray = grayscale ? bitmap.Copy(SKColorType.Gray8)
+            ?? throw new InvalidDataException("Could not create a grayscale panorama.") : null;
+        using var image = SKImage.FromBitmap(gray ?? bitmap);
         using var jpeg = image.Encode(SKEncodedImageFormat.Jpeg, 88);
         return jpeg.ToArray();
     }

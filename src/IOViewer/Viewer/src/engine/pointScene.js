@@ -25,6 +25,12 @@ export class PointScene {
       const positions = geometryPositions(data, g);
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      if (g.intensities) {
+        const values = data.view(g.intensities);
+        if (values.length * 3 !== positions.length)
+          throw new ModelDataError(`Point geometry ${geometryOf[i]} intensities do not match its positions.`);
+        geometry.setAttribute('intensity', new THREE.BufferAttribute(values.slice(), 1, true));
+      }
 
       const material = data.meta.materials[materialOf[i]];
       let vertexColors = false;
