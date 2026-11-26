@@ -7,10 +7,8 @@ using IOViewer.Model;
 using Microsoft.Data.Sqlite;
 using PclIO;
 using PclIO.Formats.Leica;
-#if PCLIO_SOURCE
 using PclIO.Formats.E57;
 using PclIO.Formats.Faro;
-#endif
 using SkiaSharp;
 
 namespace IOViewer.Cli;
@@ -23,16 +21,10 @@ internal static class ScanPhotographs
 
     internal static int SubsampleStep(PclDocument cloud)
     {
-        bool hasPanoramas = cloud is LgsxDocument;
-#if PCLIO_SOURCE
-        hasPanoramas |= cloud is FaroFlsDocument ||
+        bool hasPanoramas = cloud is LgsxDocument or FaroFlsDocument ||
             cloud is E57Document e57 && e57.XmlContent.Contains("pinholeRepresentation", StringComparison.Ordinal);
-#endif
         if (!hasPanoramas) return 1;
-        long? count = null;
-#if PCLIO_SOURCE
-        if (cloud is LgsxDocument leica) count = leica.GetEncodedPointCount();
-#endif
+        long? count = (cloud as LgsxDocument)?.GetEncodedPointCount();
         // Sample within every block so the geometry surrounds all the camera stations.
         return (int)Math.Clamp(Math.Ceiling((count ?? cloud.TotalPointCount) / 700_000.0), 1, int.MaxValue);
     }
@@ -44,10 +36,8 @@ internal static class ScanPhotographs
             IEnumerable<ViewerPanorama> photos = cloud switch
             {
                 LgsxDocument leica => ReadLeica(leica, diagnostics),
-#if PCLIO_SOURCE
                 FaroFlsDocument faro => ReadFaro(faro),
                 E57Document e57 => ReadE57(e57),
-#endif
                 _ => [],
             };
             foreach (var photo in photos) viewer.Panoramas.Add(photo);
@@ -235,7 +225,6 @@ internal static class ScanPhotographs
         return selected.Value?.ToArray() ?? throw new InvalidDataException("A Leica panorama needs six matching JPEG faces.");
     }
 
-#if PCLIO_SOURCE
     private static IEnumerable<ViewerPanorama> ReadFaro(FaroFlsDocument cloud)
     {
         if (cloud.ReadColorPanorama(Width) is not { } rgb) yield break;
@@ -322,7 +311,6 @@ internal static class ScanPhotographs
             throw new InvalidDataException("An E57 photo calibration value is invalid.");
         return parsed;
     }
-#endif
 
     private static Quaternion UnitQuaternion(double x, double y, double z, double w)
     {

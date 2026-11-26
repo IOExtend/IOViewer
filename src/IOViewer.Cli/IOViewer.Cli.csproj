@@ -27,10 +27,6 @@
     <PackageReference Include="RvtIO.Scene" />
   </ItemGroup>
 
-  <PropertyGroup Condition="'$(PclIOSourceRoot)' != ''">
-    <DefineConstants>$(DefineConstants);PCLIO_SOURCE</DefineConstants>
-  </PropertyGroup>
-
   <ItemGroup>
     <InternalsVisibleTo Include="IOViewer.Tests" />
     <!-- Pack collects these files outside the target framework builds. -->

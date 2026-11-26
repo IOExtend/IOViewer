@@ -383,73 +383,33 @@ internal static class Program
         using var cloud = PclFile.Open(path);
         int step = ScanPhotographs.SubsampleStep(cloud);
         bool showIntensity = cloud.Kind is PclFileKind.LeicaLgsx or PclFileKind.LeicaLgs;
-        var sceneOptions = new PclSceneOptions { SubsampleStep = step };
-#if PCLIO_SOURCE
         var captured = new Dictionary<int, List<byte>>();
         var colored = new HashSet<int>();
-        if (showIntensity)
+        var sceneOptions = new PclSceneOptions
         {
-            sceneOptions = sceneOptions with
-            {
-                MaxDegreeOfParallelism = step > 1 ? Math.Min(Environment.ProcessorCount, 4) : 1,
-                PointObserver = CaptureColor,
-            };
-        }
+            SubsampleStep = step,
+            MaxDegreeOfParallelism = showIntensity && step > 1 ? Math.Min(Environment.ProcessorCount, 4) : 1,
+            PointObserver = CaptureColor,
+        };
+
+        var result = PclSceneReader.Read(cloud, sceneOptions);
+        var messages = result.Diagnostics.ToList();
+        diagnostics = messages;
+        var viewer = FromScene(path, result.Document, diagnostics);
+        foreach (int geometry in colored) viewer.PointColors.Add(geometry, captured[geometry].ToArray());
+        messages.RemoveAll(diagnostic => diagnostic.Code == "colours-dropped");
+        ScanPhotographs.Add(cloud, viewer, messages);
+        return viewer;
 
         void CaptureColor(int geometry, PclPoint point)
         {
             if (!captured.TryGetValue(geometry, out var bytes)) captured[geometry] = bytes = [];
-            var color = DisplayColor(point, true, out bool present);
+            var color = DisplayColor(point, showIntensity, out bool present);
             if (present) colored.Add(geometry);
             bytes.Add(color.R);
             bytes.Add(color.G);
             bytes.Add(color.B);
         }
-#endif
-        var result = PclSceneReader.Read(cloud, sceneOptions);
-        var messages = result.Diagnostics.ToList();
-        diagnostics = messages;
-        var viewer = FromScene(path, result.Document, diagnostics);
-        ScanPhotographs.Add(cloud, viewer, messages);
-#if PCLIO_SOURCE
-        if (showIntensity)
-        {
-            foreach (int geometry in colored) viewer.PointColors.Add(geometry, captured[geometry].ToArray());
-            messages.RemoveAll(diagnostic => diagnostic.Code == "colours-dropped");
-            return viewer;
-        }
-#endif
-        if (!result.Diagnostics.Any(diagnostic => diagnostic.Code == "colours-dropped" ||
-            showIntensity && diagnostic.Code == "intensities-dropped"))
-            return viewer;
-
-        // IOScene 0.1 carries positions but has no vertex color field. Recover the same sample into the viewer.
-        var geometries = result.Document.Geometries.ToDictionary(geometry => geometry.Id);
-        foreach (var instance in result.Document.Instances)
-        {
-            var geometry = geometries[instance.GeometryId];
-            // PclIO.Scene assigns element 1 to the cloud and then one element per scan, in scan order.
-            var scan = cloud.Scans[checked((int)instance.ElementId - 2)];
-            var colors = new byte[checked(3 * geometry.Vertices.Count)];
-            int index = 0;
-            bool hasColors = false;
-            foreach (var point in scan.ReadPoints(new PclReadOptions { MaxPoints = geometry.Vertices.Count, SubsampleStep = step }))
-            {
-                if (index >= geometry.Vertices.Count || geometry.Vertices[index] != new Vector3d(point.X, point.Y, point.Z))
-                    throw new InvalidDataException("The point coordinates changed while reading colors.");
-                var color = DisplayColor(point, showIntensity, out bool present);
-                hasColors |= present;
-                colors[index * 3] = color.R;
-                colors[index * 3 + 1] = color.G;
-                colors[index * 3 + 2] = color.B;
-                index++;
-            }
-            if (index != geometry.Vertices.Count)
-                throw new InvalidDataException("The point count changed while reading colors.");
-            if (hasColors) viewer.PointColors.Add(geometry.Id, colors);
-        }
-        messages.RemoveAll(diagnostic => diagnostic.Code == "colours-dropped");
-        return viewer;
     }
 
     internal static PclColor DisplayColor(PclPoint point, bool showIntensity, out bool present)
