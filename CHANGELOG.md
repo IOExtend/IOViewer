@@ -6,10 +6,13 @@ API between minor releases.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-27
+
 ### Changed
 
-- The .NET tool downloads a smaller package for Windows x64, Linux x64 and macOS ARM64. Other architectures
-  receive the portable package. The platform-aware installer requires the .NET 10 SDK or later.
+- The .NET tool downloads about 11 MB on Windows x64, 10 MB on Linux x64 and 13 MB on macOS ARM64.
+  Other supported platforms receive the portable package. Installation requires the .NET 10 SDK or later.
+  The CLI runs on .NET 8 or rolls forward when a newer runtime is available.
 
 ## [0.4.1] - 2026-11-26
 
