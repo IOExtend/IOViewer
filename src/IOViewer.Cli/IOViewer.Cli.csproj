@@ -23,7 +23,7 @@
     <ProjectReference Include="$(PclIOSourceRoot)/src/PclIO.Scene/PclIO.Scene.csproj" Condition="'$(PclIOSourceRoot)' != ''" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SkiaSharp" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" GeneratePathProperty="true" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
     <PackageReference Include="RvtIO.Scene" />
   </ItemGroup>
 
@@ -33,9 +33,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="IOViewer.Tests" />
-    <None Include="$(PkgSkiaSharp_NativeAssets_Linux_NoDependencies)/THIRD-PARTY-NOTICES.txt"
-          Pack="true" PackagePath="licenses/SkiaSharp-NOTICES.txt" Visible="false"
-          Condition="'$(PkgSkiaSharp_NativeAssets_Linux_NoDependencies)' != ''" />
+    <!-- Pack collects these files outside the target framework builds. -->
+    <None Include="$(NuGetPackageRoot)/skiasharp.nativeassets.linux.nodependencies/$(SkiaSharpVersion)/THIRD-PARTY-NOTICES.txt"
+          Pack="true" PackagePath="licenses/SkiaSharp-NOTICES.txt" Visible="false" />
   </ItemGroup>
 
 </Project>
