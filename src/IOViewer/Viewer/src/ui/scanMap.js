@@ -40,7 +40,7 @@ export function pickPhotoElevation(camera, origin, objects, x, y, width, height)
   return undefined;
 }
 
-export function mountScanMap(root, data, points, scene, controls) {
+export function mountScanMap(root, data, points, scene, controls, requestRender) {
   if (!points.count) return;
   const bounds = new THREE.Box3().setFromObject(points.root);
   if (bounds.isEmpty()) return;
@@ -72,6 +72,7 @@ export function mountScanMap(root, data, points, scene, controls) {
   }
   let levels = saved ?? autoLevels();
   let selectedLevel = -1;
+  let showSpheres = true;
   const inLevel = (z) => levelContains(levels[selectedLevel], z + offsetZ);
 
   const panel = document.createElement('details');
@@ -227,6 +228,7 @@ export function mountScanMap(root, data, points, scene, controls) {
     removeLevel.disabled = selectedLevel < 0;
     for (const [i, position] of positions.entries()) selector.options[i + 1].hidden = !inLevel(position.z);
     redraw();
+    requestRender();
   }
   levelSelect.addEventListener('change', () => {
     selectedLevel = Number(levelSelect.value);
@@ -261,6 +263,15 @@ export function mountScanMap(root, data, points, scene, controls) {
     refreshLevels();
   });
   levelControls.append(levelSelect, addLevel, auto, removeLevel);
+  if (panoramas.length) {
+    const spheres = mapButton(t('scanMap.spheres'), '◉', () => {
+      showSpheres = !showSpheres;
+      spheres.setAttribute('aria-pressed', String(showSpheres));
+      requestRender();
+    });
+    spheres.setAttribute('aria-pressed', 'true');
+    levelControls.append(spheres);
+  }
   panel.append(levelControls, levelStatus);
   const photo = panoramas.length ? photoPanel(root, data, points, show, (pose) => {
     photoPose = pose;
@@ -304,6 +315,7 @@ export function mountScanMap(root, data, points, scene, controls) {
     // Selecting the same station again should open its photo.
     selector.value = '';
   }
+  return { open: show, showSphere: (element, z) => showSpheres && inLevel(z) && scene.isVisible(element) };
 }
 
 function photoPanel(root, data, points, show, onPose, onLevel) {
