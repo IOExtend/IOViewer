@@ -19,12 +19,23 @@
     <PackageReference Include="IOCoord" />
     <PackageReference Include="IfcIO.Scene" />
     <PackageReference Include="NwcIO.Scene" />
-    <PackageReference Include="PclIO.Scene" />
+    <PackageReference Include="PclIO.Scene" Condition="'$(PclIOSourceRoot)' == ''" />
+    <ProjectReference Include="$(PclIOSourceRoot)/src/PclIO.Scene/PclIO.Scene.csproj" Condition="'$(PclIOSourceRoot)' != ''" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" GeneratePathProperty="true" />
     <PackageReference Include="RvtIO.Scene" />
   </ItemGroup>
 
+  <PropertyGroup Condition="'$(PclIOSourceRoot)' != ''">
+    <DefineConstants>$(DefineConstants);PCLIO_SOURCE</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="IOViewer.Tests" />
+    <None Include="$(PkgSkiaSharp_NativeAssets_Linux_NoDependencies)/THIRD-PARTY-NOTICES.txt"
+          Pack="true" PackagePath="licenses/SkiaSharp-NOTICES.txt" Visible="false"
+          Condition="'$(PkgSkiaSharp_NativeAssets_Linux_NoDependencies)' != ''" />
   </ItemGroup>
 
 </Project>

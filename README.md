@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 
-IOViewer is a fast, 100% managed .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Builds of the `ioviewer` CLI from this repository also read IFC, Revit and Navisworks cache files (`.nwc`) through `IfcIO.Scene`, `RvtIO.Scene` and `NwcIO.Scene`. The IOViewer library accepts the `SceneDocument` these adapters produce and depends on [IOScene](https://github.com/IOExtend/IOScene) for the scene model.
+IOViewer is a .NET library and command line tool that generates standalone interactive 3D WebGL / HTML BIM & CAD model viewers from code, glTF/GLB, Wavefront OBJ, or JSON. Builds of the `ioviewer` CLI from this repository also read IFC, Revit and Navisworks cache files (`.nwc`) through `IfcIO.Scene`, `RvtIO.Scene` and `NwcIO.Scene`. The IOViewer library accepts the `SceneDocument` these adapters produce and depends on [IOScene](https://github.com/IOExtend/IOScene) for the scene model.
 
 The generated HTML is a single file with no external dependencies that works offline: it opens from disk (`file://`) in a current browser with WebGL 2 and makes no network requests. The viewer is built on [three.js](https://threejs.org/), which is embedded in the file (see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
@@ -33,6 +33,7 @@ Built clean-room under the [IOExtend](https://github.com/IOExtend) organization.
   - display modes (materials, textures, white, wireframe), viewport background color, grid lines and a global opacity slider;
   - saved viewpoints with a viewpoint tour, clash results, a 4D schedule player and linked-file visibility, each shown only when the document has that data.
 - Imports binary glTF 2.0 (`.glb`), Wavefront OBJ (`.obj`), and JSON: viewer JSON, IOScene scene files and IOViewer 0.1/0.2 snapshots.
+- Displays point clouds with source RGB when available and a top-down minimap. The CLI includes Leica LGSX camera panoramas. With the matching PclIO source build, it also includes FARO FLS colour panoramas and registered sets of E57 camera images. Select a station on the minimap to open its photograph.
 
 ### Mouse and keyboard
 
@@ -234,6 +235,12 @@ From the repository root:
 ```sh
 dotnet build IOViewer.slnx -c Release
 dotnet test
+```
+
+To include FARO and E57 photographs while the required PclIO APIs are in source, build against that checkout:
+
+```sh
+dotnet build IOViewer.slnx -c Release -p:PclIOSourceRoot=/path/to/PclIO
 ```
 
 The viewer page is built from `src/IOViewer/Viewer` with Node.js 24; see [CONTRIBUTING.md](CONTRIBUTING.md). The built script `dist/viewer.js` is committed, so building the .NET solution does not need Node.js.

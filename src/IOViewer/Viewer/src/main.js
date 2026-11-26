@@ -22,6 +22,7 @@ import { mountViews } from './ui/viewsPanel.js';
 import { mountClashes } from './ui/clashesPanel.js';
 import { mountTimeliner } from './ui/timeliner.js';
 import { mountLinks } from './ui/linksPanel.js';
+import { mountScanMap } from './ui/scanMap.js';
 
 document.documentElement.lang = lang;
 const canvas = document.getElementById('ioviewer-canvas');
@@ -88,24 +89,9 @@ function start(data, context) {
   const motionDetail = new MotionDetail(scene, requestRender, Math.min(scene.totalCost, 20e6));
   world.add(scene.root);
   world.add(points.root);
-  // Sections and the orbit bounds see the triangle model and the point clouds as one model.
-  const visibleBox = () => {
-    const box = scene.visibleBox();
-    return points.count ? box.union(points.visibleBox()) : box;
-  };
-  const sectionScene = {
-    visibleBox,
-    elementBox: (i, box) => {
-      const b = scene.elementBox(i, box);
-      return points.count ? b.union(points.elementBox(i)) : b;
-    },
-    setClipping: (planes, intersection) => {
-      scene.setClipping(planes, intersection);
-      points.setClipping(planes);
-    },
-  };
+  const visibleBox = () => scene.visibleBox();
   // Sections never change which elements are shown, so they leave the bounds (orbit pivot, near/far) as they are.
-  const sections = new Sections(sectionScene, visibleBox(), data.meta.sections);
+  const sections = new Sections(scene, visibleBox(), data.meta.sections);
   points.syncVisibility(scene);
   points.setClipping(sections.clipping().planes);
   const canFillSections = context.getContextAttributes()?.stencil === true;
@@ -308,6 +294,7 @@ function start(data, context) {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   controls.resize(); // also schedules the first frame for an empty model
   controls.fitBox(visibleBox(), false);
+  mountScanMap(uiRoot, data, points, scene, controls);
   const viewCube = new ViewCube(document.getElementById('ioviewer-ui'), camera, controls); // home = this load view
 
   // The canvas and the view cube take no focus, so a press on them takes it from a panel field or a toolbar button:

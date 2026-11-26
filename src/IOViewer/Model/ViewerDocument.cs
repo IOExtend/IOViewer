@@ -49,6 +49,12 @@ public sealed class ViewerDocument
     /// <summary>Imported BCF topic summaries and viewpoints in this scene.</summary>
     public List<ViewerBcfTopic> BcfTopics { get; set; } = [];
 
+    /// <summary>RGB bytes in vertex order for point geometries, keyed by geometry id.</summary>
+    public Dictionary<int, byte[]> PointColors { get; set; } = [];
+
+    /// <summary>Equirectangular photographs attached to scan elements.</summary>
+    public List<ViewerPanorama> Panoramas { get; set; } = [];
+
     /// <summary>Title of the scene: reads and writes <see cref="SceneDocument.Title"/>.</summary>
     [JsonIgnore]
     public string Title
@@ -56,4 +62,11 @@ public sealed class ViewerDocument
         get => Scene.Title;
         set => Scene.Title = value;
     }
+}
+
+/// <summary>A 2:1 JPEG at a scan station. The image centre looks along +X before <paramref name="YawDegrees"/>.</summary>
+public sealed record ViewerPanorama(long ElementId, Vector3d Position, byte[] Jpeg, double YawDegrees = 0)
+{
+    /// <summary>Name of the camera station when several stations share a single scene element.</summary>
+    public string? Name { get; init; }
 }

@@ -47,6 +47,10 @@ library package references none of them.
 
 | Component | Use | License |
 |---|---|---|
+| [PclIO and PclIO.Scene](https://github.com/IOExtend/PclIO) | read point clouds | MIT, copyright (c) 2026 mahach666 |
+| [Microsoft.Data.Sqlite](https://github.com/dotnet/efcore) | read scanner project metadata | MIT, copyright (c) Microsoft Corporation |
+| [SQLitePCLRaw](https://github.com/ericsink/SQLitePCL.raw) and [SQLite](https://sqlite.org/copyright.html) | SQLite bindings and database runtime | Apache-2.0, copyright (c) 2014–2024 SourceGear, LLC, and SQLite in the public domain |
+| [SkiaSharp and native assets](https://github.com/mono/SkiaSharp) | decode and encode photographs | MIT, copyright (c) 2015–2016 Xamarin, Inc. and 2017–2018 Microsoft Corporation |
 | [IOCoord](https://github.com/IOExtend/IOScene) 0.1.0-preview.1 | hard clash and clearance checks | MIT, copyright (c) 2026 mahach666 |
 | [IfcIO](https://github.com/IOExtend/IfcIO) 0.11.1 and IfcIO.Scene 0.11.1 | read IFC files into a scene | MIT, copyright (c) 2026 IfcIO contributors |
 | [NwcIO](https://github.com/IOExtend/NwcIO) 0.13.0 and NwcIO.Scene 0.13.0 | read Navisworks caches into a scene | MIT, copyright (c) 2026 mahach666 |
@@ -54,6 +58,8 @@ library package references none of them.
 | .NET runtime libraries (DeflateManaged sources, compiled into RvtIO) | managed inflate implementation adapted for tolerant decoding | MIT, copyright (c) .NET Foundation and Contributors |
 | [OpenMcdf](https://github.com/openmcdf/openmcdf) 3.4.0, used by RvtIO | reads the compound file container of Revit files | MPL-2.0, copyright (c) 2010-2026 Federico Blaseotto, Jeremy Powell |
 | [SharpZipLib](https://github.com/icsharpcode/SharpZipLib) 1.4.2, used by RvtIO | stream decompression | MIT, copyright (c) 2000-2022 SharpZipLib Contributors |
+
+SQLitePCLRaw uses the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). The CLI package includes the SkiaSharp native asset notices in `licenses/SkiaSharp-NOTICES.txt`.
 
 OpenMcdf is distributed unmodified under the Mozilla Public License 2.0 (<https://mozilla.org/MPL/2.0/>); its source
 code is available at <https://github.com/openmcdf/openmcdf>.

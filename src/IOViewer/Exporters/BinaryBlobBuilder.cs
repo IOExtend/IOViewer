@@ -36,6 +36,8 @@ internal sealed class BinaryBlobBuilder
 
     public BlobView Add(ReadOnlySpan<float> values) => Add(values, "f32");
 
+    public BlobView Add(ReadOnlySpan<byte> values) => Add(values, "u8");
+
     public BlobView Add(ReadOnlySpan<ushort> values) => Add(values, "u16");
 
     public BlobView Add(ReadOnlySpan<short> values) => Add(values, "i16");
