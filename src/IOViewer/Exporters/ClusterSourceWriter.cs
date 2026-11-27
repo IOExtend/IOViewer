@@ -6,8 +6,8 @@ using IOViewer.Model;
 
 namespace IOViewer.Exporters;
 
-// Disk-backed handoff to the offline LOD builder. A record is at most 8,192 triangles.
-internal static class ClusterSourceWriter
+/// <summary>Writes a seekable mesh source for the clustered viewer's page builder.</summary>
+public static class ClusterSourceWriter
 {
     private const int RecordIndices = 8192 * 3;
     private const uint Signature = 0x33534d49; // IMS3
@@ -25,8 +25,7 @@ internal static class ClusterSourceWriter
         {
             long triangles;
             using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536))
-            using (var writer = new BinaryWriter(stream))
-                triangles = Write(doc, writer, options);
+                triangles = Export(doc, stream, options);
             File.Move(temporary, path);
             return triangles;
         }
@@ -34,6 +33,19 @@ internal static class ClusterSourceWriter
         {
             File.Delete(temporary);
         }
+    }
+
+    /// <summary>Writes an IMS mesh source and returns the number of triangles. The fresh destination must be
+    /// writable and seekable. The caller retains ownership of the stream.</summary>
+    public static long Export(ViewerDocument document, Stream destination, HtmlViewerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(destination);
+        if (!destination.CanWrite || !destination.CanSeek || destination.Length != 0 || destination.Position != 0)
+            throw new ArgumentException("Use an empty, writable, seekable stream.", nameof(destination));
+
+        using var writer = new BinaryWriter(destination, System.Text.Encoding.UTF8, leaveOpen: true);
+        return Write(document, writer, options ?? new HtmlViewerOptions());
     }
 
     private static long Write(ViewerDocument doc, BinaryWriter writer, HtmlViewerOptions options)

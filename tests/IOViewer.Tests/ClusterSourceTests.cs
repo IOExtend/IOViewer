@@ -27,6 +27,11 @@ public class ClusterSourceTests
         try
         {
             Assert.Equal(3, ClusterSourceWriter.Save(new ViewerDocument(scene), path, new HtmlViewerOptions()));
+            using var stream = new MemoryStream();
+            Assert.Equal(3, ClusterSourceWriter.Export(new ViewerDocument(scene), stream));
+            Assert.True(stream.CanWrite);
+            Assert.Equal(File.ReadAllBytes(path), stream.ToArray());
+            Assert.Throws<ArgumentException>(() => ClusterSourceWriter.Export(new ViewerDocument(scene), stream));
             using var reader = new BinaryReader(File.OpenRead(path));
             Assert.Equal("IMS4"u8.ToArray(), reader.ReadBytes(4));
             Assert.Equal(0, reader.ReadDouble());

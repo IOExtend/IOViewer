@@ -16,6 +16,7 @@ import { mountViews } from '../ui/viewsPanel.js';
 import { mountClashes } from '../ui/clashesPanel.js';
 import { mountLinks } from '../ui/linksPanel.js';
 import { mountTimeliner } from '../ui/timeliner.js';
+import { fetchMeshResource } from './meshSource.js';
 import { meshSnapCandidates } from './meshSnap.js';
 
 // Trace the original leaves independently of the cut on screen. The nearest hit gives the same element at every LOD.
@@ -101,7 +102,7 @@ export function mountMeshTools({ manifest, roots, nodes, bounds, world, controls
   const data = { meta, async loadProperties(index, signal) {
     const entry = elements[index];
     if (!entry.size) return null;
-    const response = await fetch(`/elements/${index}`, { signal });
+    const response = await fetchMeshResource(`/elements/${index}`, { signal });
     if (!response.ok || Number(response.headers.get('content-length')) !== entry.size) throw new Error('Invalid element response.');
     const loaded = await response.json();
     if (loaded?.id !== entry.id || !loaded.properties || typeof loaded.properties !== 'object' || Array.isArray(loaded.properties)
